@@ -69,7 +69,9 @@ Input is the skill text: every `SKILL.md` and every script inside a skill direct
 ```mermaid
 flowchart LR
     R[Audit request or new release] --> S[Scheduled job: fetch crate, compute digest]
-    S --> K{Digest already audited?}
+    S --> T{Static checks pass?}
+    T -- no --> X[Rejected with the failing check]
+    T -- yes --> K{Digest already audited?}
     K -- yes --> V[Record the version]
     K -- no --> C[Classifier reads the skill text]
     C --> H[PR with verdict; human merges]
@@ -78,7 +80,7 @@ flowchart LR
     L --> U[Clients fetch at next session]
 ```
 
-Anyone can request an audit by opening an issue in the audits repo; the consent prompt links to it. A scheduled job (daily, for example) checks the requested crates and every new release of crates already on the list. For each release it fetches the published crate from crates.io, without building or running anything, and computes the payload digest. A digest already audited only records the new version. A new digest goes to the classifier and is routed as above. A RustSec advisory marking a crate malicious produces a revocation.
+Anyone can request an audit by opening an issue in the audits repo; the consent prompt links to it. A scheduled job (daily, for example) checks the requested crates and every new release of crates already on the list. For each release it fetches the published crate from crates.io, without building or running anything, and computes the payload digest. Static checks run first, since they are cheap enough to run on demand: at minimum, that the plugin is well formed (its manifest validates and its skills lint clean); the full set is to be defined. A release that fails them is rejected with the failing check and never reaches the classifier. A digest already audited only records the new version. A new digest goes to the classifier and is routed as above. A RustSec advisory marking a crate malicious produces a revocation.
 
 ### When it reaches users
 
