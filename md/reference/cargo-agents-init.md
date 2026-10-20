@@ -16,6 +16,8 @@ If a user config already exists, `init` updates it (preserving existing settings
 
 Without a terminal and without `--add-agent`, `init` keeps the configured agents, or configures Claude Code when there are none.
 
+Removing an agent also runs [`cargo agents sync`](./cargo-agents-sync.md) when `init` is run inside a Rust workspace, which removes the skills Symposium installed there for that agent. Copies in other workspaces stay until `cargo agents sync` runs in each of them.
+
 ## Options
 
 | Flag | Description |
