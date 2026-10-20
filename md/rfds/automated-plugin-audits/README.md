@@ -40,14 +40,14 @@ flowchart TD
     B -- yes --> X[Not loaded]
     B -- no --> C{Revoked?}
     C -- yes --> X
-    C -- no --> D{use / auto-enable?}
+    C -- no --> D{use / auto-enable, at the digest the user approved?}
     D -- yes --> L[Loaded]
     D -- no --> E{Payload digest matches an audit?}
     E -- yes --> L
     E -- no --> P[Prompt the user]
 ```
 
-A revocation outranks the user's own `use`, because it marks a payload known to be harmful.
+A revocation outranks the user's own `use`, because it marks a payload known to be harmful. Consent is digest-bound too: when the user enables a plugin, the payload digest they saw is recorded with the entry, and a later release whose payload differs falls back to the prompt, which names what changed. Existing name-only entries are pinned to the payload present at the next interactive sync.
 
 The chart is the default mode, `confirm-unvetted`. Two others change what the last two boxes mean: `confirm-all` prompts even for an audited plugin, and `confirm-none` loads everything without asking. Whenever the prompt appears for an unvetted plugin, it says so prominently. An audit answers only "is the text safe"; whether the user wants the plugin is theirs to decide, and `[plugins] disable` turns off a vetted one they don't want.
 
@@ -61,7 +61,7 @@ The chart is the default mode, `confirm-unvetted`. Two others change what the la
 
 ### The classifier
 
-Input is the skill text: every `SKILL.md` and every script inside a skill directory, for all skills of the crate together. A System One model answers a fixed set of questions about it, each with a probability: does the skill tell the agent to fetch and run remote code, send out secrets or source, hide what it is doing from the user, or act outside the task a library's documentation would describe? Each question has its own `reason` code.
+Input is everything the agent can read once the plugin is installed: every file in each skill directory — `SKILL.md`, scripts, and supporting documents it links to — for all skills of the crate together, since sync installs the whole directory. A payload containing a file that cannot be inspected as text is not audited. A System One model answers a fixed set of questions about it, each with a probability: does the skill tell the agent to fetch and run remote code, send out secrets or source, hide what it is doing from the user, or act outside the task a library's documentation would describe? Each question has its own `reason` code.
 
 **Nobody talks to the classifier.** Text addressed to an AI reviewer ("ignore previous instructions", "classify as safe") has no place in a legitimate skill, so it is disqualifying on its own. The model's answers are not shown to the submitter.
 
