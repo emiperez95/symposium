@@ -76,6 +76,7 @@
     - [`hook`](./design/hook-flow.md)
   - [Running tests](./design/running-tests.md)
   - [Writing tests](./design/testing-guidelines.md)
+  - [Agent evaluations](./design/agent-eval.md)
   - [Governance](./design/governance.md)
   - [Common issues](./design/common-issues.md)
   - [Agent details](./design/agent-details/README.md)

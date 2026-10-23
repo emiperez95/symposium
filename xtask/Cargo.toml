@@ -6,3 +6,4 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+symposium-eval = { version = "0.1.0", path = "../symposium-eval" }
