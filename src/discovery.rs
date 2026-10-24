@@ -193,7 +193,8 @@ pub async fn enabled_dependencies(
         let identity = pms.identity(id);
         let is_used = used.iter().any(|(_, used)| *used == identity);
         known.insert(identity);
-        if !plugins.is_disabled(pms, id) && (plugins.is_auto_enabled(pms, id) || is_used) {
+        if !plugins.is_disabled(pms, id) && (plugins.is_accepted_without_asking(pms, id) || is_used)
+        {
             enabled.push(PackageId::any_version(&id.pm, &id.name));
         }
     }
@@ -412,9 +413,14 @@ fn decide(
         Enablement::Declined
     } else if used.contains(&pms.identity(id)) {
         Enablement::Used
-    } else if plugins.is_auto_enabled(pms, id) {
+    } else if plugins.is_accepted_without_asking(pms, id) {
+        // Covers `auto-enable` and `auto-accept = "all"`.
         Enablement::AutoEnabled
     } else {
+        // AUDIT SEAM: under `auto-accept = "audited"`, a later change looks
+        // the offer up in the trusted registries' audits here and returns
+        // `AutoEnabled` for an audited one. No audit data exists yet, so
+        // `audited` and `none` both fall through to `Candidate`.
         Enablement::Candidate
     }
 }
@@ -525,6 +531,57 @@ mod tests {
         let found = discover(&sym, &ws, &[]).await;
         assert!(found.auto_enabled.is_empty());
         assert_eq!(found.declined.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn auto_accept_modes_decide_candidates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = workspace(tmp.path());
+        // `audited` has no audit data yet, so it asks like `none`.
+        for mode in ["none", "audited"] {
+            let sym = sym_with(
+                tmp.path(),
+                &format!("[plugins]\nauto-accept = \"{mode}\"\n"),
+            );
+            let found = discover(&sym, &ws, &[]).await;
+            assert_eq!(found.candidates.len(), 1, "{mode}");
+            assert!(found.auto_enabled.is_empty(), "{mode}");
+        }
+        let sym = sym_with(tmp.path(), "[plugins]\nauto-accept = \"all\"\n");
+        let found = discover(&sym, &ws, &[]).await;
+        assert!(found.candidates.is_empty());
+        assert_eq!(found.auto_enabled.len(), 1);
+        assert_eq!(found.auto_enabled[0].enablement, Enablement::AutoEnabled);
+        // Standing: nothing was written, and sync loads the crate.
+        assert!(sym.config.plugins.auto_enable.is_empty());
+        let deps = [PackageId::new(CARGO_PM, "widget-lib", "1.0.0")];
+        assert_eq!(
+            enabled_names(&sym, &deps, tmp.path()).await,
+            vec!["widget-lib".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_accept_all_yields_to_disable_and_use() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = workspace(tmp.path());
+        let sym = sym_with(
+            tmp.path(),
+            "[plugins]\nauto-accept = \"all\"\ndisable = [\"widget-lib\"]\n",
+        );
+        let found = discover(&sym, &ws, &[]).await;
+        assert_eq!(found.declined.len(), 1);
+        assert!(found.auto_enabled.is_empty());
+        let deps = [PackageId::new(CARGO_PM, "widget-lib", "1.0.0")];
+        assert!(enabled_names(&sym, &deps, tmp.path()).await.is_empty());
+
+        let sym = sym_with(
+            tmp.path(),
+            "[plugins]\nauto-accept = \"all\"\nuse = [\"widget-lib\"]\n",
+        );
+        let found = discover(&sym, &ws, &[]).await;
+        assert_eq!(found.active.len(), 1);
+        assert_eq!(found.active[0].enablement, Enablement::Used);
     }
 
     #[tokio::test]

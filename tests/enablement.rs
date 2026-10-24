@@ -902,3 +902,47 @@ async fn choosing_registry_plugin_does_not_enable_same_named_dependency() {
         Ok(())
     }).await.unwrap();
 }
+
+// ── auto-accept ──────────────────────────────────────────────────────
+
+/// `auto-accept = "all"` accepts the candidate without asking (and without
+/// writing config); `none` and `audited` (no audit data yet) leave it asked.
+#[tokio::test]
+async fn auto_accept_modes_decide_the_candidate() {
+    use symposium::config::AutoAccept;
+    for (mode, accepted) in [
+        (AutoAccept::None, false),
+        (AutoAccept::Audited, false),
+        (AutoAccept::All, true),
+    ] {
+        with_fixture(
+            TestMode::SimulationOnly,
+            &["auto-enable0"],
+            async |mut ctx| {
+                ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+                let workspace_root = ctx.workspace_root.clone().unwrap();
+                ctx.sym.config.plugins.auto_accept = mode;
+
+                let deps = ctx.sym.workspace_deps(&workspace_root);
+                let pending = symposium::discovery::pending_candidates(&ctx.sym, &deps).await;
+                let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+                let entry = entries
+                    .iter()
+                    .find(|e| e.name == "crate-a")
+                    .expect("crate-a discovered");
+                if accepted {
+                    assert!(pending.is_empty(), "{mode:?}: {pending:?}");
+                    assert_eq!(entry.state, StatusState::Active, "{mode:?}");
+                } else {
+                    assert_eq!(pending, vec!["crate-a".to_string()], "{mode:?}");
+                    assert_eq!(entry.state, StatusState::Candidate, "{mode:?}");
+                }
+                // Accepting writes nothing to the config.
+                assert!(ctx.sym.config.plugins.auto_enable.is_empty());
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+    }
+}

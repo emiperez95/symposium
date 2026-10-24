@@ -9,7 +9,7 @@
 //!
 //! - **active** — enabled and its predicates hold for this workspace. The
 //!   root names the trust root: workspace membership, a configured registry,
-//!   `[plugins] auto-enable`, or a `[plugins] use` entry.
+//!   `[plugins] auto-enable`, `[plugins] auto-accept`, or a `[plugins] use` entry.
 //! - **dormant** — loaded but waiting: a registry plugin that names no
 //!   dependency ([`requires_use`](crate::plugins::PluginManifest::requires_use)),
 //!   one whose predicates don't currently hold, or a dependency named by `use`
@@ -22,7 +22,7 @@
 
 use std::path::Path;
 
-use crate::pm::WorkspaceDeps;
+use crate::pm::{PmRegistry, WorkspaceDeps};
 use anyhow::Result;
 use std::sync::Arc;
 use symposium_install::UpdateLevel;
@@ -121,7 +121,7 @@ pub async fn workspace_status(
         .chain(&discovery.candidates)
         .chain(&discovery.declined)
     {
-        entries.push(entry_for(found));
+        entries.push(entry_for(sym, &pms, found));
     }
 
     // Crates enabled by `use` that are *not* dependency-embedded offers — e.g.
@@ -236,10 +236,18 @@ pub async fn workspace_status(
 }
 
 /// Render one discovered dependency plugin as a status line.
-fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
+fn entry_for(sym: &Symposium, pms: &PmRegistry, found: &DiscoveredPlugin) -> StatusEntry {
     let (state, root) = match found.enablement {
         Enablement::Used => (StatusState::Active, "`[plugins] use`".to_string()),
-        Enablement::AutoEnabled => (StatusState::Active, "`[plugins] auto-enable`".to_string()),
+        Enablement::AutoEnabled => {
+            // An explicit `auto-enable` entry is the more specific reason.
+            let key = if sym.config.plugins.is_auto_enabled(pms, &found.id) {
+                "auto-enable"
+            } else {
+                "auto-accept"
+            };
+            (StatusState::Active, format!("`[plugins] {key}`"))
+        }
         Enablement::Declined => (
             StatusState::Declined,
             "declined (`[plugins] disable`)".to_string(),
