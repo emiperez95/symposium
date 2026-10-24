@@ -39,6 +39,9 @@ agent context, so these stay off until you say otherwise. Three answers:
 - **Enable** — recorded in `[plugins] auto-enable`, and installed by this same sync.
 - **No — don't ask again** — recorded in `[plugins] disable`.
 
+Plugins already covered by `[plugins] auto-enable` or `use`, or by
+[`auto-accept = "all"`](./configuration.md#plugins), are not asked about.
+
 Only explicit answers are recorded, so hitting Enter through the prompt never
 permanently declines anything. Escape leaves the remaining questions undecided.
 
