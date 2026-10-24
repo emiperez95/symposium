@@ -32,7 +32,7 @@ Each module arrives with the RFD step that needs it:
 
 ## Task parsing
 
-`cargo xtask agent-eval --check-tasks` validates every entry of `evals/tasks/` without running an agent. It is the RFD's task-authoring gate, meant to run in CI without a model or API key.
+`cargo xtask agent-eval --check-tasks` validates every entry of `evals/tasks/` without running an agent. It is the RFD's task-authoring gate and runs in CI, needing no model or API key.
 
 `task.toml` is parsed in two layers, following Cargo's `Cargo.toml` handling. `task::schema` mirrors the file, with `Option` where "absent" and "empty" mean different things (`used`). `Task` is the validated form: names and patterns are checked while deserializing, and the cross-field rules run afterwards, collected into one `TaskErrors` so every problem is reported at once. Unlike Cargo, unknown keys are errors: Cargo warns because it promises compatibility across versions, while a misspelled key here would silently make no claim.
 

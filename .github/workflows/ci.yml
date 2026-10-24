@@ -156,3 +156,6 @@ jobs:
 
       - name: Check for orphaned md files
         run: cargo xtask md-orphan-check
+
+      - name: Check agent-eval tasks
+        run: cargo xtask agent-eval --check-tasks
