@@ -1,8 +1,6 @@
 # Agent evaluation tasks
 
-Data for `cargo xtask agent-eval`. Nothing here is Rust workspace code: the
-root `Cargo.toml` excludes this directory, because starters and fixture crates
-are copied into trials and built there.
+Data for `cargo xtask agent-eval`. Nothing here is Rust workspace code: the root `Cargo.toml` excludes this directory, because starters and fixture crates are copied into trials and built there.
 
 ```text
 evals/
@@ -15,5 +13,5 @@ evals/
     solution/            # optional; files copied over the starter
 ```
 
-Adding an evaluation means adding a directory here. The format and its rules
-are in [the RFD reference](../md/rfds/skill-evaluation/reference.md#task-format).
+Adding an evaluation means adding a directory here. The format and its rules are in [the RFD reference](../md/rfds/skill-evaluation/reference.md#task-format).
+Validate every task with `cargo xtask agent-eval --check-tasks`.

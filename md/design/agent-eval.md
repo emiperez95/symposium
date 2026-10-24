@@ -30,6 +30,18 @@ Each module arrives with the RFD step that needs it:
 | `expect` | Skill, hook, and sync expectations | 4 |
 | `report` | `result.json`, the batch manifest, `benchmark.json` | 4, 5 |
 
+## Task parsing
+
+`cargo xtask agent-eval --check-tasks` validates every entry of `evals/tasks/` without running an agent. It is the RFD's task-authoring gate, meant to run in CI without a model or API key.
+
+`task.toml` is parsed in two layers, following Cargo's `Cargo.toml` handling. `task::schema` mirrors the file, with `Option` where "absent" and "empty" mean different things (`used`). `Task` is the validated form: names and patterns are checked while deserializing, and the cross-field rules run afterwards, collected into one `TaskErrors` so every problem is reported at once. Unlike Cargo, unknown keys are errors: Cargo warns because it promises compatibility across versions, while a misspelled key here would silently make no claim.
+
+- **Names.** Task, plugin, fixture, and skill names become directory or file names, so `DirName<marker::…>` accepts only one portable path component: no separators or Windows-forbidden characters, no control characters, no trailing dot or space, and none of the device names Windows reserves (the list Cargo rejects for package names). Hook names never touch the filesystem, so `HookName` only requires text.
+- **Editable patterns** are compiled with `globset` when the task loads, with `*` never crossing `/`, so an unusable pattern is an authoring error rather than a grading failure.
+- **Directories.** Task, `starter/`, plugin, fixture, and `checks/` directories must be real directories; a path that cannot be inspected is reported as an I/O error with its cause, separately from a structural problem. Unlike skill installation, which follows symlinks, a symlink is rejected here: these contents cross into trials and grading, which must see exactly what the checkout holds. Every entry of `tasks/` is reported, including stray files and names that are not UTF-8.
+
+The crate exports only `run`; everything else is `pub(crate)` until another crate needs it. `Evals` holds the `evals/` layout so no other code joins those paths itself.
+
 ## Code comments
 
 Comments answer why, an invariant, or a surprising behavior of a client or tool. They never restate what the code says.
