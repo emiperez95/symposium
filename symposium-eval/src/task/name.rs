@@ -1,6 +1,6 @@
 //! Validated names from `task.toml` and the `evals/` tree.
 //!
-//! Task, plugin, fixture, and skill names become directory or file names, so
+//! Task, plugin, fixture, skill, and check names become directory or file names, so
 //! [`DirName`] accepts only names that are one portable path component on every
 //! platform. A marker type per kind keeps a plugin name from being passed where a skill
 //! name is expected. Hook names never touch the filesystem, so [`HookName`] only
@@ -22,12 +22,15 @@ pub(crate) mod marker {
     pub(crate) enum Fixture {}
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub(crate) enum Skill {}
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub(crate) enum Check {}
 }
 
 pub(crate) type TaskName = DirName<marker::Task>;
 pub(crate) type PluginName = DirName<marker::Plugin>;
 pub(crate) type FixtureName = DirName<marker::Fixture>;
 pub(crate) type SkillName = DirName<marker::Skill>;
+pub(crate) type CheckName = DirName<marker::Check>;
 
 /// A name that is safe to join onto any directory, on any platform.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]

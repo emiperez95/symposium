@@ -9,6 +9,7 @@
 //! symlinks: their contents cross into trials and grading, which must see exactly what
 //! the checkout holds.
 
+mod checks;
 mod name;
 mod pattern;
 mod schema;
@@ -23,7 +24,10 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use thiserror::Error;
 
-pub(crate) use name::{FixtureName, HookName, NameError, PluginName, SkillName, TaskName};
+pub(crate) use checks::CheckError;
+pub(crate) use name::{
+    CheckName, FixtureName, HookName, NameError, PluginName, SkillName, TaskName,
+};
 pub(crate) use pattern::EditablePattern;
 
 use crate::evals::{EntryError, Evals};
@@ -51,6 +55,7 @@ pub(crate) struct Task {
     fixtures: Vec<FixtureName>,
     editable: Vec<EditablePattern>,
     fmt_check: bool,
+    checks: Vec<CheckName>,
     expected_hooks: Vec<HookName>,
     expected_skills: SkillExpectations,
 }
@@ -123,8 +128,8 @@ pub(crate) enum TaskError {
         name: FixtureName,
         problem: DirProblem,
     },
-    #[error("`checks/` {0}")]
-    Checks(DirProblem),
+    #[error(transparent)]
+    Check(#[from] CheckError),
     #[error("`{list}` lists `{value}` more than once")]
     Duplicate { list: &'static str, value: String },
     #[error("skill `{skill}` is in both `{first}` and `{second}`")]
@@ -171,7 +176,10 @@ impl Task {
             &raw.plugins,
             &raw.fixtures,
         ));
-        errors.extend(require_dir(dir.join("checks"), TaskError::Checks));
+        let checks = checks::load(&dir.join("checks")).unwrap_or_else(|check_errors| {
+            errors.extend(check_errors.into_iter().map(TaskError::from));
+            Vec::new()
+        });
         errors.extend(duplicates("plugins", &raw.plugins));
         errors.extend(duplicates("fixtures", &raw.fixtures));
         errors.extend(duplicates(
@@ -193,6 +201,7 @@ impl Task {
             fixtures: raw.fixtures,
             editable: raw.editable.unwrap_or_else(default_editable),
             fmt_check: raw.fmt_check,
+            checks,
             expected_hooks: raw.expected.hooks,
             expected_skills,
         })
@@ -456,6 +465,7 @@ mod tests {
         assert_eq!(task.kind, TaskKind::Regression);
         assert_eq!(task.editable, default_editable());
         assert!(!task.fmt_check);
+        assert_eq!(task.checks, [CheckName::new("works").unwrap()]);
         assert_eq!(task.expected_skills.used, Vec::<SkillName>::new());
     }
 
@@ -591,6 +601,38 @@ mod tests {
                 "`checks/` does not exist",
             ]
         );
+    }
+
+    #[test]
+    fn every_check_file_is_validated() {
+        let (root, evals) = evals_with_task("kind = \"regression\"\nprompt = \"x\"\n");
+        let checks = root.path().join("tasks/demo/checks");
+        fs::write(
+            checks.join("two.rs"),
+            "#[test] fn a() {}\n#[test] fn b() {}\n",
+        )
+        .unwrap();
+        fs::write(checks.join("notes.txt"), "").unwrap();
+
+        let errors = load_demo(&evals).unwrap_err();
+
+        assert_eq!(
+            messages(&errors),
+            [
+                "`checks/notes.txt` is not a regular `.rs` file",
+                "`checks/two.rs` holds 2 top-level tests; it must hold exactly one",
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_checks_directory_is_rejected() {
+        let (root, evals) = evals_with_task("kind = \"regression\"\nprompt = \"x\"\n");
+        fs::remove_file(root.path().join("tasks/demo/checks/works.rs")).unwrap();
+
+        let errors = load_demo(&evals).unwrap_err();
+
+        assert_eq!(messages(&errors), ["`checks/` holds no hidden tests"]);
     }
 
     #[test]

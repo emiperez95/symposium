@@ -11,7 +11,9 @@ publish = false
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 globset = "0.4"
+proc-macro2 = { version = "1", features = ["span-locations"] }
 serde = { version = "1", features = ["derive"] }
+syn = { version = "2", features = ["full"] }
 thiserror = "2"
 toml = "0.8"
 
