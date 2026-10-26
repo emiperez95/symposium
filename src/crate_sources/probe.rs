@@ -50,6 +50,43 @@ fn fetch_sync(crate_name: &str, version_req: &str) -> Result<FetchResult> {
     }
 }
 
+pub fn find_cached(crate_name: &str, version_req: &str, cargo_home: &Path) -> Result<FetchResult> {
+    let req = semver::VersionReq::parse(version_req)
+        .with_context(|| format!("invalid version requirement `{version_req}`"))?;
+    let normalized = normalize_crate_name(crate_name);
+    let registry_src = cargo_home.join("registry/src");
+    let indexes = std::fs::read_dir(&registry_src)
+        .with_context(|| format!("failed to read `{}`", registry_src.display()))?;
+    let (name, version, path) = indexes
+        .filter_map(|index| std::fs::read_dir(index.ok()?.path()).ok())
+        .flatten()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let dir_name = entry.file_name().into_string().ok()?;
+            let name = dir_name.get(..crate_name.len())?;
+            let version = dir_name.get(crate_name.len()..)?.strip_prefix('-')?;
+            let version = semver::Version::parse(version).ok()?;
+            let path = entry.path();
+            (normalize_crate_name(name) == normalized
+                && req.matches(&version)
+                && path.join(".cargo-ok").is_file())
+            .then(|| (name.to_string(), version, path))
+        })
+        .max_by(|a, b| a.1.cmp(&b.1))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "`{crate_name} = \"{version_req}\"` is not in the cargo cache under `{}`",
+                registry_src.display()
+            )
+        })?;
+
+    Ok(FetchResult {
+        name,
+        version: version.to_string(),
+        path,
+    })
+}
+
 /// Write a minimal package at `dir` that depends on `crate_name = version_req`.
 fn write_dummy_package(dir: &Path, crate_name: &str, version_req: &str) -> Result<()> {
     std::fs::create_dir_all(dir.join("src"))?;
@@ -289,5 +326,30 @@ mod tests {
         let found = find_crate_in_lockfile(probe.path(), "tool", cargo_home.path()).unwrap();
         assert_eq!(found.version, "2.0.0");
         assert_eq!(found.path, source);
+    }
+
+    #[test]
+    fn find_cached_picks_the_highest_extracted_match() {
+        let cargo_home = tempfile::tempdir().unwrap();
+        extracted_source(cargo_home.path(), "foo-1.2.0");
+        let newest = extracted_source(cargo_home.path(), "foo-1.10.0");
+        let foo_bar = extracted_source(cargo_home.path(), "foo-bar-2.0.0");
+        let unfinished = extracted_source(cargo_home.path(), "foo-1.11.0");
+        std::fs::remove_file(unfinished.join(".cargo-ok")).unwrap();
+
+        let found = find_cached("foo", "*", cargo_home.path()).unwrap();
+        assert_eq!(found.name, "foo");
+        assert_eq!(found.version, "1.10.0");
+        assert_eq!(found.path, newest);
+
+        let found = find_cached("foo", "=1.2.0", cargo_home.path()).unwrap();
+        assert_eq!(found.version, "1.2.0");
+
+        let found = find_cached("foo_bar", "*", cargo_home.path()).unwrap();
+        assert_eq!(found.name, "foo-bar");
+        assert_eq!(found.version, "2.0.0");
+        assert_eq!(found.path, foo_bar);
+
+        assert!(find_cached("baz", "*", cargo_home.path()).is_err());
     }
 }

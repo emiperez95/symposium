@@ -108,6 +108,7 @@ pub async fn render_help(sym: &Symposium, cwd: &Path) -> String {
         &pms,
         workspace.as_ref().map(|ws| ws.root.as_path()),
         &mut ctx,
+        symposium_install::UpdateLevel::None,
     )
     .await;
 

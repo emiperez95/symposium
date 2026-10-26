@@ -121,6 +121,7 @@ pub async fn dispatch_external(
         &pms,
         workspace.as_ref().map(|ws| ws.root.as_path()),
         &mut ctx,
+        UpdateLevel::None,
     )
     .await;
 

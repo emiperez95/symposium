@@ -97,7 +97,7 @@ pub trait PackageManager {
 
     /// The plugin(s) a specific id maps to — zero, one, or many. Used for
     /// `[[plugins]]` chained references and explicitly enabled crates.
-    async fn load_plugin(&self, id: &PackageId) -> Vec<UnvalidatedPlugin>;
+    async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<UnvalidatedPlugin>;
 
     /// The package ids the current workspace depends on. Empty for PMs with no
     /// workspace notion.
@@ -192,8 +192,8 @@ impl PmInstance {
     }
 
     /// The plugin(s) an id maps to, validated.
-    pub async fn load_plugin(&self, id: &PackageId) -> Vec<Plugin> {
-        self.validate_all(self.pm.load_plugin(id).await)
+    pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<Plugin> {
+        self.validate_all(self.pm.load_plugin(id, update).await)
     }
 
     /// A registry entry that fails validation is the user's to fix, so it is
@@ -288,10 +288,10 @@ impl PmRegistry {
     /// Load the plugin(s) an id maps to, asking every instance. Any instance may
     /// contribute a plugin relevant to the id, so this can return several. Each
     /// instance's plugins are validated under its own [`PluginKind`].
-    pub async fn load_plugin(&self, id: &PackageId) -> Vec<Plugin> {
+    pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<Plugin> {
         let mut out = Vec::new();
         for inst in &self.instances {
-            out.extend(inst.load_plugin(id).await);
+            out.extend(inst.load_plugin(id, update).await);
         }
         out
     }
@@ -363,7 +363,11 @@ mod tests {
                 manifest,
             )]
         }
-        async fn load_plugin(&self, _id: &PackageId) -> Vec<UnvalidatedPlugin> {
+        async fn load_plugin(
+            &self,
+            _id: &PackageId,
+            _update: UpdateLevel,
+        ) -> Vec<UnvalidatedPlugin> {
             Vec::new()
         }
         async fn list_deps(&self) -> Result<Vec<PackageId>> {

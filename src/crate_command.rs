@@ -24,7 +24,7 @@ pub async fn dispatch_crate(
     let id = CargoPm::id_for(name, version);
     match sym
         .package_managers(&deps)
-        .fetch(&id, symposium_install::UpdateLevel::None)
+        .fetch(&id, symposium_install::UpdateLevel::Check)
         .await
     {
         Ok(result) => {

@@ -138,7 +138,7 @@ pub async fn skills_applicable_to(
 
     let pms = sym.package_managers(deps);
     let active =
-        crate::plugins::active_plugins(sym, registry, &pms, workspace_root, &mut ctx).await;
+        crate::plugins::active_plugins(sym, registry, &pms, workspace_root, &mut ctx, update).await;
     collect_skills(sym, &active, &mut ctx, update).await
 }
 
@@ -147,7 +147,7 @@ pub async fn skills_applicable_to(
 /// Provenance is re-stamped per plugin so a `source.path` group's
 /// `workspace-member()` predicate sees the plugin it belongs to. Skill git
 /// sources are fetched here (hence `update`), which is why this is separate
-/// from [`crate::plugins::active_plugins`] — the plugin walk never touches the network.
+/// from [`crate::plugins::active_plugins`].
 pub(crate) async fn collect_skills(
     sym: &Symposium,
     active: &[Plugin],

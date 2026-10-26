@@ -183,9 +183,9 @@ impl PackageManager for CargoPm {
     /// Resolve a specific crate id to its plugin (a chained reference or an
     /// enabled crate). Unlike `active_plugins`, this loads the named crate
     /// whatever it embeds — any fetchable crate yields at least the default
-    /// `skills/` plugin. Fetched cache-only.
-    async fn load_plugin(&self, id: &PackageId) -> Vec<UnvalidatedPlugin> {
-        let fetched = match self.fetch(id, UpdateLevel::None).await {
+    /// `skills/` plugin.
+    async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<UnvalidatedPlugin> {
+        let fetched = match self.fetch(id, update).await {
             Ok(f) => f,
             Err(e) => {
                 tracing::warn!(id = %id, error = %e, "failed to fetch crate for plugin");
@@ -222,11 +222,12 @@ impl PackageManager for CargoPm {
             .collect())
     }
 
-    async fn fetch(&self, id: &PackageId, _update: UpdateLevel) -> Result<FetchedPackage> {
+    async fn fetch(&self, id: &PackageId, update: UpdateLevel) -> Result<FetchedPackage> {
         debug_assert_eq!(id.pm, CARGO_PM);
         // `crates()` drives the lazy `cargo metadata` resolution — the cargo PM
         // owns the call, resolving against its own workspace.
-        let mut fetch = RustCrateFetch::new(&id.name, self.workspace.crates());
+        let mut fetch = RustCrateFetch::new(&id.name, self.workspace.crates())
+            .offline(matches!(update, UpdateLevel::None));
         if id.version != ANY_VERSION {
             fetch = fetch.version(&id.version);
         }
@@ -304,5 +305,22 @@ mod tests {
         // The plugin points at the crate source; the default `skills/` group is
         // added by validation, not by the PM.
         assert!(active[0].root.join("skills").is_dir());
+    }
+
+    #[tokio::test]
+    async fn load_plugin_without_update_reads_only_the_cargo_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pm = CargoPm::new(crate::pm::WorkspaceDeps::fixture(
+            tmp.path().to_path_buf(),
+            vec![],
+        ));
+
+        let loaded = pm
+            .load_plugin(
+                &CargoPm::id_for("zz-symposium-no-such-crate", None),
+                UpdateLevel::None,
+            )
+            .await;
+        assert!(loaded.is_empty());
     }
 }

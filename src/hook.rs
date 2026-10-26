@@ -510,6 +510,7 @@ async fn prewarm_hook_sources(sym: &Symposium, deps: &Arc<WorkspaceDeps>) {
         &pms,
         workspace.as_ref().map(|ws| ws.root.as_path()),
         &mut ctx,
+        symposium_install::UpdateLevel::None,
     )
     .await;
 
@@ -613,6 +614,7 @@ async fn discovery_hint(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Option<St
         &pms,
         workspace.as_ref().map(|ws| ws.root.as_path()),
         &mut ctx,
+        symposium_install::UpdateLevel::None,
     )
     .await;
     let any_subcommand = !applicable_subcommands(&active, &dep_ids, &used).is_empty();
@@ -752,6 +754,7 @@ pub async fn dispatch_plugin_hooks(
         &pms,
         workspace.as_ref().map(|ws| ws.root.as_path()),
         &mut ctx,
+        symposium_install::UpdateLevel::None,
     )
     .await;
     let hooks = dispatched_hooks_for_payload(&plugins, sym_input, host_agent, &mut ctx);

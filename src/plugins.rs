@@ -1133,8 +1133,6 @@ async fn load_registry_impl(
 /// plugin-level gate; a facet still calls [`Plugin::applies`] before its
 /// own predicates, to re-stamp `workspace-member()` for the plugin being read.
 ///
-/// Crate loading goes through `pms` ([`crate::pm::PmRegistry::load_plugin`]),
-/// which fetches cache-only, so this is safe on the per-event hook path.
 /// `ctx.deps` supplies the dependency list expansion evaluates against.
 pub async fn active_plugins(
     sym: &Symposium,
@@ -1142,6 +1140,7 @@ pub async fn active_plugins(
     pms: &crate::pm::PmRegistry,
     workspace_root: Option<&Path>,
     ctx: &mut crate::predicate::PredicateContext<'_>,
+    update: UpdateLevel,
 ) -> Vec<Plugin> {
     let mut active = Vec::new();
     // Crate identities already loaded through the set, keyed on `(pm, name)` so
@@ -1177,7 +1176,7 @@ pub async fn active_plugins(
     // Fixed-point: resolve each id through the set, record any new plugin, and
     // enqueue its own chained references.
     while let Some(id) = worklist.pop() {
-        for plugin in pms.load_plugin(&id).await {
+        for plugin in pms.load_plugin(&id, update).await {
             if visited.insert(plugin_key(&plugin.canonical)) {
                 record_active(plugin, ctx, &mut active, &mut worklist);
             }
