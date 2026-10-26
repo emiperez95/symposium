@@ -114,7 +114,6 @@ pub async fn workspace_status(
     // Dependency-embedded plugins, with the decision the config made about
     // each. This is the same view the consent prompt works from.
     let discovery = crate::discovery::discover(sym, deps).await;
-    let mut declined_names = Vec::new();
     for found in discovery
         .active
         .iter()
@@ -122,9 +121,6 @@ pub async fn workspace_status(
         .chain(&discovery.candidates)
         .chain(&discovery.declined)
     {
-        if found.enablement == Enablement::Declined {
-            declined_names.push(found.name().to_string());
-        }
         entries.push(entry_for(found));
     }
 
@@ -162,8 +158,13 @@ pub async fn workspace_status(
 
     // Names declined without ever being discovered (a `disable` entry for a
     // dependency whose source isn't on disk, or one added by hand).
+    let mut declined: std::collections::HashSet<crate::pm::PackageId> = discovery
+        .declined
+        .iter()
+        .map(|d| pms.identity(&d.id))
+        .collect();
     for name in &sym.config.plugins.disable {
-        if declined_names.iter().any(|n| n == name) {
+        if name == "*" || !declined.insert(pms.identify(&registry.plugins, name)) {
             continue;
         }
         entries.push(StatusEntry {

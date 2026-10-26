@@ -672,3 +672,39 @@ async fn status_reports_a_used_but_disabled_plugin_as_declined() {
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn status_lists_each_declined_name_once() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["auto-enable0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let workspace_root = ctx.workspace_root.clone().unwrap();
+            ctx.sym.config.plugins.disable = ["crate_a", "*", "never-seen", "never_seen"]
+                .map(String::from)
+                .to_vec();
+
+            let deps = ctx.sym.workspace_deps(&workspace_root);
+            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+            let named = |name: &str| {
+                entries
+                    .iter()
+                    .filter(|e| e.name.replace('_', "-") == name)
+                    .collect::<Vec<_>>()
+            };
+
+            let crate_a = named("crate-a");
+            assert_eq!(crate_a.len(), 1, "{entries:?}");
+            assert_eq!(crate_a[0].state, StatusState::Declined);
+            assert_eq!(crate_a[0].version.as_deref(), Some("0.1.0"));
+            assert!(named("*").is_empty(), "{entries:?}");
+            let never_seen = named("never-seen");
+            assert_eq!(never_seen.len(), 1, "{entries:?}");
+            assert_eq!(never_seen[0].state, StatusState::Declined);
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}

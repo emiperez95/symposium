@@ -58,7 +58,7 @@ Plugin content must not decide where Symposium writes. A name it supplies, such 
 
 ## Names compare as package identities
 
-Whether two names are the same package is the package manager's rule, not a string comparison: cargo treats `widget-lib` and `widget_lib` as one crate, while a registry compares its plugin names exactly. So code that matches a name typed by the user against a plugin or a dependency resolves both through `PmRegistry::identify` or `PmRegistry::identity` and compares the results, rather than comparing strings or applying one ecosystem's normalization to every name.
+Whether two names are the same package is the package manager's rule, not a string comparison: cargo treats `widget-lib` and `widget_lib` as one crate, while a registry compares its plugin names exactly. So code that matches a name typed by the user against a plugin or a dependency resolves both through `PmRegistry::identify` or `PmRegistry::identity` and compares the results, rather than comparing strings or applying one ecosystem's normalization to every name. A `"*"` entry is a pattern, not a name: the `PluginsConfig` queries treat it as matching everything, so code that lists entries skips it rather than reporting it as a plugin.
 
 ## A source that reads as empty is not an empty source
 
