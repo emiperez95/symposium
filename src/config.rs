@@ -554,19 +554,20 @@ impl Symposium {
         let filename = now.format("symposium-%Y%m%d-%H%M%S.log").to_string();
         let log_path = logs.join(&filename);
 
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-            .expect("failed to open log file");
-
         let level = self.log_level();
         let file_filter = EnvFilter::new(level.as_str());
 
-        let file_layer = tracing_subscriber::fmt::layer()
-            .with_writer(file)
-            .with_ansi(false)
-            .with_filter(file_filter);
+        let file_layer = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .ok()
+            .map(|file| {
+                tracing_subscriber::fmt::layer()
+                    .with_writer(file)
+                    .with_ansi(false)
+                    .with_filter(file_filter)
+            });
 
         // The report layer does its own level filtering internally, so
         // give it a permissive filter that lets all events through.
@@ -582,7 +583,6 @@ impl Symposium {
             config_dir = %self.dirs.config_dir.display(),
             cache_dir = %self.dirs.cache_dir.display(),
             log_level = %level,
-            log_file = %log_path.display(),
             "logging initialized"
         );
         tracing::trace!(config = ?self.config, "loaded config");

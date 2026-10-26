@@ -20,7 +20,7 @@ UPDATE_EXPECT=1 cargo test
 
 ## Logging and debugging
 
-Symposium uses `tracing` for structured logging. Each invocation writes a timestamped log file to `~/.symposium/logs/`.
+Symposium uses `tracing` for structured logging. Each invocation writes a timestamped log file to `~/.symposium/logs/` when that directory is writable; otherwise the command runs without one.
 
 The default log level is `info`. To get more detail, set the level in `~/.symposium/config.toml`:
 
