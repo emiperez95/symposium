@@ -1119,6 +1119,33 @@ async fn crate_info_resolves_workspace_member_to_its_directory() {
     .unwrap();
 }
 
+#[tokio::test]
+async fn sync_reports_why_the_workspace_could_not_be_loaded() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["workspace-plugin0"],
+        async |mut ctx| {
+            let manifest = ctx.workspace_root.as_ref().unwrap().join("Cargo.toml");
+            std::fs::write(
+                &manifest,
+                "[package]\nname = \"broken\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \n",
+            )?;
+            for command in ["sync", "status"] {
+                let err = format!("{:#}", ctx.symposium(&[command]).await.unwrap_err());
+                assert!(err.contains("Cargo.toml"), "{command}: {err}");
+                assert!(!err.contains("not in a Rust workspace"), "{command}: {err}");
+            }
+
+            std::fs::remove_file(&manifest)?;
+            let err = format!("{:#}", ctx.symposium(&["sync"]).await.unwrap_err());
+            assert!(err.contains("not in a Rust workspace"), "{err}");
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// `sync` installs skills from a `[patch.crates-io]`-overridden crate.
 #[tokio::test]
 async fn sync_installs_skill_from_patched_crate() {

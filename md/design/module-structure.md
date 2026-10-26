@@ -27,6 +27,8 @@ The cargo-workspace resolution is **CargoPm's**, so it lives in the cargo PM's m
 
 Members are recorded as `member_crates`, each a `WorkspaceCrate` whose `path` is the member's directory. They back workspace-plugin discovery and `crate-info` on a member, and stay out of `crates`, so a member never reaches `depends-on` or discovery as a dependency.
 
+A failed `cargo metadata` is remembered with cargo's error and logged. `load()` reads it as no workspace, so hooks, help and the package-manager layer carry on without one; `require()`, used by `sync`, `status` and `use`, reports cargo's error, and keeps "not in a Rust workspace" for a directory with no `Cargo.toml` in it or above it.
+
 ### `agents.rs` — agent abstraction
 
 Centralizes agent-specific knowledge: hook registration file paths, skill installation directories, and hook registration logic for each supported agent (Antigravity CLI, Claude Code, GitHub Copilot, Codex CLI, Kiro, OpenCode, Goose). Handles the differences between agents — e.g., Claude Code uses `.claude/skills/` and Kiro uses `.kiro/skills/`, while Antigravity, Copilot, Codex, OpenCode, and Goose use the vendor-neutral `.agents/skills/`. OpenCode and Goose are skills-only agents (no hook registration).

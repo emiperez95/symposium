@@ -87,7 +87,7 @@ struct DiskCache {
 pub struct WorkspaceDeps {
     cwd: PathBuf,
     dirs: crate::dirs::SymposiumDirs,
-    cached: OnceLock<Option<Arc<LoadedWorkspace>>>,
+    cached: OnceLock<Result<Arc<LoadedWorkspace>, Option<String>>>,
 }
 
 impl WorkspaceDeps {
@@ -105,7 +105,7 @@ impl WorkspaceDeps {
     pub(crate) fn fixture(root: impl Into<PathBuf>, crates: Vec<WorkspaceCrate>) -> Arc<Self> {
         let root = root.into();
         let cached = OnceLock::new();
-        let _ = cached.set(Some(Arc::new(LoadedWorkspace {
+        let _ = cached.set(Ok(Arc::new(LoadedWorkspace {
             root: root.clone(),
             crates,
             member_crates: Vec::new(),
@@ -123,7 +123,7 @@ impl WorkspaceDeps {
     /// search).
     pub fn detached() -> Self {
         let cached = OnceLock::new();
-        let _ = cached.set(None);
+        let _ = cached.set(Err(None));
         Self {
             cwd: PathBuf::new(),
             dirs: crate::dirs::SymposiumDirs::new(PathBuf::new(), PathBuf::new(), None),
@@ -139,7 +139,15 @@ impl WorkspaceDeps {
     /// Load (or return cached) workspace metadata.
     /// Returns `None` if not inside a Cargo workspace.
     pub fn load(&self) -> Option<&Arc<LoadedWorkspace>> {
-        self.cached.get_or_init(|| self.resolve()).as_ref()
+        self.cached.get_or_init(|| self.resolve()).as_ref().ok()
+    }
+
+    pub fn require(&self) -> anyhow::Result<&Arc<LoadedWorkspace>> {
+        match self.cached.get_or_init(|| self.resolve()) {
+            Ok(loaded) => Ok(loaded),
+            Err(None) => anyhow::bail!("not in a Rust workspace"),
+            Err(Some(e)) => anyhow::bail!("{e}"),
+        }
     }
 
     /// Convenience: workspace root, or `None` if not in a workspace.
@@ -163,22 +171,33 @@ impl WorkspaceDeps {
     }
 
     /// The one-time resolution: disk cache, then `cargo metadata` on miss.
-    fn resolve(&self) -> Option<Arc<LoadedWorkspace>> {
+    fn resolve(&self) -> Result<Arc<LoadedWorkspace>, Option<String>> {
         let cache_dir = self.workspace_cache_dir();
 
         if let Some(dir) = &cache_dir
             && let Some(loaded) = try_disk_cache(dir)
         {
-            return Some(Arc::new(loaded));
+            return Ok(Arc::new(loaded));
         }
 
-        let loaded = load_workspace(&self.cwd, self.dirs.cargo_override.as_deref())?;
+        let loaded =
+            load_workspace(&self.cwd, self.dirs.cargo_override.as_deref()).map_err(|e| {
+                if !self
+                    .cwd
+                    .ancestors()
+                    .any(|dir| dir.join("Cargo.toml").is_file())
+                {
+                    return None;
+                }
+                tracing::warn!(error = %e, "cargo metadata failed");
+                Some(e)
+            })?;
 
         if let Some(dir) = &cache_dir {
             write_disk_cache(dir, &loaded);
         }
 
-        Some(Arc::new(loaded))
+        Ok(Arc::new(loaded))
     }
 
     /// The workspace-specific cache directory, via `cargo locate-project
@@ -289,17 +308,20 @@ pub fn file_mtime(path: &Path) -> Option<u64> {
 }
 
 /// Run `cargo metadata` and extract workspace root + direct deps.
-fn load_workspace(cwd: &Path, cargo_path: Option<&Path>) -> Option<LoadedWorkspace> {
+fn load_workspace(cwd: &Path, cargo_path: Option<&Path>) -> Result<LoadedWorkspace, String> {
     let mut cmd = MetadataCommand::new();
     cmd.features(CargoOpt::AllFeatures).current_dir(cwd);
     if let Some(path) = cargo_path {
         cmd.cargo_path(path);
     }
-    let metadata = cmd.exec().ok()?;
+    let metadata = cmd.exec().map_err(|e| e.to_string())?;
 
     let root = metadata.workspace_root.clone().into_std_path_buf();
 
-    let resolve = metadata.resolve.as_ref()?;
+    let resolve = metadata
+        .resolve
+        .as_ref()
+        .ok_or("`cargo metadata` returned no dependency resolution")?;
 
     let ws_members: HashSet<_> = metadata.workspace_members.iter().collect();
     let mut direct_dep_ids: HashSet<&cargo_metadata::PackageId> = HashSet::new();
@@ -354,7 +376,7 @@ fn load_workspace(cwd: &Path, cargo_path: Option<&Path>) -> Option<LoadedWorkspa
         .collect();
     member_crates.sort_by(|a, b| a.path.cmp(&b.path));
 
-    Some(LoadedWorkspace {
+    Ok(LoadedWorkspace {
         root,
         crates,
         member_crates,

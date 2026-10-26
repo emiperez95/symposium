@@ -73,10 +73,7 @@ pub async fn workspace_status(
     sym: &Symposium,
     deps: &Arc<WorkspaceDeps>,
 ) -> Result<Vec<StatusEntry>> {
-    let ws = deps
-        .load()
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("not in a Rust workspace"))?;
+    let ws = deps.require()?.clone();
 
     let mut entries = Vec::new();
 

@@ -14,7 +14,7 @@ With the global `-v` flag, sync additionally shows each plugin, skill group, and
 
 Must be run from within a Rust workspace. Performs the following steps:
 
-1. **Find workspace root**: runs `cargo metadata` to locate the workspace.
+1. **Find workspace root**: runs `cargo metadata` to locate the workspace. If `cargo metadata` fails, sync stops and shows cargo's error.
 
 2. **Scan dependencies**: reads the full dependency graph from the workspace.
 

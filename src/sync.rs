@@ -341,9 +341,7 @@ async fn resolve_custom_predicate_entries(
 /// clean up stale installations.
 pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLevel) -> Result<()> {
     let out = &Output::quiet();
-    let loaded = deps
-        .load()
-        .ok_or_else(|| anyhow::anyhow!("not in a Rust workspace"))?;
+    let loaded = deps.require()?;
     let project_root = loaded.root.clone();
     let workspace: Vec<_> = loaded.crates.clone();
     let loaded = loaded.clone();

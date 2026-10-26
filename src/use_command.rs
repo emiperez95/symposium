@@ -65,8 +65,8 @@ pub async fn use_plugin(
     }
 
     let workspace_root = deps.load().map(|ws| ws.root.clone());
-    if !global && workspace_root.is_none() {
-        bail!("not in a Rust workspace; pass --global to enable `{name}` everywhere");
+    if !global && let Err(e) = deps.require() {
+        bail!("{e}; pass --global to enable `{name}` everywhere");
     }
 
     if !dormant {
