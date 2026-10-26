@@ -50,6 +50,8 @@ Implements `cargo agents sync`. Scans workspace dependencies, finds applicable s
 
 While `PluginRegistry::unreadable_registries` is not empty, `sync` skips that reap and warns once per registry: what an unreadable registry could not read offered nothing, so everything installed from it would look stale.
 
+Installs, the reap, and agent config writes run under a blocking lock on `<cache>/sync.lock`, taken after resolution, so concurrent syncs (two agent sessions starting together) run one after the other instead of reaping each other's installs. See [sync concurrency](./sync-agent-flow.md#concurrency).
+
 One entry point, `sync(sym, deps, update)`. The caller supplies the `WorkspaceDeps`, so the hook pipeline hands over the resolver its other stages already used rather than resolving the workspace a second time. Callers: the CLI's `sync` arm (after the consent prompt), `use_command` once an enablement is recorded, and the hook pipeline's auto-sync.
 
 `sync` takes an `UpdateLevel` that it threads into skill resolution (`skills::collect_skills`), controlling how aggressively `source.git` skill groups are re-fetched. Callers choose: the auto-sync path passes `Check` on `SessionStart` (refresh) and `None` otherwise (debounced); the binary's global `--update` flag feeds manual `cargo agents sync`.

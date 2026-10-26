@@ -475,6 +475,8 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
         "sync started"
     );
 
+    let _lock = lock_sync(sym)?;
+
     if agent_names.is_empty() {
         tracing::info!(
             report = %crate::report::ReportEvent::Info {
@@ -735,6 +737,21 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
     }
 
     Ok(())
+}
+
+fn lock_sync(sym: &Symposium) -> Result<fs::File> {
+    let cache_dir = sym.cache_dir();
+    fs::create_dir_all(cache_dir).with_context(|| format!("create {}", cache_dir.display()))?;
+    let path = cache_dir.join("sync.lock");
+    let file = fs::File::options()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .with_context(|| format!("open {}", path.display()))?;
+    file.lock()
+        .with_context(|| format!("lock {}", path.display()))?;
+    Ok(file)
 }
 
 /// Register global hooks for all configured agents.

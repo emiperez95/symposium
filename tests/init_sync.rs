@@ -1952,6 +1952,79 @@ async fn sync_falls_back_to_hashed_name_when_a_dangling_link_is_in_the_way() {
     .unwrap();
 }
 
+#[tokio::test]
+async fn concurrent_syncs_keep_every_skill() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plugins0", "workspace-plugin0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let config = ctx.sym.config_dir().join("config.toml");
+            let toml = std::fs::read_to_string(&config)?;
+            std::fs::write(&config, format!("auto-update = \"off\"\n{toml}"))?;
+
+            let root = ctx.workspace_root.clone().unwrap();
+            for i in 0..20 {
+                let dir = root.join(format!("skills/s{i}"));
+                std::fs::create_dir_all(&dir)?;
+                std::fs::write(
+                    dir.join("SKILL.md"),
+                    format!("---\nname: s{i}\ndescription: skill s{i}\n---\n"),
+                )?;
+                for j in 0..30 {
+                    std::fs::write(dir.join(format!("f{j}.txt")), "x".repeat(2000))?;
+                }
+            }
+
+            let skills_dir = root.join(".claude/skills");
+            let entries = || -> std::io::Result<Vec<_>> {
+                let mut names = std::fs::read_dir(&skills_dir)?
+                    .map(|entry| entry.map(|e| e.file_name()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                names.sort();
+                Ok(names)
+            };
+            ctx.symposium(&["sync"]).await?;
+            let expected = entries()?;
+
+            let binary =
+                std::env::var("CARGO_BIN_EXE_cargo-agents").expect("must run via cargo test");
+            for _ in 0..5 {
+                std::fs::remove_dir_all(root.join(".claude"))?;
+                let children: Vec<_> = (0..3)
+                    .map(|_| {
+                        std::process::Command::new(&binary)
+                            .arg("sync")
+                            .env("SYMPOSIUM_HOME", ctx.sym.config_dir())
+                            .current_dir(&root)
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .spawn()
+                    })
+                    .collect::<Result<_, _>>()?;
+                for child in children {
+                    let output = child.wait_with_output()?;
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+
+                assert_eq!(entries()?, expected);
+                for i in 0..20 {
+                    let dir = skills_dir.join(format!("s{i}"));
+                    assert!(dir.join(".symposium").exists(), "{}", dir.display());
+                    assert!(dir.join("f29.txt").exists(), "{}", dir.display());
+                }
+            }
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// One plugin with two `[[skills]]` groups, each with its own `source.path`,
 /// each producing a same-named skill. The group source goes into the
 /// origin's `disambiguator`, so both groups install — without colliding.
