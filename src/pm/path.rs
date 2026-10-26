@@ -109,14 +109,16 @@ impl PackageManager for PathPm {
         Ok(Vec::new())
     }
 
-    /// Substring match over the entries' subpath keys. Manifest names are the
-    /// plugin layer's to interpret, so this only sees directory names.
+    /// Case-insensitive substring match over the entries' subpath keys.
+    /// Manifest names are the plugin layer's to interpret, so this only sees
+    /// directory names.
     async fn search(&self, query: &str) -> Result<Vec<PluginInfo>> {
+        let query = query.to_lowercase();
         let entries = layout::enumerate(&self.dir).unwrap_or_default();
         Ok(entries
             .into_iter()
             .map(|entry| layout::subpath_key(&entry.subpath))
-            .filter(|key| key.contains(query))
+            .filter(|key| key.to_lowercase().contains(&query))
             .map(|key| PluginInfo::from_id(PackageId::new(&self.name, key, ANY_VERSION)))
             .collect())
     }
@@ -178,6 +180,10 @@ mod tests {
         assert_eq!(one[0].manifest.name.as_deref(), Some("tools"));
 
         let hits = pm.search("too").await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id.name, "tools");
+
+        let hits = pm.search("TOO").await.unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id.name, "tools");
     }

@@ -316,6 +316,14 @@ async fn search_finds_registry_content_tagged_by_origin() {
             "registry entry tagged with its instance name: {matches:?}"
         );
 
+        let matches = symposium::search_command::find_matches(&ctx.sym, "MY-SKILL").await;
+        assert!(
+            matches
+                .iter()
+                .any(|m| m.origin == "user-plugins" && m.name == "my-skill"),
+            "registry entries match case-insensitively: {matches:?}"
+        );
+
         // A query nothing matches finds nothing (and does not fail).
         assert!(
             symposium::search_command::find_matches(&ctx.sym, "zzz-nothing")
