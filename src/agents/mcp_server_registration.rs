@@ -275,7 +275,7 @@ fn unregister_json_mcp_servers(
 
     let mut changed = false;
     for name in names {
-        if obj.remove(*name).is_some() {
+        if obj.shift_remove(*name).is_some() {
             out.removed(format!("{display}: removed {name} MCP server"));
             changed = true;
         }
@@ -1466,5 +1466,40 @@ mod tests {
                 .is_symlink()
         );
         assert!(!target.exists());
+    }
+
+    #[test]
+    fn json_registration_keeps_order_indent_and_newline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("opencode.json");
+        let original = "{\n    \"$schema\": \"https://opencode.ai/config.json\",\n    \"theme\": \"tokyonight\",\n    \"autoupdate\": false\n}\n";
+        fs::write(&path, original).unwrap();
+
+        register_opencode_mcp_servers(&path, &test_servers(), &Output::quiet()).unwrap();
+
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            text.starts_with("{\n    \"$schema\": \"https://opencode.ai/config.json\",\n    \"theme\": \"tokyonight\",\n    \"autoupdate\": false,\n    \"mcp\": {"),
+            "{text}"
+        );
+        assert!(text.ends_with("}\n"), "{text}");
+    }
+
+    #[test]
+    fn json_unregistration_keeps_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".mcp.json");
+        fs::write(
+            &path,
+            "{\n  \"mcpServers\": {\n    \"a\": {},\n    \"b\": {},\n    \"c\": {}\n  }\n}\n",
+        )
+        .unwrap();
+
+        unregister_claude_mcp_servers(&path, &["a"], &Output::quiet()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "{\n  \"mcpServers\": {\n    \"b\": {},\n    \"c\": {}\n  }\n}\n"
+        );
     }
 }
