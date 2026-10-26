@@ -14,6 +14,8 @@ Prompts for which agents you use (e.g., Antigravity CLI, Claude Code, Copilot) a
 
 If a user config already exists, `init` updates it (preserving existing settings not affected by the flags).
 
+Without a terminal and without `--add-agent`, `init` keeps the configured agents, or configures Claude Code when there are none.
+
 ## Options
 
 | Flag | Description |

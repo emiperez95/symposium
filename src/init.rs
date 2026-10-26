@@ -26,7 +26,7 @@ fn interactive(out: &Output) -> bool {
 /// Resolve which agents to configure. Priority:
 /// 1. Explicit `--add-agent` / `--remove-agent` flags (applied to existing set)
 /// 2. Interactive multi-select (if `should_prompt`), pre-selecting existing agents
-/// 3. Default to first agent (Claude) in non-interactive mode
+/// 3. Default to Claude in non-interactive mode
 fn resolve_agents(
     opts: &InitOpts,
     existing: &[AgentEntry],
@@ -55,7 +55,7 @@ fn resolve_agents(
             .map(|e| Agent::from_config_name(&e.name))
             .collect();
     }
-    Ok(vec![Agent::all()[0]])
+    Ok(vec![Agent::Claude])
 }
 
 /// Run user-wide initialization.

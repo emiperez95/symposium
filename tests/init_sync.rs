@@ -135,6 +135,29 @@ async fn init_creates_config() {
 }
 
 #[tokio::test]
+async fn non_interactive_init_defaults_to_claude() {
+    with_fixture(TestMode::SimulationOnly, &[], async |mut ctx| {
+        ctx.symposium(&["init"]).await?;
+
+        let config = symposium::config::Symposium::from_dir(ctx.sym.config_dir());
+        let agent_names: Vec<_> = config
+            .config
+            .agents
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect();
+        assert_eq!(agent_names, vec!["claude"]);
+
+        let home = ctx.sym.home_dir();
+        assert!(home.join(".claude/settings.json").exists());
+        assert!(!home.join(".gemini").exists());
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn init_does_not_overwrite_an_unparseable_config() {
     with_fixture(TestMode::SimulationOnly, &[], async |mut ctx| {
         let config_dir = ctx.sym.config_dir().to_path_buf();
