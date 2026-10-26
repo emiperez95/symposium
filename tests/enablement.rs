@@ -728,3 +728,54 @@ async fn status_lists_each_declined_name_once() {
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn status_reports_a_pluginless_dependency_only_when_used() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plain-dep0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let workspace_root = ctx.workspace_root.clone().unwrap();
+            ctx.sym.config.plugins.auto_enable = vec!["*".into()];
+            ctx.sym
+                .config
+                .plugins
+                .used
+                .push(symposium::config::UseEntry::Global("not-a-dep".into()));
+
+            let deps = ctx.sym.workspace_deps(&workspace_root);
+            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+            assert!(
+                !entries.iter().any(|e| e.name == "plain-dep"),
+                "{entries:?}"
+            );
+            let crate_a = entries
+                .iter()
+                .find(|e| e.name == "crate-a")
+                .expect("crate-a present");
+            assert_eq!(crate_a.state, StatusState::Active);
+            assert_eq!(crate_a.root, "`[plugins] auto-enable`");
+            let not_a_dep = entries
+                .iter()
+                .find(|e| e.name == "not-a-dep")
+                .expect("not-a-dep present");
+            assert_eq!(not_a_dep.state, StatusState::Active);
+            assert!(not_a_dep.root.contains("not a dependency"), "{not_a_dep:?}");
+
+            ctx.sym.config.plugins.auto_enable.clear();
+            ctx.symposium(&["use", "plain-dep"]).await?;
+            let deps = ctx.sym.workspace_deps(&workspace_root);
+            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+            let plain = entries
+                .iter()
+                .find(|e| e.name == "plain-dep")
+                .expect("plain-dep present once used");
+            assert_eq!(plain.state, StatusState::Dormant);
+            assert!(!plain.root.contains("not a dependency"), "{plain:?}");
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}

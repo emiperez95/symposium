@@ -1,0 +1,8 @@
+[package]
+name = "plain-dep-host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crate-a = { path = "crate-a" }
+plain-dep = { path = "plain-dep" }
