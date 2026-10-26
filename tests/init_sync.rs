@@ -668,6 +668,83 @@ async fn add_agent_is_additive() {
     .unwrap();
 }
 
+fn configure_unknown_agent(ctx: &mut symposium_testlib::TestContext) -> anyhow::Result<()> {
+    ctx.sym.config.agents = vec![
+        symposium::config::AgentEntry {
+            name: "gemini".into(),
+        },
+        symposium::config::AgentEntry {
+            name: "claude".into(),
+        },
+    ];
+    ctx.sym.save_config()
+}
+
+fn configured_agent_names(ctx: &symposium_testlib::TestContext) -> Vec<String> {
+    symposium::config::Symposium::from_dir(ctx.sym.config_dir())
+        .config
+        .agents
+        .into_iter()
+        .map(|a| a.name)
+        .collect()
+}
+
+#[tokio::test]
+async fn sync_skips_an_unknown_agent() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["auto-enable0"],
+        async |mut ctx| {
+            ctx.sym.config.plugins.auto_enable.push("crate-a".into());
+            configure_unknown_agent(&mut ctx)?;
+            ctx.symposium(&["sync"]).await?;
+
+            let workspace_root = ctx.workspace_root.clone().unwrap();
+            find_installed_skill(&workspace_root.join(".claude/skills"), "a-guidance");
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn init_removes_an_unknown_agent() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["auto-enable0"],
+        async |mut ctx| {
+            configure_unknown_agent(&mut ctx)?;
+            ctx.symposium(&["init", "--remove-agent", "gemini"]).await?;
+            assert_eq!(configured_agent_names(&ctx), vec!["claude"]);
+
+            configure_unknown_agent(&mut ctx)?;
+            ctx.symposium(&["init", "--add-agent", "codex"]).await?;
+            assert_eq!(
+                configured_agent_names(&ctx),
+                vec!["gemini", "claude", "codex"]
+            );
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn init_rejects_removing_an_unknown_unconfigured_agent() {
+    with_fixture(TestMode::SimulationOnly, &[], async |mut ctx| {
+        assert!(
+            ctx.symposium(&["init", "--remove-agent", "nosuch"])
+                .await
+                .is_err()
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
 /// `sync` filters MCP servers by their `depends-on` predicates.
 #[tokio::test]
 async fn sync_filters_mcp_servers_by_crates() {
