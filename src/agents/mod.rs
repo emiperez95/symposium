@@ -868,23 +868,23 @@ fn unregister_kiro_hooks(agents_dir: &Path, out: &Output) {
 /// Remove symposium hooks from a Claude-style settings.json file.
 fn unregister_settings_hooks(settings_path: &Path, command_prefix: &str, out: &Output) {
     remove_hook_entries(settings_path, out, |group| {
-        group
-            .get("hooks")
-            .and_then(|h| h.as_array())
-            .is_some_and(|hooks| {
-                hooks.iter().any(|h| {
-                    h.get("command")
-                        .and_then(|c| c.as_str())
-                        .is_some_and(|c| c.starts_with(command_prefix))
-                })
-            })
+        let Some(handlers) = group.get_mut("hooks").and_then(|h| h.as_array_mut()) else {
+            return false;
+        };
+        let before = handlers.len();
+        handlers.retain(|h| {
+            !h.get("command")
+                .and_then(|c| c.as_str())
+                .is_some_and(|c| c.starts_with(command_prefix))
+        });
+        handlers.len() < before && handlers.is_empty()
     });
 }
 
 fn remove_hook_entries(
     config_path: &Path,
     out: &Output,
-    is_symposium: impl Fn(&serde_json::Value) -> bool,
+    drop_entry: impl Fn(&mut serde_json::Value) -> bool,
 ) {
     let display = display_path(config_path);
 
@@ -902,9 +902,9 @@ fn remove_hook_entries(
     let mut changed = false;
     for (event, arr) in hooks.iter_mut() {
         if let Some(entries) = arr.as_array_mut() {
-            let before = entries.len();
-            entries.retain(|entry| !is_symposium(entry));
-            if entries.len() < before {
+            let before = entries.clone();
+            entries.retain_mut(|entry| !drop_entry(entry));
+            if *entries != before {
                 changed = true;
                 if entries.is_empty() {
                     emptied.push(event.clone());
@@ -1551,6 +1551,42 @@ mod tests {
                     serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
                 assert_eq!(&after, original);
             }
+        }
+    }
+
+    #[test]
+    fn unregistering_keeps_user_handlers_in_symposiums_group() {
+        type Register = fn(&Path, &Output) -> Result<()>;
+        type Unregister = fn(&Path, &Output);
+        let agents: [(Register, Unregister); 2] = [
+            (register_claude_hooks, unregister_claude_hooks),
+            (register_codex_hooks, unregister_codex_hooks),
+        ];
+        let user_hook = json!({ "type": "command", "command": "user-hook" });
+        for (register, unregister) in agents {
+            let tmp = tempfile::tempdir().unwrap();
+            let path = tmp.path().join("settings.json");
+            register(&path, &Output::quiet()).unwrap();
+
+            let mut settings: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            let group = &mut settings["hooks"]["PreToolUse"][0];
+            let matcher = group["matcher"].clone();
+            group["hooks"]
+                .as_array_mut()
+                .unwrap()
+                .push(user_hook.clone());
+            fs::write(&path, settings.to_string()).unwrap();
+
+            unregister(&path, &Output::quiet());
+
+            let content = fs::read_to_string(&path).unwrap();
+            let after: serde_json::Value = serde_json::from_str(&content).unwrap();
+            assert_eq!(
+                after["hooks"]["PreToolUse"],
+                json!([{ "matcher": matcher, "hooks": [user_hook] }])
+            );
+            assert!(!content.contains("cargo-agents hook"));
         }
     }
 

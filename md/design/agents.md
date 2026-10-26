@@ -59,7 +59,7 @@ At the global level, each agent has its own path:
 
 ### Hook registration
 
-Claude Code hooks live under the `"hooks"` key in settings JSON files. Each event maps to an array of matcher groups, each containing an array of hook commands.
+Claude Code hooks live under the `"hooks"` key in settings JSON files. Each event maps to an array of matcher groups, each containing an array of hook commands. The user's own handlers can share symposium's group, so unregistering removes symposium's handler from it and drops the group only once it is empty.
 
 | Scope | File |
 |-------|------|
@@ -341,6 +341,8 @@ Example hook registration:
 ```
 
 Note: An empty `matcher` string matches everything in Codex (equivalent to `"*"` in other agents).
+
+Unregistering works as in Claude Code: symposium's handler leaves its matcher group, and the group goes only once it is empty.
 
 ### Supported events
 
