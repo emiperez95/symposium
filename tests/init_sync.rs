@@ -1921,6 +1921,37 @@ async fn sync_falls_back_to_hashed_name_when_user_dir_in_the_way() {
     .unwrap();
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn sync_falls_back_to_hashed_name_when_a_dangling_link_is_in_the_way() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plugins0", "workspace0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+
+            let skills_dir = ctx.workspace_root.as_ref().unwrap().join(".claude/skills");
+            std::fs::create_dir_all(&skills_dir)?;
+            let link = skills_dir.join("serde-guidance");
+            std::os::unix::fs::symlink("../../missing/serde-guidance", &link)?;
+
+            ctx.symposium(&["sync"]).await?;
+
+            assert!(std::fs::symlink_metadata(&link)?.file_type().is_symlink());
+            assert_eq!(
+                std::fs::read_link(&link)?,
+                Path::new("../../missing/serde-guidance")
+            );
+            let installed = find_installed_skill(&skills_dir, "serde-guidance");
+            assert_ne!(installed, link);
+            assert!(installed.join(".symposium").exists());
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// One plugin with two `[[skills]]` groups, each with its own `source.path`,
 /// each producing a same-named skill. The group source goes into the
 /// origin's `disambiguator`, so both groups install — without colliding.

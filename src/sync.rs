@@ -71,11 +71,15 @@ fn mark_generated_skill_directory(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Does `dir` contain the `.symposium` marker, i.e. is it a symposium-managed
-/// skill directory? Returns `false` for user-authored skills and for any
-/// directory symposium did not create.
-fn has_symposium_marker(dir: &Path) -> bool {
-    dir.join(MARKER_FILE).exists()
+fn slot_taken(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
+}
+
+/// Is `path` a real directory holding the `.symposium` marker, i.e. a
+/// symposium-managed skill directory? Returns `false` for user-authored skills,
+/// for any directory symposium did not create, and for any symlink.
+fn is_managed_skill_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) && path.join(MARKER_FILE).exists()
 }
 
 /// One entry of a source tree as the installer sees it: a path relative to the
@@ -235,7 +239,7 @@ fn sync_skill_dir(
     }
 
     // If the destination doesn't exist yet, do a fresh install.
-    if !dest_dir.exists() {
+    if !slot_taken(dest_dir) {
         create_managed_dir_all(dest_dir, project_root)?;
         copy_dir_recursive(source_dir, dest_dir)?;
         mark_generated_skill_directory(dest_dir)?;
@@ -575,7 +579,7 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
             //   distinct origins coexist and we never clobber a
             //   user-managed directory.
             let unique_name = name_counts.get(skill_name).copied().unwrap_or(0) == 1;
-            let plain_available = !plain_dir.exists() || has_symposium_marker(&plain_dir);
+            let plain_available = !slot_taken(&plain_dir) || is_managed_skill_dir(&plain_dir);
             let dir_name = if unique_name && plain_available {
                 skill_name.clone()
             } else {
@@ -584,7 +588,7 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
             let dest_dir = agent.project_skill_dir(&project_root, &dir_name);
 
             // If the dest exists but is user-managed, skip it.
-            if dest_dir.exists() && !has_symposium_marker(&dest_dir) {
+            if slot_taken(&dest_dir) && !is_managed_skill_dir(&dest_dir) {
                 tracing::info!(
                     report = %crate::report::ReportEvent::Warning {
                         message: format!(
@@ -644,14 +648,8 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
             continue;
         };
         for entry in entries.flatten() {
-            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
-                continue;
-            }
             let path = entry.path();
-            if installed.contains(&path) {
-                continue;
-            }
-            if !has_symposium_marker(&path) {
+            if installed.contains(&path) || !is_managed_skill_dir(&path) {
                 continue;
             }
             match fs::remove_dir_all(&path) {
