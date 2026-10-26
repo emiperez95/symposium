@@ -62,9 +62,7 @@ pub struct LoadedWorkspace {
     pub root: PathBuf,
     /// Direct dependencies of all workspace members.
     pub crates: Vec<WorkspaceCrate>,
-    /// Manifest directories of the workspace's member packages. Backs
-    /// workspace-plugin discovery (a member directory may define a plugin).
-    pub members: Vec<PathBuf>,
+    pub member_crates: Vec<WorkspaceCrate>,
 }
 
 /// On-disk cache format. Adding a field is a compatible cache bump: an old
@@ -74,7 +72,7 @@ struct DiskCache {
     lock_mtime: u64,
     root: PathBuf,
     crates: Vec<WorkspaceCrate>,
-    members: Vec<PathBuf>,
+    member_crates: Vec<WorkspaceCrate>,
 }
 
 /// Lazy, cached workspace dependency resolver.
@@ -110,7 +108,7 @@ impl WorkspaceDeps {
         let _ = cached.set(Some(Arc::new(LoadedWorkspace {
             root: root.clone(),
             crates,
-            members: Vec::new(),
+            member_crates: Vec::new(),
         })));
         Arc::new(Self {
             cwd: root,
@@ -153,6 +151,13 @@ impl WorkspaceDeps {
     pub fn crates(&self) -> &[WorkspaceCrate] {
         match self.load() {
             Some(w) => &w.crates,
+            None => &[],
+        }
+    }
+
+    pub fn member_crates(&self) -> &[WorkspaceCrate] {
+        match self.load() {
+            Some(w) => &w.member_crates,
             None => &[],
         }
     }
@@ -205,7 +210,7 @@ fn try_disk_cache(ws_cache_dir: &Path) -> Option<LoadedWorkspace> {
     Some(LoadedWorkspace {
         root: cached.root,
         crates: cached.crates,
-        members: cached.members,
+        member_crates: cached.member_crates,
     })
 }
 
@@ -219,7 +224,7 @@ fn write_disk_cache(ws_cache_dir: &Path, loaded: &LoadedWorkspace) {
         lock_mtime: mtime,
         root: loaded.root.clone(),
         crates: loaded.crates.clone(),
-        members: loaded.members.clone(),
+        member_crates: loaded.member_crates.clone(),
     };
 
     let _ = fs::create_dir_all(ws_cache_dir);
@@ -337,18 +342,21 @@ fn load_workspace(cwd: &Path, cargo_path: Option<&Path>) -> Option<LoadedWorkspa
     crates.sort_by(|a, b| a.name.cmp(&b.name));
     crates.dedup_by(|a, b| a.name == b.name);
 
-    let mut members: Vec<PathBuf> = metadata
+    let mut member_crates: Vec<WorkspaceCrate> = metadata
         .packages
         .iter()
         .filter(|p| ws_members.contains(&p.id))
-        .filter_map(|p| p.manifest_path.parent().map(|dir| dir.into()))
+        .filter_map(|p| {
+            let version = semver::Version::parse(&p.version.to_string()).ok()?;
+            let dir = p.manifest_path.parent()?.into();
+            Some(WorkspaceCrate::new(p.name.to_string(), version, Some(dir)))
+        })
         .collect();
-    members.sort();
-    members.dedup();
+    member_crates.sort_by(|a, b| a.path.cmp(&b.path));
 
     Some(LoadedWorkspace {
         root,
         crates,
-        members,
+        member_crates,
     })
 }
