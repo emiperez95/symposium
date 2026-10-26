@@ -93,6 +93,12 @@ async fn use_records_workspace_entry_and_installs() {
 
             ctx.symposium(&["use", "crate-a"]).await?;
             assert_eq!(config, read_config(&ctx), "re-using must not duplicate");
+            ctx.symposium(&["use", "crate_a"]).await?;
+            assert_eq!(
+                config,
+                read_config(&ctx),
+                "another spelling must not duplicate"
+            );
             Ok(())
         },
     )
@@ -114,6 +120,12 @@ async fn use_global_records_unscoped_entry() {
             assert!(
                 config.contains(r#"use = ["crate-a"]"#),
                 "global entry is a plain string: {config}"
+            );
+            ctx.symposium(&["use", "--global", "crate_a"]).await?;
+            assert_eq!(
+                config,
+                read_config(&ctx),
+                "another spelling must not duplicate"
             );
             Ok(())
         },

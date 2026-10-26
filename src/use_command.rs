@@ -82,7 +82,11 @@ pub async fn use_plugin(
         None => unreachable!("checked above"),
     };
 
-    if sym.config.plugins.used.contains(&entry) {
+    let already_enabled = sym.config.plugins.used.iter().any(|e| {
+        in_scope(e, global, workspace_root.as_deref())
+            && pms.identify(&registry.plugins, e.name()) == id
+    });
+    if already_enabled {
         tracing::info!(
             report = %ReportEvent::Info {
                 message: format!("`{name}` is already enabled; nothing changed"),
@@ -128,19 +132,8 @@ pub async fn remove_plugin(
     let used = &mut sym.config.plugins.used;
     let before = used.len();
     used.retain(|entry| {
-        if pms.identify(&registry.plugins, entry.name()) != id {
-            return true;
-        }
-        let in_scope = match entry {
-            UseEntry::Global(_) => global,
-            UseEntry::Workspace { .. } => {
-                !global
-                    && workspace_root
-                        .as_deref()
-                        .is_some_and(|root| entry.applies_in(root))
-            }
-        };
-        !in_scope
+        !in_scope(entry, global, workspace_root.as_deref())
+            || pms.identify(&registry.plugins, entry.name()) != id
     });
     if used.len() == before {
         let scope = if global { "--global" } else { "this workspace" };
@@ -158,6 +151,15 @@ pub async fn remove_plugin(
         crate::sync::sync(sym, &deps, update).await?;
     }
     Ok(())
+}
+
+fn in_scope(entry: &UseEntry, global: bool, workspace_root: Option<&Path>) -> bool {
+    match entry {
+        UseEntry::Global(_) => global,
+        UseEntry::Workspace { .. } => {
+            !global && workspace_root.is_some_and(|root| entry.applies_in(root))
+        }
+    }
 }
 
 /// Check that `name` resolves to something before recording it: a workspace
