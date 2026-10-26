@@ -721,11 +721,11 @@ impl Symposium {
 ///
 /// Resolution: SYMPOSIUM_HOME/logs → XDG_STATE_HOME/symposium/logs → config_dir/logs.
 fn resolve_logs_dir(config_dir: &Path) -> PathBuf {
-    if let Ok(home) = env::var("SYMPOSIUM_HOME") {
-        return PathBuf::from(home).join("logs");
+    if let Some(home) = crate::dirs::env_dir("SYMPOSIUM_HOME") {
+        return home.join("logs");
     }
-    if let Ok(xdg) = env::var("XDG_STATE_HOME") {
-        return PathBuf::from(xdg).join("symposium").join("logs");
+    if let Some(xdg) = crate::dirs::xdg_dir("XDG_STATE_HOME") {
+        return xdg.join("symposium").join("logs");
     }
     config_dir.join("logs")
 }

@@ -3170,3 +3170,48 @@ async fn sync_installs_skills_from_a_symlinked_group_directory() {
     .await
     .unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn empty_env_dirs_are_ignored() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let config_dir = home.join(".symposium");
+    let cwd = tmp.path().join("cwd");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::create_dir_all(&cwd).unwrap();
+    std::fs::write(
+        config_dir.join("config.toml"),
+        "auto-update = \"off\"\n\n[defaults]\nsymposium-recommendations = false\n",
+    )
+    .unwrap();
+
+    let cases: &[&[(&str, &str)]] = &[
+        &[("XDG_CONFIG_HOME", "")],
+        &[("XDG_CACHE_HOME", ""), ("XDG_STATE_HOME", "")],
+        &[("XDG_CONFIG_HOME", "relative")],
+        &[("SYMPOSIUM_HOME", "")],
+    ];
+    for vars in cases {
+        let _ = std::fs::remove_file(config_dir.join("state.toml"));
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_cargo-agents"))
+            .args(["telemetry", "status"])
+            .current_dir(&cwd)
+            .env("HOME", &home)
+            .env_remove("SYMPOSIUM_HOME")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_CACHE_HOME")
+            .env_remove("XDG_STATE_HOME")
+            .envs(vars.iter().copied())
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "{vars:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(std::fs::read_dir(&cwd).unwrap().count(), 0, "{vars:?}");
+        assert!(config_dir.join("state.toml").exists(), "{vars:?}");
+    }
+}

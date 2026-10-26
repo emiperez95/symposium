@@ -2,7 +2,7 @@
 
 ## Directory resolution
 
-User-wide paths are resolved using the [`directories`](https://crates.io/crates/directories) crate, which handles XDG Base Directory conventions automatically. If XDG environment variables are set, they are respected; otherwise paths fall back to `~/.symposium/`.
+User-wide paths are resolved from environment variables in `dirs.rs` (config and cache) and `config.rs` (`resolve_logs_dir`): `SYMPOSIUM_HOME` first, then the matching `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` or `XDG_STATE_HOME`, then the default (`~/.symposium/`, with `cache/` and `logs/` under the config directory). An empty variable counts as unset (`dirs::env_dir`), and a relative `XDG_*` value is ignored as the XDG Base Directory spec asks (`dirs::xdg_dir`), so neither resolves against the current directory.
 
 See the [configuration reference](../reference/configuration.md#directory-resolution) for the full resolution table.
 
