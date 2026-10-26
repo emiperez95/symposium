@@ -223,8 +223,8 @@ fn dir_contents_differ(source_dir: &Path, dest_dir: &Path) -> Result<bool> {
 ///    — if so, skips entirely.
 /// 2. Compares source and dest content — if identical, touches the marker
 ///    to reset the debounce window and returns without modifying content.
-/// 3. Otherwise removes `dest_dir`, re-creates it with the source content,
-///    and writes the marker + gitignore.
+/// 3. Otherwise builds a complete, marked copy beside `dest_dir` and swaps it
+///    in, so a failed copy leaves the slot as it was.
 ///
 /// Returns `Ok(true)` if the destination was created or updated (callers
 /// record it as installed). Returns `Ok(false)` if skipped (no-op).
@@ -240,9 +240,7 @@ fn sync_skill_dir(
 
     // If the destination doesn't exist yet, do a fresh install.
     if !slot_taken(dest_dir) {
-        create_managed_dir_all(dest_dir, project_root)?;
-        copy_dir_recursive(source_dir, dest_dir)?;
-        mark_generated_skill_directory(dest_dir)?;
+        install_skill_dir(source_dir, dest_dir, project_root)?;
         return Ok(true);
     }
 
@@ -266,11 +264,34 @@ fn sync_skill_dir(
     }
 
     // Content changed: replace entirely.
-    fs::remove_dir_all(dest_dir).with_context(|| format!("remove {}", dest_dir.display()))?;
-    create_managed_dir_all(dest_dir, project_root)?;
-    copy_dir_recursive(source_dir, dest_dir)?;
-    mark_generated_skill_directory(dest_dir)?;
+    install_skill_dir(source_dir, dest_dir, project_root)?;
     Ok(true)
+}
+
+fn install_skill_dir(source_dir: &Path, dest_dir: &Path, project_root: &Path) -> Result<()> {
+    let parent = dest_dir.parent().expect("skill dir must have parent");
+    let name = dest_dir.file_name().expect("skill dir must have a name");
+    let staging = parent.join(format!(".symposium-tmp-{}", name.to_string_lossy()));
+    create_managed_dir_all(parent, project_root)?;
+    if slot_taken(&staging) {
+        fs::remove_dir_all(&staging).with_context(|| format!("remove {}", staging.display()))?;
+    }
+    if let Err(e) = stage_skill_dir(source_dir, &staging) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(e);
+    }
+    if slot_taken(dest_dir) {
+        fs::remove_dir_all(dest_dir).with_context(|| format!("remove {}", dest_dir.display()))?;
+    }
+    fs::rename(&staging, dest_dir)
+        .with_context(|| format!("rename {} -> {}", staging.display(), dest_dir.display()))
+}
+
+fn stage_skill_dir(source_dir: &Path, staging: &Path) -> Result<()> {
+    fs::create_dir(staging).with_context(|| format!("create {}", staging.display()))?;
+    mark_generated_skill_directory(staging)?;
+    copy_dir_recursive(source_dir, staging)?;
+    mark_generated_skill_directory(staging)
 }
 
 /// Update the marker file's mtime to now without changing content.
@@ -976,5 +997,32 @@ mod tests {
         mark_generated_skill_directory(&dst).unwrap();
 
         assert!(!dir_contents_differ(&src, &dst).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_install_leaves_the_slot_free() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("SKILL.md"), "skill").unwrap();
+        let notes = src.join("notes.txt");
+        fs::write(&notes, "notes").unwrap();
+        fs::set_permissions(&notes, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read(&notes).is_ok() {
+            return;
+        }
+        let skills = tmp.path().join("skills");
+        let dst = skills.join("alpha");
+
+        assert!(sync_skill_dir(&src, &dst, tmp.path(), Duration::ZERO).is_err());
+        assert_eq!(fs::read_dir(&skills).unwrap().count(), 0);
+
+        fs::set_permissions(&notes, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(sync_skill_dir(&src, &dst, tmp.path(), Duration::ZERO).unwrap());
+        assert!(dst.join(MARKER_FILE).exists());
+        assert_eq!(fs::read_to_string(dst.join("notes.txt")).unwrap(), "notes");
     }
 }
