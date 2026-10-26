@@ -152,11 +152,12 @@ fn check_source(file: &str, source: &str) -> Vec<CheckError> {
     let mut scan = Scan {
         file,
         tests: 0,
+        disguised_test: false,
         errors: Vec::new(),
     };
     scan.inert_attributes(&parsed.attrs);
     scan.items(&parsed.items, true);
-    if scan.tests != 1 {
+    if scan.tests != 1 && !scan.disguised_test {
         scan.errors.push(CheckError::TestCount {
             file: file.to_owned(),
             count: scan.tests,
@@ -231,6 +232,9 @@ struct TestMarkers {
 struct Scan<'a> {
     file: &'a str,
     tests: usize,
+    /// A function carries a rejected attribute, such as `#[tokio::test]`, so it may be a
+    /// test the scan cannot recognize and the count would mislead.
+    disguised_test: bool,
     errors: Vec<CheckError>,
 }
 
@@ -296,7 +300,10 @@ impl Scan<'_> {
                 }
                 AttributeKind::Ignore => markers.ignored = true,
                 AttributeKind::ShouldPanic | AttributeKind::Inert => {}
-                kind => self.reject(kind),
+                kind => {
+                    self.disguised_test = true;
+                    self.reject(kind);
+                }
             }
         }
         markers
@@ -476,6 +483,16 @@ mod tests {
         assert_eq!(
             messages("#[test] fn first() {}\n#[test] fn second() {}\n"),
             ["`checks/demo.rs` holds 2 top-level tests; it must hold exactly one"]
+        );
+    }
+
+    #[test]
+    fn a_disguised_test_is_not_also_miscounted() {
+        assert_eq!(
+            messages("#[tokio::test] async fn works() {}"),
+            [
+                "`checks/demo.rs` uses `#[tokio::test]`; only built-in attributes that cannot change the tests are allowed"
+            ]
         );
     }
 

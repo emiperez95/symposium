@@ -96,18 +96,10 @@ pub(crate) enum DirProblem {
 pub(crate) enum TaskError {
     #[error(transparent)]
     Entry(#[from] EntryError),
-    #[error("cannot read `{}`", .path.display())]
-    Read {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-    #[error("invalid `{}`", .path.display())]
-    Parse {
-        path: PathBuf,
-        #[source]
-        source: toml::de::Error,
-    },
+    #[error("cannot read `task.toml`")]
+    Read(#[source] io::Error),
+    #[error("invalid `task.toml`")]
+    Parse(#[source] toml::de::Error),
     #[error("cannot inspect `{}`", .path.display())]
     Inspect {
         path: PathBuf,
@@ -152,13 +144,9 @@ impl Task {
     /// Reading and parsing `task.toml` stop at the first error; every other rule reports
     /// all of its problems.
     pub(crate) fn load(evals: &Evals, name: &TaskName) -> Result<Self, TaskErrors> {
-        let path = evals.task_dir(name).join("task.toml");
-        let text = fs::read_to_string(&path).map_err(|source| TaskError::Read {
-            path: path.clone(),
-            source,
-        })?;
-        let raw: RawTask =
-            toml::from_str(&text).map_err(|source| TaskError::Parse { path, source })?;
+        let text =
+            fs::read_to_string(evals.task_dir(name).join("task.toml")).map_err(TaskError::Read)?;
+        let raw: RawTask = toml::from_str(&text).map_err(TaskError::Parse)?;
         Self::validate(evals, name, raw)
     }
 
@@ -517,7 +505,7 @@ mod tests {
             let errors = load_demo(&evals).unwrap_err();
 
             assert!(
-                matches!(errors.as_slice(), [TaskError::Parse { .. }]),
+                matches!(errors.as_slice(), [TaskError::Parse(_)]),
                 "{task_toml}"
             );
         }
@@ -643,7 +631,7 @@ mod tests {
         let errors = load_demo(&Evals::new(root.path())).unwrap_err();
 
         assert!(
-            matches!(errors.as_slice(), [TaskError::Read { .. }]),
+            matches!(errors.as_slice(), [TaskError::Read(_)]),
             "{errors}"
         );
     }
