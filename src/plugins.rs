@@ -312,9 +312,9 @@ pub struct Plugin {
     /// real package identity, so this is a placeholder id tagged with the source
     /// name (registry) or `"local"` (workspace).
     ///
-    /// Used only to key chained-plugin cycle/diamond detection on the normalized
-    /// crate name (see `skills::expand_chained_plugins`). It does *not* affect
-    /// skill identity — that is the `SKILL.md` path hash.
+    /// Keys chained-plugin cycle/diamond detection on its package identity
+    /// ([`PmRegistry::identity`](crate::pm::PmRegistry::identity)). It does
+    /// *not* affect skill identity, which is the `SKILL.md` path hash.
     ///
     /// FIXME: the registry/workspace placeholder `pm` tags (`"user-plugins"`,
     /// `"local"`, …) should become real `path` PM ids once that PM lands.
@@ -1176,24 +1176,13 @@ pub async fn active_plugins(
     // enqueue its own chained references.
     while let Some(id) = worklist.pop() {
         for plugin in pms.load_plugin(&id, update).await {
-            if visited.insert(plugin_key(&plugin.canonical)) {
+            if visited.insert(pms.identity(&plugin.canonical)) {
                 record_active(plugin, ctx, &mut active, &mut worklist);
             }
         }
     }
 
     active
-}
-
-/// The dedup key for a loaded crate plugin: its ecosystem plus normalized name,
-/// so hyphen/underscore spellings collapse but a registry plugin and a crate of
-/// the same name stay distinct.
-fn plugin_key(id: &crate::pm::PackageId) -> String {
-    format!(
-        "{}/{}",
-        id.pm,
-        crate::crate_sources::normalize_crate_name(&id.name)
-    )
 }
 
 /// Gate `plugin` and, if it passes, record it into `active` and enqueue its
