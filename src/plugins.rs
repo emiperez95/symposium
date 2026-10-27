@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use clap::CommandFactory;
 use serde::Serialize;
 
 use crate::config::Symposium;
@@ -1792,17 +1793,16 @@ fn validate_manifest(
     })
 }
 
-/// Names a plugin subcommand cannot use because they collide with built-in
-/// `cargo agents` commands.
-const RESERVED_SUBCOMMAND_NAMES: &[&str] = &[
-    "init",
-    "sync",
-    "hook",
-    "plugin",
-    "crate-info",
-    "self-update",
-    "help",
-];
+/// Whether `name` collides with a built-in `cargo agents` command. Clap
+/// matches built-ins before falling back to `External`, so a plugin
+/// subcommand with one of these names could never run.
+///
+/// The names come from the clap definition so new commands are covered
+/// automatically. `help` is added by hand: clap's help subcommand is
+/// disabled and `help_render` handles the bare word itself.
+fn is_reserved_subcommand_name(name: &str) -> bool {
+    name == "help" || crate::cli::Cli::command().find_subcommand(name).is_some()
+}
 
 /// Maximum length (bytes) of a subcommand's `description` field.
 const MAX_SUBCOMMAND_DESCRIPTION_LEN: usize = 1024;
@@ -1812,7 +1812,7 @@ fn validate_subcommand_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("subcommand name is empty");
     }
-    if RESERVED_SUBCOMMAND_NAMES.contains(&name) {
+    if is_reserved_subcommand_name(name) {
         bail!("subcommand `{name}` shadows a built-in `cargo agents` command");
     }
     if !name
@@ -4464,6 +4464,58 @@ mod tests {
         let err = from_str(toml).expect_err("expected error");
         let msg = format!("{err:#}");
         assert!(msg.contains("shadows") && msg.contains("init"), "{msg}");
+    }
+
+    fn manifest_with_subcommand(name: &str) -> String {
+        format!(
+            r#"
+            name = "p"
+            depends-on = ["*"]
+
+            [[installations]]
+            name = "tool"
+            source = "cargo"
+            crate = "example-tool"
+
+            [subcommand.{name}]
+            description = "Run {name}"
+            command = "tool"
+            "#
+        )
+    }
+
+    #[test]
+    fn parse_subcommand_rejects_every_builtin_name() {
+        // Same list as md/reference/plugin-definition.md.
+        let builtins = [
+            "init",
+            "sync",
+            "search",
+            "use",
+            "status",
+            "hook",
+            "plugin",
+            "self-update",
+            "crate-info",
+            "telemetry",
+            "help",
+        ];
+
+        for name in builtins {
+            let err = from_str(&manifest_with_subcommand(name))
+                .expect_err(&format!("`{name}` should be rejected"));
+            let msg = format!("{err:#}");
+            assert!(msg.contains("shadows") && msg.contains(name), "{msg}");
+        }
+    }
+
+    #[test]
+    fn parse_subcommand_accepts_name_close_to_builtin() {
+        for name in ["searcher", "status-report", "init_db"] {
+            let plugin = from_str(&manifest_with_subcommand(name))
+                .unwrap_or_else(|e| panic!("`{name}` should be accepted: {e:#}"));
+            assert!(plugin.subcommands.contains_key(name));
+        }
     }
 
     #[test]
