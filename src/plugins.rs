@@ -1171,7 +1171,7 @@ pub async fn active_plugins(
             .iter()
             .map(|p| crate::crate_sources::normalize_crate_name(&p.manifest.name))
             .collect();
-        for name in crate::discovery::enabled_dependencies(sym, ctx.deps, root) {
+        for name in crate::discovery::enabled_dependencies(sym, pms, ctx.deps, root) {
             if !registry_names.contains(&crate::crate_sources::normalize_crate_name(&name)) {
                 worklist.push(crate::pm::CargoPm::id_for(&name, None));
             }

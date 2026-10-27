@@ -142,7 +142,7 @@ pub async fn workspace_status(
                 .map(|d| pms.identity(&d.id)),
         )
         .collect();
-    for name in crate::discovery::enabled_dependencies(sym, &dep_ids, &ws.root) {
+    for name in crate::discovery::enabled_dependencies(sym, &pms, &dep_ids, &ws.root) {
         let id = pms.identify(&registry.plugins, &name);
         if shown.contains(&id) {
             continue;

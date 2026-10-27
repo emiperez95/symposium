@@ -32,21 +32,26 @@ pub async fn use_plugin(
     global: bool,
     update: UpdateLevel,
 ) -> Result<()> {
+    let deps = sym.workspace_deps(cwd);
+    let pms = sym.package_managers(&deps);
+    let registry = crate::plugins::load_registry(sym).await;
+    let id = pms.identify(&registry.plugins, name);
+
     // `disable` outranks every way of enabling a plugin, `use` included, so
     // recording an entry here would report success and then install nothing.
     // Re-enabling is dropping the `disable` entry, which is a deliberate edit
     // rather than something `use` undoes on the user's behalf.
-    if sym.config.plugins.is_disabled(name) {
+    if sym
+        .config
+        .plugins
+        .is_disabled(&pms, &PackageId::any_version(&id.pm, name))
+    {
         bail!("`{name}` is disabled in `[plugins] disable`; remove that entry to enable it again");
     }
 
     // A configured registry is a trust root: what it offers is already
     // enabled by configuration, so there is nothing to record. The exception
     // is a dormant plugin, for which `use` is exactly the wake-up call.
-    let deps = sym.workspace_deps(cwd);
-    let pms = sym.package_managers(&deps);
-    let registry = crate::plugins::load_registry(sym).await;
-    let id = pms.identify(&registry.plugins, name);
     let registry_plugin = registry
         .plugins
         .iter()

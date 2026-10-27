@@ -33,6 +33,7 @@
 //! [`pm::workspace_dep_ids`]: crate::pm::workspace_dep_ids
 //! [`PackageManager::active_plugins`]: crate::pm::PackageManager::active_plugins
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::pm::WorkspaceDeps;
@@ -40,9 +41,8 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 
 use crate::config::Symposium;
-use crate::crate_sources::normalize_crate_name;
 use crate::output::Output;
-use crate::pm::{CARGO_PM, PackageId};
+use crate::pm::{CARGO_PM, CargoPm, PackageId, PmRegistry};
 use crate::report::ReportEvent;
 
 /// Why a discovered offer is (or is not) enabled.
@@ -131,7 +131,7 @@ pub async fn discover(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Discovery {
         for plugin in inst.active_plugins(&dep_ids).await {
             let name = plugin.canonical.name.clone();
             let description = Some(describe_plugin(&plugin.manifest));
-            let enablement = decide(sym, &name, &workspace_root);
+            let enablement = decide(sym, &pms, &plugin.canonical, &workspace_root);
             let discovered = DiscoveredPlugin {
                 registry: inst.name.clone(),
                 id: plugin.canonical,
@@ -166,28 +166,25 @@ pub async fn discover(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Discovery {
 /// works.
 pub fn enabled_dependencies(
     sym: &Symposium,
+    pms: &PmRegistry,
     dep_ids: &[PackageId],
     workspace_root: &Path,
 ) -> Vec<String> {
     let plugins = &sym.config.plugins;
-    let mut names: Vec<String> = dep_ids
-        .iter()
-        .filter(|id| id.pm == CARGO_PM)
-        .filter(|id| !plugins.is_disabled(&id.name))
-        .filter(|id| {
-            plugins.is_auto_enabled(&id.name) || plugins.is_used_in(&id.name, workspace_root)
-        })
-        .map(|id| id.name.clone())
-        .collect();
+    let mut names = Vec::new();
+    let mut known = HashSet::new();
+    for id in dep_ids.iter().filter(|id| id.pm == CARGO_PM) {
+        known.insert(pms.identity(id));
+        if !plugins.is_disabled(pms, id)
+            && (plugins.is_auto_enabled(pms, id) || plugins.is_used_in(pms, id, workspace_root))
+        {
+            names.push(id.name.clone());
+        }
+    }
 
     for used in plugins.used_names_in(workspace_root) {
-        let norm = normalize_crate_name(used);
-        let known = plugins.is_disabled(used)
-            || names.iter().any(|n| normalize_crate_name(n) == norm)
-            || dep_ids
-                .iter()
-                .any(|id| normalize_crate_name(&id.name) == norm);
-        if !known {
+        let id = CargoPm::id_for(used, None);
+        if !plugins.is_disabled(pms, &id) && known.insert(pms.identity(&id)) {
             names.push(used.to_string());
         }
     }
@@ -225,14 +222,15 @@ pub fn apply_consent(sym: &mut Symposium, approved: &[String], declined: &[Strin
     if approved.is_empty() && declined.is_empty() {
         return Ok(());
     }
+    let pms = sym.detached_managers();
     let plugins = &mut sym.config.plugins;
     for name in approved {
-        if !plugins.is_auto_enabled(name) {
+        if !plugins.is_auto_enabled(&pms, &CargoPm::id_for(name, None)) {
             plugins.auto_enable.push(name.clone());
         }
     }
     for name in declined {
-        if !plugins.is_disabled(name) {
+        if !plugins.is_disabled(&pms, &CargoPm::id_for(name, None)) {
             plugins.disable.push(name.clone());
         }
     }
@@ -339,18 +337,18 @@ fn count_phrase(n: usize, singular: &str, plural: &str) -> Option<String> {
 /// Classify one offer against the `[plugins]` config. An explicit decision —
 /// `use`, then `disable` — outranks the standing `auto-enable`, so a name the
 /// user declined stays declined.
-fn decide(sym: &Symposium, name: &str, workspace_root: &Path) -> Enablement {
+fn decide(sym: &Symposium, pms: &PmRegistry, id: &PackageId, workspace_root: &Path) -> Enablement {
     let plugins = &sym.config.plugins;
     // `disable` is tested first because it is the last word: every other
     // entry says a plugin *may* run, and this is the only one that says it
     // may not. Activation agrees (see `record_active`), so classifying a
     // disabled plugin as `Used` here would report it active while it stays
     // off.
-    if plugins.is_disabled(name) {
+    if plugins.is_disabled(pms, id) {
         Enablement::Declined
-    } else if plugins.is_used_in(name, workspace_root) {
+    } else if plugins.is_used_in(pms, id, workspace_root) {
         Enablement::Used
-    } else if plugins.is_auto_enabled(name) {
+    } else if plugins.is_auto_enabled(pms, id) {
         Enablement::AutoEnabled
     } else {
         Enablement::Candidate
@@ -508,7 +506,7 @@ mod tests {
         ];
 
         assert_eq!(
-            enabled_dependencies(&sym, &deps, tmp.path()),
+            enabled_dependencies(&sym, &sym.detached_managers(), &deps, tmp.path()),
             vec!["serde".to_string(), "tokio".to_string()]
         );
     }
@@ -530,7 +528,7 @@ mod tests {
         // Only `anyhow` is an actual dependency; the rest are not.
         let deps = [PackageId::new(CARGO_PM, "anyhow", "1.0.0")];
 
-        let enabled = enabled_dependencies(&sym, &deps, tmp.path());
+        let enabled = enabled_dependencies(&sym, &sym.detached_managers(), &deps, tmp.path());
         // The `use`d non-dependency crate is enabled; the workspace-scoped one
         // (for /elsewhere) and the auto-enabled non-dependency are not.
         assert_eq!(enabled, vec!["my-skills-crate".to_string()]);
@@ -549,7 +547,7 @@ mod tests {
         );
         let deps = [PackageId::new(CARGO_PM, "serde", "1.0.210")];
         assert_eq!(
-            enabled_dependencies(&sym, &deps, tmp.path()),
+            enabled_dependencies(&sym, &sym.detached_managers(), &deps, tmp.path()),
             vec!["serde".to_string()]
         );
     }
