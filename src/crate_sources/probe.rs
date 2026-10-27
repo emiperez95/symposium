@@ -329,6 +329,25 @@ mod tests {
     }
 
     #[test]
+    fn cached_lookup_does_not_substitute_another_registry() {
+        let cargo_home = tempfile::tempdir().unwrap();
+        let public = extracted_source(cargo_home.path(), "foo-1.0.0");
+        let private = cargo_home
+            .path()
+            .join("registry/src/private.example-0123456789abcdef/foo-1.9.0");
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::write(private.join(".cargo-ok"), "").unwrap();
+
+        // The normal probe requests crates.io; an unrelated registry's cache
+        // must not change what the same request resolves to during hooks.
+        let found = find_cached("foo", "^1.0", cargo_home.path()).unwrap();
+        assert_eq!(
+            found.path, public,
+            "cached lookup crossed registry identities"
+        );
+    }
+
+    #[test]
     fn find_cached_picks_the_highest_extracted_match() {
         let cargo_home = tempfile::tempdir().unwrap();
         extracted_source(cargo_home.path(), "foo-1.2.0");
