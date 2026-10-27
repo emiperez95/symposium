@@ -5,6 +5,61 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use symposium_testlib::{TestMode, with_fixture};
 
+/// A desired skill remains installed when refreshing its source fails.
+/// In particular, stale cleanup must not mistake a failed update for removal.
+#[cfg(unix)]
+#[tokio::test]
+async fn sync_preserves_installed_skill_after_failed_update() {
+    use std::os::unix::fs::PermissionsExt;
+
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plugins0", "workspace0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            ctx.symposium(&["sync"]).await?;
+            ctx.sym.config.sync_debounce_secs = 0;
+
+            let root = ctx.workspace_root.clone().unwrap();
+            let installed = find_installed_skill(&root.join(".claude/skills"), "serde-guidance");
+            let old_content = std::fs::read(installed.join("SKILL.md"))?;
+            assert!(installed.join(".symposium").exists());
+
+            // Adding a file forces a refresh. Making it unreadable lets source
+            // discovery succeed but prevents the installer copying the tree.
+            let notes = ctx.sym.config_dir().join("plugins/my-skill/notes.txt");
+            std::fs::write(&notes, "new source content")?;
+            std::fs::set_permissions(&notes, std::fs::Permissions::from_mode(0o000))?;
+            if std::fs::read(&notes).is_ok() {
+                // Privileged users can bypass permission bits.
+                std::fs::set_permissions(&notes, std::fs::Permissions::from_mode(0o644))?;
+                return Ok(());
+            }
+
+            let result = ctx.sync_with_report(tracing::Level::INFO).await;
+            std::fs::set_permissions(&notes, std::fs::Permissions::from_mode(0o644))?;
+            let reports = result?;
+            assert!(
+                reports.iter().any(|r| r["message"].as_str().is_some_and(
+                    |message| message.contains("failed to install skill serde-guidance")
+                )),
+                "the update must actually fail: {reports:?}"
+            );
+
+            assert_eq!(
+                std::fs::read(installed.join("SKILL.md")).expect(
+                    "cleanup must preserve the previous installation after an update fails"
+                ),
+                old_content
+            );
+            assert!(installed.join(".symposium").exists());
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// Read the user config file from the test context.
 fn read_user_config(ctx: &symposium_testlib::TestContext) -> String {
     let path = ctx.sym.config_dir().join("config.toml");
