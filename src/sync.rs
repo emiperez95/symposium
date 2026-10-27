@@ -483,8 +483,9 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
         );
     }
 
-    // Track every skill directory we (re)install during this sync. Anything
-    // we find later that has the marker file but isn't in this set is stale.
+    // Track every skill directory this sync wants, even one whose refresh
+    // failed. Anything we find later that has the marker file but isn't in
+    // this set is stale.
     let mut installed_dirs: BTreeSet<PathBuf> = BTreeSet::new();
     let skip_cleanup = !registry.unreadable_registries.is_empty();
 
@@ -621,9 +622,9 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
                 continue;
             }
 
+            installed_dirs.insert(dest_dir.clone());
             match sync_skill_dir(source_dir, &dest_dir, &project_root, debounce) {
                 Ok(true) => {
-                    installed_dirs.insert(dest_dir.clone());
                     tracing::info!(
                         report = %crate::report::ReportEvent::SkillInstalled {
                             skill: dir_name.clone(),
@@ -632,11 +633,7 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
                         },
                     );
                 }
-                Ok(false) => {
-                    // Debounced or unchanged — still record as installed
-                    // so stale-cleanup doesn't remove it.
-                    installed_dirs.insert(dest_dir.clone());
-                }
+                Ok(false) => {}
                 Err(e) => {
                     tracing::info!(
                         report = %crate::report::ReportEvent::Warning {
