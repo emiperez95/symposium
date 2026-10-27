@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use symposium::config::UseEntry;
 use symposium::output::Output;
 use symposium::status_command::StatusState;
 use symposium_testlib::{HookStep, TestContext, TestMode, with_fixture};
@@ -198,6 +199,80 @@ async fn use_matches_registry_plugin_names_exactly() {
                 "{err}"
             );
             assert!(!read_config(&ctx).contains("gateless_plugin"));
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// A crate name matches the way cargo matches it, so `crate_a` names the
+/// dependency `crate-a` in `auto-enable`, `use` and `disable` alike.
+#[tokio::test]
+async fn plugins_entries_match_crate_names_like_cargo() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["auto-enable0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let skills_dir = ctx.workspace_root.clone().unwrap().join(".claude/skills");
+            let installed = || !find_installed_skills(&skills_dir, "a-guidance").is_empty();
+
+            ctx.sym.config.plugins.auto_enable = vec!["crate_a".into()];
+            ctx.symposium(&["sync"]).await?;
+            assert!(installed(), "auto-enable");
+
+            ctx.sym.config.plugins.auto_enable.clear();
+            ctx.sym.config.plugins.used = vec![UseEntry::Global("crate_a".into())];
+            ctx.symposium(&["sync"]).await?;
+            assert!(installed(), "use");
+
+            ctx.sym.config.plugins.used.clear();
+            ctx.sym.config.plugins.auto_enable = vec!["*".into()];
+            ctx.sym.config.plugins.disable = vec!["crate_a".into()];
+            ctx.symposium(&["sync"]).await?;
+            assert!(!installed(), "disable");
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// A registry plugin's name matches exactly: `use = ["gateless_plugin"]`
+/// neither wakes the dormant `gateless-plugin` nor is taken for a crate, and
+/// `disable = ["gateless_plugin"]` does not block it. `auto-enable` is consent
+/// for dependencies, so it wakes no registry plugin whatever the spelling.
+#[tokio::test]
+async fn plugins_entries_match_registry_plugin_names_exactly() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["dormant-plugin0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let skills_dir = ctx.workspace_root.clone().unwrap().join(".claude/skills");
+            let woken = || !find_installed_skills(&skills_dir, "gateless-guidance").is_empty();
+
+            ctx.sym.config.plugins.auto_enable = vec!["gateless-plugin".into()];
+            ctx.sym.config.plugins.used = vec![UseEntry::Global("gateless_plugin".into())];
+            ctx.symposium(&["sync"]).await?;
+            assert!(!woken(), "auto-enable and a folded `use` spelling");
+
+            ctx.sym.config.plugins.auto_enable.clear();
+            ctx.sym.config.plugins.used.clear();
+            ctx.sym.config.plugins.disable = vec!["gateless_plugin".into()];
+            ctx.symposium(&["use", "gateless-plugin"]).await?;
+            assert!(woken(), "a folded `disable` spelling");
+
+            ctx.symposium(&["use", "--remove", "gateless-plugin"])
+                .await?;
+            ctx.sym.config.plugins.disable = vec!["gateless-plugin".into()];
+            let err = ctx
+                .symposium(&["use", "gateless-plugin"])
+                .await
+                .expect_err("the exact `disable` spelling blocks it");
+            assert!(err.to_string().contains("[plugins] disable"), "{err}");
+            assert!(!woken());
             Ok(())
         },
     )
