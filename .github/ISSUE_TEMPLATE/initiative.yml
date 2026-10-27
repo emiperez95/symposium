@@ -1,5 +1,6 @@
 name: Initiative
 description: A feature or effort tracked on the project board
+type: Feature
 projects: ["symposium-dev/6"]
 body:
   - type: textarea
@@ -9,6 +10,18 @@ body:
       description: One or two sentences a user would understand.
     validations:
       required: true
+  - type: textarea
+    id: definition
+    attributes:
+      label: Definition
+      description: |
+        What done means, as requirements and examples. Requirements say what the system MUST (or MUST NOT) do, one statement each, with a short name. Examples are concrete cases: a situation, an action and the expected result. Mark requirements provisional if an RFD will refine them.
+      value: |
+        **Requirements**
+        - `name`: ... MUST ...
+
+        **Examples**
+        - `name`: situation, action, expected result.
   - type: input
     id: zulip
     attributes:
@@ -28,3 +41,8 @@ body:
       description: Fill in as PRs open. Each PR says "Part of #<this issue>".
       value: |
         - [ ]
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: The roadmap this came from, dependencies on other initiatives, and open questions.
