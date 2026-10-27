@@ -15,6 +15,7 @@ use cargo_metadata::MetadataCommand;
 use super::{FetchResult, normalize_crate_name};
 
 const PROBE_PACKAGE: &str = "symposium-crate-probe";
+const CRATES_IO_SRC_PREFIX: &str = "index.crates.io-";
 
 /// Fetch a crate via a temporary dummy cargo package.
 ///
@@ -58,7 +59,14 @@ pub fn find_cached(crate_name: &str, version_req: &str, cargo_home: &Path) -> Re
     let indexes = std::fs::read_dir(&registry_src)
         .with_context(|| format!("failed to read `{}`", registry_src.display()))?;
     let (name, version, path) = indexes
-        .filter_map(|index| std::fs::read_dir(index.ok()?.path()).ok())
+        .filter_map(|index| index.ok())
+        .filter(|index| {
+            index
+                .file_name()
+                .to_string_lossy()
+                .starts_with(CRATES_IO_SRC_PREFIX)
+        })
+        .filter_map(|index| std::fs::read_dir(index.path()).ok())
         .flatten()
         .filter_map(|entry| {
             let entry = entry.ok()?;
