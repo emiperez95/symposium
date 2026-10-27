@@ -17,6 +17,10 @@ pub(crate) enum RunError {
         #[source]
         source: io::Error,
     },
+    #[error("`{}` is not a Rust sysroot: it has no `bin/cargo` and `lib/rustlib`", .0.display())]
+    NotToolchain(PathBuf),
+    #[error("`{}` lies inside `{}`", .inner.display(), .outer.display())]
+    Nested { inner: PathBuf, outer: PathBuf },
     #[error("cannot create `{}`", .path.display())]
     Create {
         path: PathBuf,
@@ -25,4 +29,6 @@ pub(crate) enum RunError {
     },
     #[error("cannot copy the task into the trial")]
     Copy(#[source] ImportError),
+    #[error("cannot write the `srt` policy")]
+    Policy(#[source] serde_json::Error),
 }

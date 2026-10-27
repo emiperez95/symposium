@@ -1,5 +1,5 @@
-//! Trials: the directories one agent session runs in (RFD reference, "Preparing a
-//! trial").
+//! Trials: the directories one agent session runs in, and the `srt` policy that confines
+//! it to them (RFD reference, "Preparing a trial" and "Isolation").
 //!
 //! Every batch lives under one evaluation root, outside the checkout, since `srt` denies
 //! the whole checkout to the agent:
@@ -13,15 +13,22 @@
 //!
 //! Invariant: a trial starts fresh. A batch or trial directory that already exists is an
 //! error, never reused, so no state from an earlier attempt reaches the agent. A trial
-//! whose setup failed keeps its directory as evidence, so its number is never retried.
+//! whose setup failed keeps its directory as evidence, so its number is never retried;
+//! `srt.json` is written last, and a trial without one never ran.
+//!
+//! Invariant: the policy denies the evaluation root the trial actually lives in. A
+//! [`Batch`] keeps its root both as given and canonical, and a [`Trial`] carries its
+//! batch, so the two cannot be paired wrongly.
 
 mod error;
+mod policy;
 
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(crate) use error::RunError;
+use policy::Policy;
 
 use crate::evals::Evals;
 use crate::grade::copy_tree;
@@ -40,6 +47,8 @@ pub(crate) enum Configuration {
 pub(crate) struct Batch {
     /// Canonical, so nesting checks compare real directories.
     eval_root: PathBuf,
+    /// The evaluation root as given, which `srt` matches separately when it is a link.
+    eval_root_as_given: PathBuf,
     root: PathBuf,
 }
 
@@ -77,6 +86,7 @@ impl Batch {
     /// created.
     pub(crate) fn create(eval_root: &Path, name: &BatchName) -> Result<Self, RunError> {
         let eval_root = absolute(eval_root)?;
+        let eval_root_as_given = eval_root.to_owned();
         fs::create_dir_all(eval_root).map_err(|source| RunError::Create {
             path: eval_root.to_owned(),
             source,
@@ -88,6 +98,7 @@ impl Batch {
         let batch = Self {
             root: eval_root.join(name.as_str()),
             eval_root,
+            eval_root_as_given,
         };
         create_private(&batch.root)?;
         create_dirs([batch.common_tools(), batch.symposium_tools()])?;
@@ -97,6 +108,15 @@ impl Batch {
     /// The canonical evaluation root, which holds other batches and their trials.
     pub(crate) fn eval_root(&self) -> &Path {
         &self.eval_root
+    }
+
+    /// Every name of the evaluation root: as given, then resolved when that differs.
+    pub(crate) fn eval_root_names(&self) -> Vec<PathBuf> {
+        let mut names = vec![self.eval_root_as_given.clone()];
+        if self.eval_root != self.eval_root_as_given {
+            names.push(self.eval_root.clone());
+        }
+        names
     }
 
     /// Clients every trial may run.
@@ -158,6 +178,10 @@ impl Batch {
 }
 
 impl Trial {
+    pub(crate) fn batch(&self) -> &Batch {
+        &self.batch
+    }
+
     pub(crate) fn root(&self) -> &Path {
         &self.root
     }
@@ -204,6 +228,22 @@ impl Trial {
     /// The task's plugins, offered to Symposium as its only registry.
     pub(crate) fn registry(&self) -> PathBuf {
         self.root.join("registry")
+    }
+
+    /// Where the trial's `srt` policy is written, and kept with its results.
+    pub(crate) fn policy_file(&self) -> PathBuf {
+        self.root.join("srt.json")
+    }
+
+    /// Writes `policy` to [`Self::policy_file`].
+    ///
+    /// # Errors
+    ///
+    /// When the file cannot be written.
+    pub(crate) fn write_policy(&self, policy: &Policy) -> Result<(), RunError> {
+        let text = serde_json::to_string_pretty(policy).map_err(RunError::Policy)?;
+        let path = self.policy_file();
+        fs::write(&path, text).map_err(|source| RunError::Create { path, source })
     }
 }
 
