@@ -270,28 +270,26 @@ fn sync_skill_dir(
 
 fn install_skill_dir(source_dir: &Path, dest_dir: &Path, project_root: &Path) -> Result<()> {
     let parent = dest_dir.parent().expect("skill dir must have parent");
-    let name = dest_dir.file_name().expect("skill dir must have a name");
-    let staging = parent.join(format!(".symposium-tmp-{}", name.to_string_lossy()));
     create_managed_dir_all(parent, project_root)?;
-    if slot_taken(&staging) {
-        fs::remove_dir_all(&staging).with_context(|| format!("remove {}", staging.display()))?;
-    }
-    if let Err(e) = stage_skill_dir(source_dir, &staging) {
-        let _ = fs::remove_dir_all(&staging);
-        return Err(e);
-    }
+    let mut staging = tempfile::Builder::new()
+        .prefix(".symposium-tmp-")
+        .tempdir_in(parent)
+        .with_context(|| format!("create staging dir in {}", parent.display()))?;
+    mark_generated_skill_directory(staging.path())?;
+    copy_dir_recursive(source_dir, staging.path())?;
+    mark_generated_skill_directory(staging.path())?;
     if slot_taken(dest_dir) {
         fs::remove_dir_all(dest_dir).with_context(|| format!("remove {}", dest_dir.display()))?;
     }
-    fs::rename(&staging, dest_dir)
-        .with_context(|| format!("rename {} -> {}", staging.display(), dest_dir.display()))
-}
-
-fn stage_skill_dir(source_dir: &Path, staging: &Path) -> Result<()> {
-    fs::create_dir(staging).with_context(|| format!("create {}", staging.display()))?;
-    mark_generated_skill_directory(staging)?;
-    copy_dir_recursive(source_dir, staging)?;
-    mark_generated_skill_directory(staging)
+    fs::rename(staging.path(), dest_dir).with_context(|| {
+        format!(
+            "rename {} -> {}",
+            staging.path().display(),
+            dest_dir.display()
+        )
+    })?;
+    staging.disable_cleanup(true);
+    Ok(())
 }
 
 /// Update the marker file's mtime to now without changing content.
