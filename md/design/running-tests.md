@@ -3,10 +3,19 @@
 ## Quick start
 
 ```bash
-cargo test              # simulation + configured agents
+cargo test                                        # simulation only
+SYMPOSIUM_ENABLE_AGENT_TESTING=1 cargo test       # simulation + configured agents
 ```
 
-By default, `cargo test` runs simulation tests and then re-runs agent-mode tests against each agent listed in `test-agents.toml`. On a fresh clone (no file), the defaults are `claude-sdk` and `kiro-cli-acp`.
+In PowerShell, set the variable first. It lasts for the rest of the session, so remove it to go back to simulation only:
+
+```powershell
+$env:SYMPOSIUM_ENABLE_AGENT_TESTING = "1"
+cargo test
+Remove-Item Env:SYMPOSIUM_ENABLE_AGENT_TESTING
+```
+
+Agent-mode tests run only when `SYMPOSIUM_ENABLE_AGENT_TESTING` is set. Without it, a `TestMode::AgentOnly` test runs nothing and still reports `ok`; with `--nocapture` it prints that no agent ran. When it is set, `cargo test` runs simulation tests and then re-runs agent-mode tests against each agent listed in `test-agents.toml`. On a fresh clone (no file), the default is `claude-sdk`.
 
 ## Configuring test agents
 
@@ -27,7 +36,7 @@ Available agent names:
 
 | Name | Backend | Notes |
 |------|---------|-------|
-| `claude-sdk` | Claude Agent SDK (Python) | Requires `uv` + `ANTHROPIC_API_KEY` |
+| `claude-sdk` | Claude Agent SDK (Python) | Requires `uv`, and `ANTHROPIC_API_KEY` or a logged-in `claude` |
 | `kiro-cli-acp` | Kiro CLI via ACP | Requires `kiro-cli` in PATH |
 | Any name from `acpr --list` | ACP registry via `acpr` | Auto-downloaded |
 
@@ -36,10 +45,28 @@ Available agent names:
 Override with the `SYMPOSIUM_TEST_AGENT` env var:
 
 ```bash
-SYMPOSIUM_TEST_AGENT=kiro-cli-acp cargo test --test hook_agent
+SYMPOSIUM_ENABLE_AGENT_TESTING=1 SYMPOSIUM_TEST_AGENT=kiro-cli-acp cargo test --test hook_agent
 ```
 
-This ignores `test-agents.toml` and runs only the specified agent.
+```powershell
+$env:SYMPOSIUM_ENABLE_AGENT_TESTING = "1"
+$env:SYMPOSIUM_TEST_AGENT = "kiro-cli-acp"
+cargo test --test hook_agent
+```
+
+This ignores `test-agents.toml` and runs only the specified agent. `cargo test-agent` is an alias for `cargo test --test hook_agent --`, so it needs the same variables.
+
+For example, to reproduce #344 (a skill installed by the first `SessionStart` is not loadable on the first prompt) on Claude Code:
+
+```bash
+SYMPOSIUM_ENABLE_AGENT_TESTING=1 SYMPOSIUM_TEST_AGENT=claude-sdk cargo test --test hook_agent skill_installed_by_session_start -- --nocapture
+```
+
+```powershell
+$env:SYMPOSIUM_ENABLE_AGENT_TESTING = "1"
+$env:SYMPOSIUM_TEST_AGENT = "claude-sdk"
+cargo test --test hook_agent skill_installed_by_session_start -- --nocapture
+```
 
 ## Running specific test files
 

@@ -207,6 +207,14 @@ pub struct TestContext {
     session: Option<AgentSession>,
 }
 
+impl TestContext {
+    /// Whether each [`prompt`](Self::prompt) starts a new Claude Code session, so a test
+    /// can change the project between sessions. An ACP session starts before the test runs.
+    pub fn starts_claude_session_per_prompt(&self) -> bool {
+        matches!(self.session, Some(AgentSession::ClaudeSdk))
+    }
+}
+
 impl Drop for TestContext {
     fn drop(&mut self) {
         if std::thread::panicking() {
@@ -707,6 +715,12 @@ pub async fn with_fixture(
     f: impl AsyncFn(TestContext) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
     let agents = configured_test_agents();
+    if matches!(mode, TestMode::AgentOnly) && agents.is_empty() {
+        // libtest has no "skipped" result, so the test will still report `ok`.
+        eprintln!(
+            "[test] agent-only test ran no agent: set SYMPOSIUM_ENABLE_AGENT_TESTING=1 (see md/design/running-tests.md)"
+        );
+    }
 
     // Simulation run.
     if matches!(mode, TestMode::SimulationOnly | TestMode::Any) {
