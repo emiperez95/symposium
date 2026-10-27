@@ -27,7 +27,7 @@ use serde::Deserialize;
 pub(crate) use checks::CheckError;
 pub(crate) use error::{DirProblem, TaskError, TaskErrors};
 pub(crate) use name::{
-    CheckName, FixtureName, HookName, NameError, PluginName, SkillName, TaskName,
+    BatchName, CheckName, FixtureName, HookName, NameError, PluginName, SkillName, TaskName,
 };
 pub(crate) use pattern::EditablePattern;
 pub(crate) use protected::is_protected;
@@ -106,6 +106,10 @@ impl Task {
 
     pub(crate) fn fixtures(&self) -> &[FixtureName] {
         &self.fixtures
+    }
+
+    pub(crate) fn plugins(&self) -> &[PluginName] {
+        &self.plugins
     }
 
     /// The hidden checks, in name order.
