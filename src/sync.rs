@@ -452,7 +452,14 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
     let mut installed_dirs: BTreeSet<PathBuf> = BTreeSet::new();
 
     for agent_name in &agent_names {
-        let agent = Agent::from_config_name(agent_name)?;
+        let Ok(agent) = Agent::from_config_name(agent_name) else {
+            tracing::info!(
+                report = %crate::report::ReportEvent::Warning {
+                    message: unknown_agent_warning(agent_name),
+                },
+            );
+            continue;
+        };
 
         // Hooks: the project and global locations are genuinely different files
         // for some agents - Antigravity writes `.agents/hooks.json` but
@@ -705,7 +712,10 @@ pub async fn register_hooks(sym: &Symposium, out: &Output) -> Result<()> {
     // the project-level file is written by the first `sync` in a workspace.
     let home = sym.home_dir();
     for agent_name in &agent_names {
-        let agent = Agent::from_config_name(agent_name)?;
+        let Ok(agent) = Agent::from_config_name(agent_name) else {
+            out.warn(unknown_agent_warning(agent_name));
+            continue;
+        };
         agent.register_hooks(home, sym, out)?;
         let names = agent.register_mcp_servers(
             crate::agents::McpScope::User,
@@ -750,6 +760,12 @@ fn record_mcp_registrations(sym: &Symposium, agent: Agent, file: &Path, names: V
             })
             .collect(),
     );
+}
+
+fn unknown_agent_warning(agent_name: &str) -> String {
+    format!(
+        "unknown agent `{agent_name}` in config.toml, skipped; remove it with `cargo agents init --remove-agent {agent_name}`"
+    )
 }
 
 /// Remove the MCP entries Symposium wrote for agents that are not configured,

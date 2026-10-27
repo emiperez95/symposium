@@ -14,12 +14,14 @@ Prompts for which agents you use (e.g., Antigravity CLI, Claude Code, Copilot) a
 
 If a user config already exists, `init` updates it (preserving existing settings not affected by the flags).
 
+Without a terminal and without `--add-agent`, `init` keeps the configured agents, or configures Claude Code when there are none.
+
 ## Options
 
 | Flag | Description |
 |------|-------------|
 | `--add-agent <name>` | Add an agent (e.g., `antigravity`, `claude`, `copilot`). Repeatable. Skips the interactive prompt. |
-| `--remove-agent <name>` | Remove an agent. Repeatable. |
+| `--remove-agent <name>` | Remove an agent, including one this version no longer knows. Repeatable. |
 | `--hook-scope <scope>` | Where to install hooks: `global` (default, writes to `~/`) or `project` (writes to the project directory). |
 
 ## Examples

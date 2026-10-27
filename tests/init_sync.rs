@@ -135,6 +135,29 @@ async fn init_creates_config() {
 }
 
 #[tokio::test]
+async fn non_interactive_init_defaults_to_claude() {
+    with_fixture(TestMode::SimulationOnly, &[], async |mut ctx| {
+        ctx.symposium(&["init"]).await?;
+
+        let config = symposium::config::Symposium::from_dir(ctx.sym.config_dir());
+        let agent_names: Vec<_> = config
+            .config
+            .agents
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect();
+        assert_eq!(agent_names, vec!["claude"]);
+
+        let home = ctx.sym.home_dir();
+        assert!(home.join(".claude/settings.json").exists());
+        assert!(!home.join(".gemini").exists());
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn init_does_not_overwrite_an_unparseable_config() {
     with_fixture(TestMode::SimulationOnly, &[], async |mut ctx| {
         let config_dir = ctx.sym.config_dir().to_path_buf();
@@ -638,6 +661,83 @@ async fn add_agent_is_additive() {
             std::fs::read_to_string(&codex_hooks)
                 .unwrap()
                 .contains("cargo-agents hook")
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+fn configure_unknown_agent(ctx: &mut symposium_testlib::TestContext) -> anyhow::Result<()> {
+    ctx.sym.config.agents = vec![
+        symposium::config::AgentEntry {
+            name: "gemini".into(),
+        },
+        symposium::config::AgentEntry {
+            name: "claude".into(),
+        },
+    ];
+    ctx.sym.save_config()
+}
+
+fn configured_agent_names(ctx: &symposium_testlib::TestContext) -> Vec<String> {
+    symposium::config::Symposium::from_dir(ctx.sym.config_dir())
+        .config
+        .agents
+        .into_iter()
+        .map(|a| a.name)
+        .collect()
+}
+
+#[tokio::test]
+async fn sync_skips_an_unknown_agent() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["auto-enable0"],
+        async |mut ctx| {
+            ctx.sym.config.plugins.auto_enable.push("crate-a".into());
+            configure_unknown_agent(&mut ctx)?;
+            ctx.symposium(&["sync"]).await?;
+
+            let workspace_root = ctx.workspace_root.clone().unwrap();
+            find_installed_skill(&workspace_root.join(".claude/skills"), "a-guidance");
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn init_removes_an_unknown_agent() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["auto-enable0"],
+        async |mut ctx| {
+            configure_unknown_agent(&mut ctx)?;
+            ctx.symposium(&["init", "--remove-agent", "gemini"]).await?;
+            assert_eq!(configured_agent_names(&ctx), vec!["claude"]);
+
+            configure_unknown_agent(&mut ctx)?;
+            ctx.symposium(&["init", "--add-agent", "codex"]).await?;
+            assert_eq!(
+                configured_agent_names(&ctx),
+                vec!["gemini", "claude", "codex"]
+            );
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn init_rejects_removing_an_unknown_unconfigured_agent() {
+    with_fixture(TestMode::SimulationOnly, &[], async |mut ctx| {
+        assert!(
+            ctx.symposium(&["init", "--remove-agent", "nosuch"])
+                .await
+                .is_err()
         );
         Ok(())
     })
@@ -3069,4 +3169,49 @@ async fn sync_installs_skills_from_a_symlinked_group_directory() {
     )
     .await
     .unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn empty_env_dirs_are_ignored() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let config_dir = home.join(".symposium");
+    let cwd = tmp.path().join("cwd");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::create_dir_all(&cwd).unwrap();
+    std::fs::write(
+        config_dir.join("config.toml"),
+        "auto-update = \"off\"\n\n[defaults]\nsymposium-recommendations = false\n",
+    )
+    .unwrap();
+
+    let cases: &[&[(&str, &str)]] = &[
+        &[("XDG_CONFIG_HOME", "")],
+        &[("XDG_CACHE_HOME", ""), ("XDG_STATE_HOME", "")],
+        &[("XDG_CONFIG_HOME", "relative")],
+        &[("SYMPOSIUM_HOME", "")],
+    ];
+    for vars in cases {
+        let _ = std::fs::remove_file(config_dir.join("state.toml"));
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_cargo-agents"))
+            .args(["telemetry", "status"])
+            .current_dir(&cwd)
+            .env("HOME", &home)
+            .env_remove("SYMPOSIUM_HOME")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_CACHE_HOME")
+            .env_remove("XDG_STATE_HOME")
+            .envs(vars.iter().copied())
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "{vars:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(std::fs::read_dir(&cwd).unwrap().count(), 0, "{vars:?}");
+        assert!(config_dir.join("state.toml").exists(), "{vars:?}");
+    }
 }

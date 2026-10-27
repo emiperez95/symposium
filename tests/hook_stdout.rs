@@ -70,6 +70,43 @@ async fn install_command_output_stays_off_hook_stdout() {
     .unwrap();
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn hook_runs_when_the_logs_dir_is_unwritable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plugins0", "workspace0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let workspace = ctx.workspace_root.clone().unwrap();
+            let logs = ctx.sym.config_dir().join("logs");
+            std::fs::create_dir_all(&logs)?;
+            std::fs::set_permissions(&logs, std::fs::Permissions::from_mode(0o500))?;
+            let permissions_enforced = std::fs::write(logs.join("probe"), "").is_err();
+            let output = run_session_start(&ctx, HookAgent::Claude, &workspace);
+            std::fs::set_permissions(&logs, std::fs::Permissions::from_mode(0o700))?;
+            if !permissions_enforced {
+                return Ok(());
+            }
+
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "stderr: {stderr}");
+            assert!(!stderr.contains("panicked"), "stderr: {stderr}");
+            serde_json::from_slice::<Value>(&output.stdout).unwrap_or_else(|e| {
+                panic!(
+                    "stdout is not JSON ({e}): {}",
+                    String::from_utf8_lossy(&output.stdout)
+                )
+            });
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// Run `cargo agents hook <agent> session-start` as the agent would, from `cwd`.
 fn run_session_start(
     ctx: &TestContext,

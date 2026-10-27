@@ -60,11 +60,21 @@ impl SymposiumDirs {
     }
 }
 
+pub(crate) fn env_dir(name: &str) -> Option<PathBuf> {
+    env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+pub(crate) fn xdg_dir(name: &str) -> Option<PathBuf> {
+    env_dir(name).filter(|path| path.is_absolute())
+}
+
 fn resolve_config_dir() -> PathBuf {
-    if let Ok(home) = env::var("SYMPOSIUM_HOME") {
-        PathBuf::from(home)
-    } else if let Ok(xdg) = env::var("XDG_CONFIG_HOME") {
-        PathBuf::from(xdg).join("symposium")
+    if let Some(home) = env_dir("SYMPOSIUM_HOME") {
+        home
+    } else if let Some(xdg) = xdg_dir("XDG_CONFIG_HOME") {
+        xdg.join("symposium")
     } else {
         dirs::home_dir()
             .expect("could not determine home directory")
@@ -73,11 +83,11 @@ fn resolve_config_dir() -> PathBuf {
 }
 
 fn resolve_cache_dir(config_dir: &Path) -> PathBuf {
-    if let Ok(home) = env::var("SYMPOSIUM_HOME") {
-        return PathBuf::from(home).join("cache");
+    if let Some(home) = env_dir("SYMPOSIUM_HOME") {
+        return home.join("cache");
     }
-    if let Ok(xdg) = env::var("XDG_CACHE_HOME") {
-        return PathBuf::from(xdg).join("symposium");
+    if let Some(xdg) = xdg_dir("XDG_CACHE_HOME") {
+        return xdg.join("symposium");
     }
     config_dir.join("cache")
 }

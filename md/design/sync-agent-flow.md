@@ -19,6 +19,8 @@ Scans workspace dependencies, installs applicable skills into agent directories,
    - Drop a `.symposium` marker file into each installed skill directory so future syncs (and other tools) can recognize it as symposium-managed.
    - For every skill directory symposium creates along the way (the skill directory itself or its `skills/` parent), write a `.gitignore` containing a single `*` so symposium-managed files stay out of version control.
 
+   An `[[agent]]` name this version does not know is skipped with a warning that names `cargo agents init --remove-agent`; every other agent syncs as usual.
+
 6. **Workspace `.agents/skills/` (agents-syncing)** — not a separate step: when `agents-syncing` is enabled, each workspace plugin carries a `workspace-member()`-gated default group for `.agents/skills/`, so maintainer skills resolve and install through the same pipeline as everything else. Two marker guards make `.agents/skills/` safe as both a source and (for vendor-neutral agents) a destination: discovery skips `.symposium`-marked directories (installed copies are never sources), and a skill whose source already sits at an agent's install slot is skipped for that agent (no self-copy, no suffixed duplicate).
 
 7. **Reap stale skills**: across every known agent's skills parent directory, remove any subdirectory that contains the `.symposium` marker but wasn't installed this sync. Directories without the marker (user-managed) are left untouched, and so is any symlink, whatever it points to. Paths are compared resolved, so a skills directory that is a link to another agent's (`.claude/skills -> ../.agents/skills`) is scanned once and what this sync installed there is kept.

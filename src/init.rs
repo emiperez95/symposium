@@ -26,14 +26,14 @@ fn interactive(out: &Output) -> bool {
 /// Resolve which agents to configure. Priority:
 /// 1. Explicit `--add-agent` / `--remove-agent` flags (applied to existing set)
 /// 2. Interactive multi-select (if `should_prompt`), pre-selecting existing agents
-/// 3. Default to first agent (Claude) in non-interactive mode
+/// 3. Default to Claude in non-interactive mode
 fn resolve_agents(
     opts: &InitOpts,
     existing: &[AgentEntry],
     should_prompt: bool,
-) -> Result<Vec<Agent>> {
+) -> Result<Vec<String>> {
+    let mut names: Vec<String> = existing.iter().map(|e| e.name.clone()).collect();
     if !opts.agents.is_empty() || !opts.remove_agents.is_empty() {
-        let mut names: Vec<String> = existing.iter().map(|e| e.name.clone()).collect();
         for name in &opts.agents {
             Agent::from_config_name(name)?;
             if !names.contains(name) {
@@ -41,21 +41,23 @@ fn resolve_agents(
             }
         }
         for name in &opts.remove_agents {
-            Agent::from_config_name(name)?;
+            if !names.contains(name) {
+                Agent::from_config_name(name)?;
+            }
             names.retain(|n| n != name);
         }
-        return names.iter().map(|n| Agent::from_config_name(n)).collect();
+        return Ok(names);
     }
     if should_prompt {
-        return prompt_for_agents(existing);
-    }
-    if !existing.is_empty() {
-        return existing
+        return Ok(prompt_for_agents(existing)?
             .iter()
-            .map(|e| Agent::from_config_name(&e.name))
-            .collect();
+            .map(|a| a.config_name().to_string())
+            .collect());
     }
-    Ok(vec![Agent::all()[0]])
+    if names.is_empty() {
+        names.push(Agent::Claude.config_name().to_string());
+    }
+    Ok(names)
 }
 
 /// Run user-wide initialization.
@@ -71,13 +73,15 @@ pub async fn init(sym: &mut Symposium, out: &Output, opts: &InitOpts) -> Result<
     let should_prompt = !cli_driven && interactive(out);
 
     // Resolve each setting: CLI flag > interactive prompt > keep existing.
-    let agents = resolve_agents(opts, &sym.config.agents, should_prompt)?;
-
-    sym.config.agents = agents
+    let names = resolve_agents(opts, &sym.config.agents, should_prompt)?;
+    let agents: Vec<Agent> = names
         .iter()
-        .map(|a| AgentEntry {
-            name: a.config_name().to_string(),
-        })
+        .filter_map(|n| Agent::from_config_name(n).ok())
+        .collect();
+
+    sym.config.agents = names
+        .iter()
+        .map(|name| AgentEntry { name: name.clone() })
         .collect();
 
     sym.config.hook_scope = match opts.hook_scope {
@@ -94,7 +98,7 @@ pub async fn init(sym: &mut Symposium, out: &Output, opts: &InitOpts) -> Result<
     }
 
     tracing::debug!(
-        agents = ?agents.iter().map(|a| a.config_name()).collect::<Vec<_>>(),
+        agents = ?names,
         scope = ?sym.config.hook_scope,
         auto_update = ?sym.config.auto_update,
         "resolved config"
