@@ -133,11 +133,11 @@ pub async fn workspace_status(
     // Discovery only sees dependencies, so these are invisible above; surface
     // them from the config the same way sync loads them
     // ([`enabled_dependencies`](crate::discovery::enabled_dependencies)).
-    let normalize = crate::crate_sources::normalize_crate_name;
-    let shown: std::collections::HashSet<String> = registry
+    let pms = sym.package_managers(deps);
+    let shown: std::collections::HashSet<crate::pm::PackageId> = registry
         .plugins
         .iter()
-        .map(|p| normalize(&p.manifest.name))
+        .map(|p| pms.identity(&p.canonical))
         .chain(
             discovery
                 .active
@@ -145,11 +145,11 @@ pub async fn workspace_status(
                 .chain(&discovery.auto_enabled)
                 .chain(&discovery.candidates)
                 .chain(&discovery.declined)
-                .map(|d| normalize(d.name())),
+                .map(|d| pms.identity(&d.id)),
         )
         .collect();
     for name in crate::discovery::enabled_dependencies(sym, &dep_ids, &ws.root) {
-        if shown.contains(&normalize(&name)) {
+        if shown.contains(&pms.identify(&registry.plugins, &name)) {
             continue;
         }
         entries.push(StatusEntry {

@@ -56,6 +56,10 @@ Destinations need the opposite treatment. A link found in an agent's skills dire
 
 Plugin content must not decide where Symposium writes. A name it supplies, such as a skill's `name`, can resolve outside the directory it is joined onto (`Path::join` does not confine it), so it never becomes part of a path unchecked. Validate it with `skills::is_safe_dir_name`, which also covers Windows-specific path forms, rather than with a check of your own.
 
+## Names compare as package identities
+
+Whether two names are the same package is the package manager's rule, not a string comparison: cargo treats `widget-lib` and `widget_lib` as one crate, while a registry compares its plugin names exactly. So code that matches a name typed by the user against a plugin or a dependency resolves both through `PmRegistry::identify` or `PmRegistry::identity` and compares the results, rather than comparing strings or applying one ecosystem's normalization to every name.
+
 ## A source that reads as empty is not an empty source
 
 A listing that swallows read errors returns the same empty list for "nothing there" and "could not look", and anything that removes what a source stopped offering turns the second into data loss: a `[[registry]]` path on an unmounted share would make `sync` delete every skill installed from it. So `PackageManager::registry_plugins` fails when a registry cannot be read, `PluginRegistry::unreadable_registries` carries that to `sync`, and `sync` skips its stale-skill cleanup while that list is not empty. Any new pass that removes things because a source stopped offering them belongs behind the same condition. The opposite mistake is as bad: a source that is legitimately absent must not count as unreadable, or cleanup never runs again, which is why the built-in `~/.symposium/plugins/` is left out when nothing exists at that path.

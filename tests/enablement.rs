@@ -168,6 +168,29 @@ async fn use_registry_content_is_a_noop() {
     .unwrap();
 }
 
+#[tokio::test]
+async fn use_matches_registry_plugin_names_exactly() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["dormant-plugin0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let err = ctx
+                .symposium(&["use", "gateless_plugin"])
+                .await
+                .expect_err("a registry plugin name is not a crate name");
+            assert!(
+                err.to_string().contains("no crate or plugin named"),
+                "{err}"
+            );
+            assert!(!read_config(&ctx).contains("gateless_plugin"));
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// `use` wakes a dormant registry plugin (one no dependency gates), and
 /// `--remove` puts it back to sleep, reaping its skills.
 #[tokio::test]

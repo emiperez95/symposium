@@ -46,6 +46,10 @@ impl PackageManager for PathPm {
         &self.name
     }
 
+    fn canonical_name(&self, name: &str) -> String {
+        name.to_string()
+    }
+
     /// Every entry in the registry, loaded as a plugin. `deps` is ignored — a
     /// local registry's contents don't vary with the workspace; whether each
     /// plugin applies is decided later by its own predicates. A registry is a
