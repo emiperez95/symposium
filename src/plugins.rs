@@ -1156,20 +1156,20 @@ pub async fn active_plugins(
         record_active(parsed.clone(), ctx, &mut active, &mut worklist);
     }
 
-    // Enabled crates: consented dependencies and `use`d crates that aren't
-    // dependencies. A name a registry already provides as a plugin was seeded
-    // above, so skip it here rather than also fetching it as a crate.
+    // Enabled packages: consented dependencies and what `use` entries name,
+    // each resolved by the package managers.
     if let Some(root) = workspace_root {
-        let registry_names: std::collections::HashSet<String> = registry
-            .plugins
-            .iter()
-            .map(|p| crate::crate_sources::normalize_crate_name(&p.manifest.name))
-            .collect();
-        for name in crate::discovery::enabled_dependencies(sym, pms, ctx.deps, root) {
-            if !registry_names.contains(&crate::crate_sources::normalize_crate_name(&name)) {
-                worklist.push(crate::pm::CargoPm::id_for(&name, None));
-            }
-        }
+        worklist.extend(
+            crate::discovery::enabled_dependencies(
+                sym,
+                pms,
+                &registry.plugins,
+                ctx.deps,
+                root,
+                update,
+            )
+            .await,
+        );
     }
 
     // Fixed-point: resolve each id through the set, record any new plugin, and

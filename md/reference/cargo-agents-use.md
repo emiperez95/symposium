@@ -50,10 +50,12 @@ trusting its curation — so `use`-ing it is a no-op and reports as such.
 Enablement is not activation: `use` only adds to what *may* run. The plugin's
 own [predicates](./predicates.md) still decide when it applies.
 
-The name must resolve to something before it is recorded — a dormant registry
-plugin, a workspace dependency, or a registry search hit — otherwise the
-command errors and writes nothing. Use
-[`cargo agents search`](./cargo-agents-search.md) to find the right name.
+The name must name a package before it is recorded: a registry plugin (matched
+exactly), a workspace dependency, or a crate on crates.io (matched the way
+cargo matches crate names, so `widget-lib` and `widget_lib` are the same).
+When a registry plugin and a crate share the name, the registry plugin wins.
+Otherwise the command fails with `no package named <NAME>` and writes nothing.
+Use [`cargo agents search`](./cargo-agents-search.md) to find the right name.
 
 ### `--remove`
 

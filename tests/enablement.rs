@@ -148,7 +148,8 @@ async fn use_unknown_name_errors() {
                 .await
                 .expect_err("unknown name should be rejected");
             assert!(
-                err.to_string().contains("no crate or plugin named"),
+                err.to_string()
+                    .contains("no package named `no-such-plugin`"),
                 "{err}"
             );
             assert!(
@@ -192,7 +193,8 @@ async fn use_matches_registry_plugin_names_exactly() {
                 .await
                 .expect_err("a registry plugin name is not a crate name");
             assert!(
-                err.to_string().contains("no crate or plugin named"),
+                err.to_string()
+                    .contains("no package named `gateless_plugin`"),
                 "{err}"
             );
             assert!(!read_config(&ctx).contains("gateless_plugin"));
@@ -719,9 +721,11 @@ async fn status_lists_each_declined_name_once() {
             assert_eq!(crate_a[0].state, StatusState::Declined);
             assert_eq!(crate_a[0].version.as_deref(), Some("0.1.0"));
             assert!(named("*").is_empty(), "{entries:?}");
+            // No package manager has `never-seen`, so nothing says the two
+            // spellings are one package.
             let never_seen = named("never-seen");
-            assert_eq!(never_seen.len(), 1, "{entries:?}");
-            assert_eq!(never_seen[0].state, StatusState::Declined);
+            assert_eq!(never_seen.len(), 2, "{entries:?}");
+            assert!(never_seen.iter().all(|e| e.state == StatusState::Declined));
             Ok(())
         },
     )
@@ -760,8 +764,8 @@ async fn status_reports_a_pluginless_dependency_only_when_used() {
                 .iter()
                 .find(|e| e.name == "not-a-dep")
                 .expect("not-a-dep present");
-            assert_eq!(not_a_dep.state, StatusState::Active);
-            assert!(not_a_dep.root.contains("not a dependency"), "{not_a_dep:?}");
+            assert_eq!(not_a_dep.state, StatusState::Dormant);
+            assert!(not_a_dep.root.contains("cached crate"), "{not_a_dep:?}");
 
             ctx.sym.config.plugins.auto_enable.clear();
             ctx.symposium(&["use", "plain-dep"]).await?;

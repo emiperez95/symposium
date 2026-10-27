@@ -21,6 +21,7 @@ use anyhow::{Context, Result, bail};
 use symposium_install::UpdateLevel;
 
 use crate::config::{Symposium, UseEntry};
+use crate::plugins::Plugin;
 use crate::pm::{PackageId, PmRegistry};
 use crate::report::ReportEvent;
 
@@ -35,7 +36,13 @@ pub async fn use_plugin(
     let deps = sym.workspace_deps(cwd);
     let pms = sym.package_managers(&deps);
     let registry = crate::plugins::load_registry(sym).await;
-    let id = pms.identify(&registry.plugins, name);
+    let id = match pms
+        .identify(&registry.plugins, name, UpdateLevel::Check)
+        .await
+    {
+        Ok(id) => id,
+        Err(e) => bail!("{e} (try `cargo agents search {name}`)"),
+    };
 
     // `disable` outranks every way of enabling a plugin, `use` included, so
     // recording an entry here would report success and then install nothing.
@@ -74,10 +81,6 @@ pub async fn use_plugin(
         bail!("{e}; pass --global to enable `{name}` everywhere");
     }
 
-    if !dormant {
-        resolve_name(&pms, &id, name).await?;
-    }
-
     let entry = match &workspace_root {
         _ if global => UseEntry::Global(name.to_string()),
         Some(root) => UseEntry::Workspace {
@@ -87,10 +90,15 @@ pub async fn use_plugin(
         None => unreachable!("checked above"),
     };
 
-    let already_enabled = sym.config.plugins.used.iter().any(|e| {
-        in_scope(e, global, workspace_root.as_deref())
-            && pms.identify(&registry.plugins, e.name()) == id
-    });
+    let mut already_enabled = false;
+    for e in &sym.config.plugins.used {
+        if in_scope(e, global, workspace_root.as_deref())
+            && names(&pms, &registry.plugins, e.name(), name, Some(&id)).await
+        {
+            already_enabled = true;
+            break;
+        }
+    }
     if already_enabled {
         tracing::info!(
             report = %ReportEvent::Info {
@@ -132,15 +140,21 @@ pub async fn remove_plugin(
     let workspace_root = deps.load().map(|ws| ws.root.clone());
     let pms = sym.package_managers(&deps);
     let registry = crate::plugins::load_registry(sym).await;
-    let id = pms.identify(&registry.plugins, name);
+    let id = pms
+        .identify(&registry.plugins, name, UpdateLevel::Check)
+        .await
+        .ok();
 
-    let used = &mut sym.config.plugins.used;
+    let used = std::mem::take(&mut sym.config.plugins.used);
     let before = used.len();
-    used.retain(|entry| {
-        !in_scope(entry, global, workspace_root.as_deref())
-            || pms.identify(&registry.plugins, entry.name()) != id
-    });
-    if used.len() == before {
+    for entry in used {
+        let remove = in_scope(&entry, global, workspace_root.as_deref())
+            && names(&pms, &registry.plugins, entry.name(), name, id.as_ref()).await;
+        if !remove {
+            sym.config.plugins.used.push(entry);
+        }
+    }
+    if sym.config.plugins.used.len() == before {
         let scope = if global { "--global" } else { "this workspace" };
         bail!("no `use` entry for `{name}` ({scope}); see `cargo agents status`");
     }
@@ -167,24 +181,21 @@ fn in_scope(entry: &UseEntry, global: bool, workspace_root: Option<&Path>) -> bo
     }
 }
 
-/// Check that `name` resolves to something before recording it: a workspace
-/// dependency (offline-friendly) or a registry search hit.
-async fn resolve_name(pms: &PmRegistry, id: &PackageId, name: &str) -> Result<()> {
-    let is_workspace_dep = pms
-        .list_deps()
-        .await
-        .unwrap_or_default()
-        .iter()
-        .any(|dep| pms.identity(dep) == *id);
-    if is_workspace_dep {
-        return Ok(());
-    }
-
-    let found = pms.search(name).await.iter().any(|(_, info)| {
-        pms.identity(&info.id) == pms.identity(&PackageId::any_version(&info.id.pm, name))
-    });
-    if found {
-        return Ok(());
-    }
-    bail!("no crate or plugin named `{name}` found (try `cargo agents search {name}`)")
+/// Does the `use` entry `entry` name the package `id` that `name` resolved
+/// to? An entry or a name that no package manager has matches only as written.
+async fn names(
+    pms: &PmRegistry,
+    plugins: &[Plugin],
+    entry: &str,
+    name: &str,
+    id: Option<&PackageId>,
+) -> bool {
+    entry == name
+        || (id.is_some()
+            && pms
+                .identify(plugins, entry, UpdateLevel::Check)
+                .await
+                .ok()
+                .as_ref()
+                == id)
 }

@@ -146,6 +146,27 @@ impl PackageManager for CargoPm {
         crate::crate_sources::normalize_crate_name(name)
     }
 
+    /// A workspace dependency of that name, or a crate in cargo's extracted
+    /// sources; above [`UpdateLevel::None`], otherwise a crate crates.io has.
+    async fn find(&self, name: &str, update: UpdateLevel) -> Option<PackageId> {
+        let wanted = self.canonical_name(name);
+        let same = |id: &PackageId| self.canonical_name(&id.name) == wanted;
+        if let Some(dep) = self.list_deps().await.ok()?.into_iter().find(same) {
+            return Some(dep);
+        }
+        if let Ok(cached) = self
+            .fetch(&Self::id_for(name, None), UpdateLevel::None)
+            .await
+        {
+            return Some(cached.id);
+        }
+        if matches!(update, UpdateLevel::None) {
+            return None;
+        }
+        let found = self.search(name).await.ok()?;
+        found.into_iter().map(|info| info.id).find(same)
+    }
+
     /// The plugins embedded in the workspace's dependencies: every dep in
     /// `deps` whose source tree embeds plugin content, built into a full
     /// `Plugin`. Whether each is *trusted* (may activate without consent)
