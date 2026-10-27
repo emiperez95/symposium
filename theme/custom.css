@@ -356,7 +356,7 @@ body[data-no-menu-bar] #content {
     border-bottom: 1px solid var(--table-border-color);
 }
 
-.video-card h2 {
+.video-card h3 {
     margin: 0;
     font-size: 2rem;
 }
