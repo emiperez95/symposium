@@ -82,12 +82,14 @@ pub async fn workspace_status(
     // plugins and whether the predicates hold.
     let registry = crate::plugins::load_registry_with_workspace(sym, Some(&ws)).await;
     let dep_ids = crate::pm::workspace_dep_ids(sym, deps).await;
+    let pms = sym.package_managers(deps);
     let used_names = sym.config.plugins.used_names_in(&ws.root);
-    let mut ctx = crate::predicate::PredicateContext::new(&dep_ids).with_used_names(&used_names);
+    let used = crate::discovery::used_plugins(sym, &pms, &registry.plugins, &ws.root);
+    let mut ctx = crate::predicate::PredicateContext::new(&dep_ids).with_used(&used);
     for parsed in &registry.plugins {
         let root = if parsed.workspace_member {
             "workspace member".to_string()
-        } else if parsed.manifest.requires_use && ctx.is_used(&parsed.manifest.name) {
+        } else if parsed.manifest.requires_use && ctx.is_used(&parsed.canonical) {
             "`[plugins] use`".to_string()
         } else {
             format!("registry `{}`", parsed.canonical.pm)
@@ -127,7 +129,6 @@ pub async fn workspace_status(
     // Discovery only sees dependencies, so these are invisible above; surface
     // them from the config the same way sync loads them
     // ([`enabled_dependencies`](crate::discovery::enabled_dependencies)).
-    let pms = sym.package_managers(deps);
     let shown: std::collections::HashSet<crate::pm::PackageId> = registry
         .plugins
         .iter()

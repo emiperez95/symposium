@@ -323,14 +323,18 @@ pub struct Plugin {
 
 impl Plugin {
     /// Evaluate the plugin-level predicate set, stamping this plugin's
-    /// provenance into the context first. Use this — not
-    /// `plugin.applies()` directly — when iterating loaded plugins, so
-    /// `workspace-member()` sees the right plugin's provenance. The stamp
-    /// carries over to the plugin's nested component evaluations (groups,
-    /// skills, hooks, MCP servers, subcommands) on the same context.
+    /// provenance into the context first, so `workspace-member()` sees the
+    /// right plugin's provenance. The stamp carries over to the plugin's
+    /// nested component evaluations (groups, skills, hooks, MCP servers,
+    /// subcommands) on the same context. A dormant plugin
+    /// ([`requires_use`](PluginManifest::requires_use)) applies only when an
+    /// applicable `[plugins] use` entry names it.
     pub fn applies(&self, ctx: &mut crate::predicate::PredicateContext) -> bool {
         ctx.set_workspace_member(self.workspace_member);
-        self.manifest.applies(ctx)
+        if self.manifest.requires_use && !ctx.is_used(&self.canonical) {
+            return false;
+        }
+        self.manifest.predicates.evaluate(ctx)
     }
 }
 
@@ -398,16 +402,6 @@ pub struct ChainedPlugin {
 }
 
 impl PluginManifest {
-    /// Check if this plugin's activation predicates hold in `ctx`. A dormant
-    /// plugin ([`requires_use`](Self::requires_use)) applies only when an
-    /// applicable `[plugins] use` entry names it.
-    pub fn applies(&self, ctx: &mut crate::predicate::PredicateContext) -> bool {
-        if self.requires_use && !ctx.is_used(&self.name) {
-            return false;
-        }
-        self.predicates.evaluate(ctx)
-    }
-
     /// Look up a named installation on this plugin.
     pub fn get_installation(&self, name: &str) -> Option<&Installation> {
         self.installations.iter().find(|i| i.name == name)
@@ -1973,8 +1967,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plugin.name, "widget-tools");
-        assert!(plugin.applies(&mut ctx(&[PackageId::new("cargo", "widget-lib", "1.0.0")])));
-        assert!(!plugin.applies(&mut ctx(&[PackageId::new("cargo", "serde", "1.0.0")])));
+        assert!(plugin.predicates.evaluate(&mut ctx(&[PackageId::new(
+            "cargo",
+            "widget-lib",
+            "1.0.0"
+        )])));
+        assert!(
+            !plugin
+                .predicates
+                .evaluate(&mut ctx(&[PackageId::new("cargo", "serde", "1.0.0")]))
+        );
     }
 
     #[test]
@@ -2920,7 +2922,11 @@ mod tests {
             chained: vec![],
             requires_use: false,
         };
-        assert!(plugin_wildcard.applies(&mut ctx(&workspace_crates)));
+        assert!(
+            plugin_wildcard
+                .predicates
+                .evaluate(&mut ctx(&workspace_crates))
+        );
 
         // Plugin targeting serde - should apply
         let plugin_serde = PluginManifest {
@@ -2935,7 +2941,11 @@ mod tests {
             chained: vec![],
             requires_use: false,
         };
-        assert!(plugin_serde.applies(&mut ctx(&workspace_crates)));
+        assert!(
+            plugin_serde
+                .predicates
+                .evaluate(&mut ctx(&workspace_crates))
+        );
 
         // Plugin targeting non-existent crate - should not apply
         let plugin_other = PluginManifest {
@@ -2950,7 +2960,11 @@ mod tests {
             chained: vec![],
             requires_use: false,
         };
-        assert!(!plugin_other.applies(&mut ctx(&workspace_crates)));
+        assert!(
+            !plugin_other
+                .predicates
+                .evaluate(&mut ctx(&workspace_crates))
+        );
 
         // Plugin with version predicate - should reject wrong version
         let plugin_version = PluginManifest {
@@ -2965,7 +2979,11 @@ mod tests {
             chained: vec![],
             requires_use: false,
         };
-        assert!(!plugin_version.applies(&mut ctx(&workspace_crates)));
+        assert!(
+            !plugin_version
+                .predicates
+                .evaluate(&mut ctx(&workspace_crates))
+        );
     }
 
     #[test]
@@ -3127,14 +3145,18 @@ mod tests {
     #[test]
     fn dormant_plugin_applies_only_when_used() {
         let manifest: RawPluginManifest = toml::from_str(r#"name = "gate-less""#).unwrap();
-        let plugin = validate_manifest(manifest, ManifestOrigin::Registry).unwrap();
-        assert!(plugin.requires_use);
+        let plugin = Plugin {
+            manifest: validate_manifest(manifest, ManifestOrigin::Registry).unwrap(),
+            workspace_member: false,
+            canonical: PackageId::any_version("reg", "gate-less"),
+        };
+        assert!(plugin.manifest.requires_use);
 
         let deps: Vec<PackageId> = Vec::new();
+        let other = PackageId::any_version("reg", "something-else");
         assert!(!plugin.applies(&mut ctx(&deps)));
-        assert!(!plugin.applies(&mut ctx(&deps).with_used_names(&["something-else"])));
-        // Hyphen/underscore spellings name the same plugin.
-        assert!(plugin.applies(&mut ctx(&deps).with_used_names(&["gate_less"])));
+        assert!(!plugin.applies(&mut ctx(&deps).with_used(&[other])));
+        assert!(plugin.applies(&mut ctx(&deps).with_used(std::slice::from_ref(&plugin.canonical))));
     }
 
     #[test]

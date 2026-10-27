@@ -498,12 +498,12 @@ async fn prewarm_hook_sources(sym: &Symposium, deps: &Arc<WorkspaceDeps>) {
     } else {
         Vec::new()
     };
-    let used_names = workspace
-        .as_ref()
-        .map(|ws| sym.config.plugins.used_names_in(&ws.root))
-        .unwrap_or_default();
-    let mut ctx = crate::predicate::PredicateContext::new(&dep_ids).with_used_names(&used_names);
     let pms = sym.package_managers(deps);
+    let used = workspace
+        .as_ref()
+        .map(|ws| crate::discovery::used_plugins(sym, &pms, &registry.plugins, &ws.root))
+        .unwrap_or_default();
+    let mut ctx = crate::predicate::PredicateContext::new(&dep_ids).with_used(&used);
     let plugins = crate::plugins::active_plugins(
         sym,
         &registry,
@@ -602,12 +602,12 @@ async fn discovery_hint(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Option<St
     let registry = crate::plugins::load_registry_with_workspace(sym, workspace.as_deref()).await;
     let dep_ids = crate::pm::workspace_dep_ids(sym, deps).await;
 
+    let pms = sym.package_managers(deps);
     let used = workspace
         .as_ref()
-        .map(|ws| sym.config.plugins.used_names_in(&ws.root))
+        .map(|ws| crate::discovery::used_plugins(sym, &pms, &registry.plugins, &ws.root))
         .unwrap_or_default();
-    let mut ctx = crate::predicate::PredicateContext::new(&dep_ids).with_used_names(&used);
-    let pms = sym.package_managers(deps);
+    let mut ctx = crate::predicate::PredicateContext::new(&dep_ids).with_used(&used);
     let active = crate::plugins::active_plugins(
         sym,
         &registry,
@@ -740,14 +740,14 @@ pub async fn dispatch_plugin_hooks(
     } else {
         Vec::new()
     };
-    let used_names = workspace
+    let pms = sym.package_managers(deps);
+    let used = workspace
         .as_ref()
-        .map(|ws| sym.config.plugins.used_names_in(&ws.root))
+        .map(|ws| crate::discovery::used_plugins(sym, &pms, &registry.plugins, &ws.root))
         .unwrap_or_default();
-    let mut ctx = crate::predicate::PredicateContext::new(&dep_ids).with_used_names(&used_names);
+    let mut ctx = crate::predicate::PredicateContext::new(&dep_ids).with_used(&used);
     // Dispatch over the active set — registry plugins plus crate-sourced ones —
     // so a crate plugin's hooks fire exactly like a registry plugin's.
-    let pms = sym.package_managers(deps);
     let plugins = crate::plugins::active_plugins(
         sym,
         &registry,

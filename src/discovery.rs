@@ -42,6 +42,7 @@ use std::sync::Arc;
 
 use crate::config::Symposium;
 use crate::output::Output;
+use crate::plugins::Plugin;
 use crate::pm::{CARGO_PM, CargoPm, PackageId, PmRegistry};
 use crate::report::ReportEvent;
 
@@ -190,6 +191,25 @@ pub fn enabled_dependencies(
     }
 
     names
+}
+
+/// The canonical ids of the `plugins` an applicable `use` entry names, which
+/// is what wakes a dormant one. A plugin is named by its manifest name, under
+/// the rule of the package manager it came from.
+pub fn used_plugins(
+    sym: &Symposium,
+    pms: &PmRegistry,
+    plugins: &[Plugin],
+    workspace_root: &Path,
+) -> Vec<PackageId> {
+    plugins
+        .iter()
+        .filter(|p| {
+            let named = PackageId::any_version(&p.canonical.pm, &p.manifest.name);
+            sym.config.plugins.is_used_in(pms, &named, workspace_root)
+        })
+        .map(|p| p.canonical.clone())
+        .collect()
 }
 
 /// Run [`discover`] for the workspace `deps` points at, or an empty
@@ -550,5 +570,29 @@ mod tests {
             enabled_dependencies(&sym, &sym.detached_managers(), &deps, tmp.path()),
             vec!["serde".to_string()]
         );
+    }
+
+    /// A registry compares plugin names exactly, so only the exact spelling
+    /// in `use` wakes a dormant registry plugin.
+    #[tokio::test]
+    async fn use_wakes_a_registry_plugin_only_by_its_exact_name() {
+        let used = async |entry: &str| {
+            let tmp = tempfile::tempdir().unwrap();
+            let config = format!(
+                "[plugins]\nuse = [\"{entry}\"]\n\n[[registry]]\nname = \"reg\"\npath = \"reg\"\n"
+            );
+            let sym = sym_with(tmp.path(), &config);
+            let entry_dir = tmp.path().join("config/reg/my-plugin");
+            std::fs::create_dir_all(&entry_dir).unwrap();
+            std::fs::write(entry_dir.join("Symposium.toml"), "name = \"my-plugin\"\n").unwrap();
+            let plugins = crate::plugins::load_registry(&sym).await.plugins;
+            assert_eq!(plugins.len(), 1);
+            assert!(plugins[0].manifest.requires_use);
+            used_plugins(&sym, &sym.detached_managers(), &plugins, tmp.path())
+                == [plugins[0].canonical.clone()]
+        };
+
+        assert!(used("my-plugin").await);
+        assert!(!used("my_plugin").await);
     }
 }

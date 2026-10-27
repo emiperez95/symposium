@@ -373,19 +373,19 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
     // custom predicate results survive across sync runs; results are persisted
     // at the end of this evaluation pass.
     let dep_ids = crate::pm::workspace_dep_ids(sym, deps).await;
-    let used_names = sym.config.plugins.used_names_in(&project_root);
+    let pms = sym.package_managers(deps);
+    let used = crate::discovery::used_plugins(sym, &pms, &registry.plugins, &project_root);
     let predicate_cache_path =
         crate::predicate_cache::PredicateCache::path_for_workspace(sym.cache_dir(), &project_root);
     let mut ctx =
         crate::predicate::PredicateContext::with_custom_predicates(&dep_ids, custom_entries)
-            .with_used_names(&used_names)
+            .with_used(&used)
             .with_disk_cache(&predicate_cache_path);
 
     // The active plugin set: registry plugins plus the crate-sourced plugins
     // reached through `[[plugins]]` chained references and dependency
     // enablement. Every facet resolves over this one set, so a crate plugin's
     // skills and MCP servers install exactly like a registry plugin's.
-    let pms = sym.package_managers(deps);
     let active = plugins::active_plugins(
         sym,
         &registry,

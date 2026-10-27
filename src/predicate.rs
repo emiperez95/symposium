@@ -80,11 +80,12 @@ pub struct PredicateContext<'a> {
     /// the loader stamps it per plugin (via `Plugin::applies`) before
     /// that plugin's predicate sets are evaluated.
     workspace_member: bool,
-    /// Plugin names enabled by the applicable `[plugins] use` entries,
-    /// normalized. A plugin with no gate of its own
+    /// Canonical ids of the plugins the applicable `[plugins] use` entries
+    /// name ([`used_plugins`](crate::discovery::used_plugins)). A plugin with
+    /// no gate of its own
     /// ([`PluginManifest::requires_use`](crate::plugins::PluginManifest::requires_use)) is
-    /// dormant unless it is named here.
-    used_names: std::collections::HashSet<String>,
+    /// dormant unless it is listed here.
+    used: std::collections::HashSet<PackageId>,
     custom_entries: std::collections::HashMap<String, ResolvedPredicateEntry>,
     custom_cache: std::collections::HashMap<(String, String), CustomPredicateResult>,
     /// The current (possibly mutated) view of the on-disk cache.
@@ -100,7 +101,7 @@ impl<'a> PredicateContext<'a> {
         Self {
             deps,
             workspace_member: false,
-            used_names: std::collections::HashSet::new(),
+            used: std::collections::HashSet::new(),
             custom_entries: std::collections::HashMap::new(),
             custom_cache: std::collections::HashMap::new(),
             disk_cache: None,
@@ -118,22 +119,17 @@ impl<'a> PredicateContext<'a> {
         }
     }
 
-    /// Record the plugin names the applicable `[plugins] use` entries enable.
-    /// Matching is hyphen/underscore-insensitive, like every other name
-    /// comparison against user-typed config.
-    pub fn with_used_names<S: AsRef<str>>(mut self, names: &[S]) -> Self {
-        self.used_names.extend(
-            names
-                .iter()
-                .map(|n| crate::crate_sources::normalize_crate_name(n.as_ref())),
-        );
+    /// Record the plugins the applicable `[plugins] use` entries name, by
+    /// canonical id.
+    pub fn with_used(mut self, plugins: &[PackageId]) -> Self {
+        self.used.extend(plugins.iter().cloned());
         self
     }
 
-    /// Is the named plugin enabled by a `use` entry in this context?
-    pub fn is_used(&self, plugin_name: &str) -> bool {
-        self.used_names
-            .contains(&crate::crate_sources::normalize_crate_name(plugin_name))
+    /// Is the plugin with this canonical id enabled by a `use` entry in this
+    /// context?
+    pub fn is_used(&self, canonical: &PackageId) -> bool {
+        self.used.contains(canonical)
     }
 
     /// Load a persistent cache from disk and attach it to this context.
