@@ -1016,6 +1016,31 @@ mod tests {
         assert!(!dir_contents_differ(&src, &dst).unwrap());
     }
 
+    #[test]
+    fn install_preserves_unmarked_directory_at_staging_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("SKILL.md"), "skill").unwrap();
+
+        let skills = tmp.path().join("skills");
+        let user_dir = skills.join(".symposium-tmp-alpha");
+        fs::create_dir_all(&user_dir).unwrap();
+        let notes = user_dir.join("notes.txt");
+        fs::write(&notes, "user-owned notes").unwrap();
+        assert!(!user_dir.join(MARKER_FILE).exists());
+
+        // Either choose another staging path or fail safely. Neither outcome
+        // may delete or adopt this pre-existing, unmarked directory.
+        let _ = sync_skill_dir(&src, &skills.join("alpha"), tmp.path(), Duration::ZERO);
+
+        assert_eq!(
+            fs::read_to_string(&notes).expect("install must preserve user-owned files"),
+            "user-owned notes"
+        );
+        assert!(!user_dir.join(MARKER_FILE).exists());
+    }
+
     #[cfg(unix)]
     #[test]
     fn failed_install_leaves_the_slot_free() {
