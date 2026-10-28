@@ -858,3 +858,26 @@ async fn status_reports_a_pluginless_dependency_only_when_used() {
     .await
     .unwrap();
 }
+
+// A registry plugin wins name resolution over a same-named dependency.
+// Choosing it must not also grant consent to the dependency's embedded plugin.
+
+#[tokio::test]
+async fn choosing_registry_plugin_does_not_enable_same_named_dependency() {
+    with_fixture(TestMode::SimulationOnly, &["auto-enable0"], async |mut ctx| {
+        ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+        ctx.sym.config.defaults.user_plugins = true;
+        let plugin_dir = ctx.sym.config_dir().join("plugins/registry-choice");
+        std::fs::create_dir_all(&plugin_dir)?;
+        std::fs::write(plugin_dir.join("Symposium.toml"), "name = \"crate-a\"\n")?;
+        let registry = symposium::plugins::load_registry(&ctx.sym).await;
+        assert!(registry.plugins.iter().any(|plugin|
+            plugin.manifest.name == "crate-a" && plugin.manifest.requires_use));
+        ctx.symposium(&["use", "crate-a"]).await?;
+        let skills = ctx.workspace_root.as_ref().unwrap().join(".claude/skills");
+        let installed = find_installed_skills(&skills, "a-guidance");
+        assert!(installed.is_empty(),
+            "enabling the registry plugin also installed the unconsented dependency: {installed:?}");
+        Ok(())
+    }).await.unwrap();
+}
