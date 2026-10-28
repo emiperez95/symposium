@@ -77,6 +77,7 @@
   - [Running tests](./design/running-tests.md)
   - [Writing tests](./design/testing-guidelines.md)
   - [Governance](./design/governance.md)
+  - [Tickets and the project board](./design/contributing-tickets.md)
   - [Common issues](./design/common-issues.md)
   - [Agent details](./design/agent-details/README.md)
     - [Antigravity CLI](./design/agent-details/antigravity-cli.md)
