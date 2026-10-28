@@ -670,7 +670,7 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
         tracing::info!(
             report = %crate::report::ReportEvent::Warning {
                 message: format!(
-                    "registry `{name}` could not be read; skipped cleanup of installed skills"
+                    "registry `{name}` could not be fully read; skipped cleanup of installed skills"
                 ),
             },
         );
