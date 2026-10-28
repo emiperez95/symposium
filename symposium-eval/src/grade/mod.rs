@@ -10,7 +10,7 @@ mod error;
 mod hidden;
 mod import;
 mod limits;
-mod process;
+pub(crate) mod process;
 #[cfg(test)]
 mod repository_tasks;
 mod solution;

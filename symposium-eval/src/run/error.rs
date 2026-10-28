@@ -1,5 +1,6 @@
 //! Everything preparing a trial can report.
 
+use std::env::JoinPathsError;
 use std::io;
 use std::path::PathBuf;
 
@@ -31,4 +32,6 @@ pub(crate) enum RunError {
     Copy(#[source] ImportError),
     #[error("cannot write the `srt` policy")]
     Policy(#[source] serde_json::Error),
+    #[error("cannot build `PATH` for the trial")]
+    PathList(#[source] JoinPathsError),
 }

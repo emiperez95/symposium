@@ -21,6 +21,7 @@
 //! joining it would wait without bound.
 
 use std::ffi::OsString;
+use std::fmt;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -45,7 +46,7 @@ const KILL_GRACE: Duration = Duration::from_secs(5);
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One command, as grading wants it run.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct Invocation {
     pub(crate) program: OsString,
     pub(crate) args: Vec<OsString>,
@@ -54,6 +55,21 @@ pub(crate) struct Invocation {
     pub(crate) env: Vec<(OsString, OsString)>,
     /// Names the log files, such as `metadata` for `metadata.stdout.log`.
     pub(crate) log_name: String,
+}
+
+/// Prints the environment's names only: a trial's environment holds the model API key,
+/// which must not reach a log, a panic message, or a result.
+impl fmt::Debug for Invocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let env_names: Vec<_> = self.env.iter().map(|(name, _)| name).collect();
+        f.debug_struct("Invocation")
+            .field("program", &self.program)
+            .field("args", &self.args)
+            .field("dir", &self.dir)
+            .field("env", &env_names)
+            .field("log_name", &self.log_name)
+            .finish()
+    }
 }
 
 /// How a command ended.

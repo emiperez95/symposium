@@ -125,6 +125,24 @@ impl Machine {
     }
 }
 
+impl Machine {
+    /// [`Self::with_exact_roots`] for the other `run` tests; production code goes through
+    /// [`Self::new`].
+    #[cfg(test)]
+    pub(super) fn for_tests(
+        user_data_roots: Vec<PathBuf>,
+        checkout: &Path,
+        toolchain: &Path,
+    ) -> Self {
+        Self::with_exact_roots(user_data_roots, checkout, toolchain).unwrap()
+    }
+
+    /// The toolchain's own `bin/`, which holds only Rust tools.
+    pub(crate) fn toolchain_bin(&self) -> PathBuf {
+        self.toolchain.join("bin")
+    }
+}
+
 /// The platform's roots, then the current user's home, then the caller's. The home is
 /// listed even when a platform root covers it: it can sit anywhere, such as
 /// `/var/lib/<service>`.
@@ -276,68 +294,14 @@ fn reject_nested(inner: &Path, outer: &Path) -> Result<(), RunError> {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use tempfile::TempDir;
 
     use super::*;
-    use crate::evals::Evals;
     use crate::run::Batch;
-    use crate::task::{BatchName, Task, TaskName};
-
-    /// A canonical scratch directory holding `home/`, `checkout/evals/`, and a toolchain
-    /// under the home, as rustup installs one.
-    struct Host {
-        _temp: TempDir,
-        base: PathBuf,
-    }
-
-    impl Host {
-        fn new() -> Self {
-            let temp = TempDir::new().unwrap();
-            let base = fs::canonicalize(temp.path()).unwrap();
-            let toolchain = base.join("home/dev/.rustup/toolchains/stable");
-            fs::create_dir_all(toolchain.join("bin")).unwrap();
-            fs::create_dir_all(toolchain.join("lib/rustlib")).unwrap();
-            let cargo = format!("cargo{}", std::env::consts::EXE_SUFFIX);
-            fs::write(toolchain.join("bin").join(cargo), "").unwrap();
-            fs::create_dir_all(base.join("checkout/evals")).unwrap();
-            Self { _temp: temp, base }
-        }
-
-        fn join(&self, relative: &str) -> PathBuf {
-            relative
-                .split('/')
-                .fold(self.base.clone(), |path, part| path.join(part))
-        }
-
-        fn machine(&self) -> Machine {
-            Machine::with_exact_roots(
-                vec![self.join("home")],
-                &self.join("checkout"),
-                &self.join("home/dev/.rustup/toolchains/stable"),
-            )
-            .unwrap()
-        }
-
-        fn batch(&self) -> Batch {
-            Batch::create(&self.join("eval"), &BatchName::new("batch").unwrap()).unwrap()
-        }
-    }
-
-    fn store_durability() -> (Evals, Task) {
-        let evals = Evals::in_repository();
-        let task = Task::load(&evals, &TaskName::new("store-durability").unwrap()).unwrap();
-        (evals, task)
-    }
-
-    fn trial(batch: &Batch, number: usize, configuration: Configuration) -> Trial {
-        let (evals, task) = store_durability();
-        batch
-            .create_trial(number, configuration, &evals, &task)
-            .unwrap()
-    }
+    use crate::run::test_support::{Host, trial};
+    use crate::task::BatchName;
 
     fn policy(trial: &Trial, machine: &Machine) -> Policy {
-        Policy::for_trial(trial, machine, "api.anthropic.com").unwrap()
+        Policy::for_trial(trial, machine, "api.example.com").unwrap()
     }
 
     #[test]
@@ -449,7 +413,7 @@ mod tests {
                     trial_dir("evidence"),
                 ],
             },
-            "network": { "allowedDomains": ["api.anthropic.com"] },
+            "network": { "allowedDomains": ["api.example.com"] },
         });
         assert_eq!(policy, expected);
     }
@@ -519,14 +483,10 @@ mod tests {
         let inside_checkout =
             Batch::create(&host.join("checkout/eval"), &BatchName::new("b").unwrap()).unwrap();
         let trial = trial(&inside_checkout, 1, Configuration::Baseline);
-        let result = Policy::for_trial(&trial, &machine, "api.anthropic.com");
+        let result = Policy::for_trial(&trial, &machine, "api.example.com");
         assert!(matches!(result, Err(RunError::Nested { .. })), "{result:?}");
 
-        let toolchain = host.join("checkout/toolchain");
-        fs::create_dir_all(toolchain.join("lib/rustlib")).unwrap();
-        fs::create_dir_all(toolchain.join("bin")).unwrap();
-        let cargo = format!("cargo{}", std::env::consts::EXE_SUFFIX);
-        fs::write(toolchain.join("bin").join(cargo), "").unwrap();
+        let toolchain = host.add_toolchain("checkout/toolchain");
         let result = Machine::with_exact_roots(Vec::new(), &host.join("checkout"), &toolchain);
         assert!(matches!(result, Err(RunError::Nested { .. })), "{result:?}");
     }

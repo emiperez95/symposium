@@ -20,15 +20,18 @@
 //! [`Batch`] keeps its root both as given and canonical, and a [`Trial`] carries its
 //! batch, so the two cannot be paired wrongly.
 
+mod env;
 mod error;
 mod policy;
+#[cfg(test)]
+mod test_support;
 
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(crate) use error::RunError;
-use policy::Policy;
+pub(crate) use policy::{Machine, Policy};
 
 use crate::evals::Evals;
 use crate::grade::copy_tree;
