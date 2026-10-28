@@ -28,6 +28,7 @@ pub(crate) use checks::CheckError;
 pub(crate) use error::{DirProblem, TaskError, TaskErrors};
 pub(crate) use name::{
     BatchName, CheckName, FixtureName, HookName, NameError, PluginName, SkillName, TaskName,
+    ToolName,
 };
 pub(crate) use pattern::EditablePattern;
 pub(crate) use protected::is_protected;

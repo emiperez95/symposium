@@ -14,9 +14,12 @@
 //! A write is checked on the host, not inside the sandbox: `srt` covers a read-denied
 //! directory with an empty writable tmpfs, so a write there succeeds and is thrown away.
 //!
-//! Nothing is staged yet, so a stand-in executable plays the staged `cargo-agents`.
-//! FIXME: launch the real clients and `cargo-agents` with `--version` once tools are
-//! staged.
+//! Tools are staged as the runner stages them, and each trial runs them by name from its
+//! `bin/`: the machine's `node`, a small npm-style package that finds the staged `node`
+//! through its `env node` line, and a stand-in for `cargo-agents`, which a baseline trial
+//! must not find at all.
+//!
+//! FIXME: stage and launch the real clients and `cargo-agents` with `--version`.
 //!
 //! Run on Linux with `cargo test -p symposium-eval -- --ignored`.
 
@@ -27,13 +30,16 @@ use std::time::Duration;
 
 use super::Configuration;
 use super::Trial;
-use super::test_support::{RealSrt, api_key, checkout, executable};
+use tempfile::TempDir;
+
+use super::stage::{Audience, Tool};
+use super::test_support::{RealSrt, api_key, checkout, executable, on_path};
 
 /// Long enough for a first build of the project and its fixture.
 const DEADLINE: Duration = Duration::from_secs(300);
 
-/// The trial's checks. Each argument after a `--` marker is a path the marker applies to;
-/// paths are absolute, so none is taken for a marker. A path before any marker, or after
+/// The trial's checks. Each argument after a `--` marker is a path or command name the
+/// marker applies to; none starts with `--`, so none is taken for a marker. A path before any marker, or after
 /// one the script does not know, fails the script rather than going unchecked.
 const SCRIPT: &str = r#"
 fail() { echo "smoke: $1" >&2; exit 1; }
@@ -49,6 +55,8 @@ for arg; do
         --unwritable) (echo changed >> "$arg") 2>/dev/null ;;
         --runnable) "$arg" --version >/dev/null || fail "cannot run $arg" ;;
         --not-runnable) "$arg" --version >/dev/null 2>&1 && fail "ran $arg" ;;
+        --command) "$arg" --version >/dev/null || fail "cannot run $arg from PATH" ;;
+        --absent-command) command -v "$arg" >/dev/null && fail "found $arg on PATH" ;;
         *) fail "unknown boundary mode '$mode' for $arg" ;;
     esac
 done
@@ -63,10 +71,13 @@ struct Boundary {
     unwritable: Vec<PathBuf>,
     runnable: Vec<PathBuf>,
     not_runnable: Vec<PathBuf>,
+    /// Staged tools the trial runs by name, from its `bin/`.
+    commands: Vec<&'static str>,
+    /// Names nothing on the trial's `PATH` may answer to.
+    absent_commands: Vec<&'static str>,
 }
 
-/// Two trials of one batch, one per configuration, and a stand-in for the staged
-/// `cargo-agents`.
+/// Two trials of one batch, one per configuration, created after the tools are staged.
 struct Smoke {
     real: RealSrt,
     staged: PathBuf,
@@ -85,9 +96,20 @@ fn each_trial_reaches_only_its_own_files() {
 
 impl Smoke {
     fn new() -> Self {
-        let real = RealSrt::new(api_key());
-        let staged = real.batch().symposium_tools().join("cargo-agents");
-        executable(&staged, "#!/bin/sh\necho 'cargo-agents stand-in'\n");
+        let mut real = RealSrt::new(api_key());
+        let sources = TempDir::new().unwrap();
+        real.stage("node", &Tool::Executable(on_path("node")), Audience::Common);
+        let package = sources.path().join("package");
+        fs::create_dir(&package).unwrap();
+        let cli = "#!/usr/bin/env node\nconsole.log('a staged package');\n";
+        executable(&package.join("cli.js"), cli);
+        let entry = PathBuf::from("cli.js");
+        let tool = Tool::NodePackage { package, entry };
+        real.stage("package", &tool, Audience::Common);
+        let stand_in = sources.path().join("cargo-agents");
+        executable(&stand_in, "#!/bin/sh\necho 'cargo-agents stand-in'\n");
+        let tool = Tool::Executable(stand_in);
+        let staged = real.stage("cargo-agents", &tool, Audience::Symposium);
         let symposium = real.trial(1, Configuration::Symposium);
         let baseline = real.trial(2, Configuration::Baseline);
         Self {
@@ -124,11 +146,15 @@ impl Smoke {
             unwritable: self.unwritable(trial, other),
             runnable: Vec::new(),
             not_runnable: vec![self.installed_cargo_agents()],
+            commands: vec!["node", "package"],
+            absent_commands: Vec::new(),
         };
         if is_symposium {
             boundary.runnable.push(self.staged.clone());
+            boundary.commands.push("cargo-agents");
         } else {
             boundary.not_runnable.push(self.staged.clone());
+            boundary.absent_commands.push("cargo-agents");
             boundary.unreadable.push(self.registry_file());
         }
         boundary
@@ -215,6 +241,14 @@ fn arguments(boundary: &Boundary) -> Vec<OsString> {
         ("--not-runnable", &boundary.not_runnable),
     ];
     let mut arguments = Vec::new();
+    let commands = [
+        ("--command", &boundary.commands),
+        ("--absent-command", &boundary.absent_commands),
+    ];
+    for (marker, names) in commands {
+        arguments.push(OsString::from(marker));
+        arguments.extend(names.iter().map(OsString::from));
+    }
     for (marker, paths) in sections {
         arguments.push(OsString::from(marker));
         for path in paths {

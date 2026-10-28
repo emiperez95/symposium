@@ -113,6 +113,18 @@ impl RealSrt {
         &self.batch
     }
 
+    /// Stages `tool` as `name`; trials created afterwards link it.
+    pub(crate) fn stage(
+        &mut self,
+        name: &str,
+        tool: &super::stage::Tool,
+        audience: super::stage::Audience,
+    ) -> PathBuf {
+        let name = crate::task::ToolName::new(name).unwrap();
+        let staged = self.batch.stage(name, tool, audience).unwrap();
+        staged.command().to_owned()
+    }
+
     pub(crate) fn decoy_home(&self) -> &std::path::Path {
         self.decoy_home.path()
     }
@@ -167,7 +179,7 @@ fn installed_srt() -> super::srt::Srt {
 
 /// The first file called `name` in a directory on `PATH`.
 #[cfg(target_os = "linux")]
-fn on_path(name: &str) -> PathBuf {
+pub(crate) fn on_path(name: &str) -> PathBuf {
     std::env::split_paths(&std::env::var_os("PATH").unwrap())
         .map(|dir| dir.join(name))
         .find(|path| path.is_file())

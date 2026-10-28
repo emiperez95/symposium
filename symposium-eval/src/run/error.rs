@@ -33,6 +33,18 @@ pub(crate) enum RunError {
     Copy(#[source] ImportError),
     #[error("cannot write the `srt` policy")]
     Policy(#[source] serde_json::Error),
+    #[error("a tool named `{0}` is already staged")]
+    StagedTwice(String),
+    #[error("`{}` is not a file inside its package", .0.display())]
+    ToolEntry(PathBuf),
+    #[error("cannot stage a tool")]
+    Stage(#[source] ImportError),
+    #[error("cannot link `{}` to a staged tool", .path.display())]
+    Link {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
     #[error("cannot build `PATH` for the trial")]
     PathList(#[source] JoinPathsError),
     #[error("`{}` has not been written, so the trial cannot run", .0.display())]

@@ -26,6 +26,7 @@ mod policy;
 #[cfg(all(test, target_os = "linux"))]
 mod smoke;
 mod srt;
+pub(crate) mod stage;
 #[cfg(test)]
 mod test_support;
 
@@ -37,6 +38,7 @@ pub(crate) use env::ApiKey;
 pub(crate) use error::RunError;
 pub(crate) use policy::{Machine, Policy};
 pub(crate) use srt::SRT_VERSION;
+use stage::StagedTool;
 
 use crate::evals::Evals;
 use crate::grade::copy_tree;
@@ -58,6 +60,8 @@ pub(crate) struct Batch {
     /// The evaluation root as given, which `srt` matches separately when it is a link.
     eval_root_as_given: PathBuf,
     root: PathBuf,
+    /// The tools staged so far, which trials created from now on link.
+    staged: Vec<StagedTool>,
 }
 
 /// The directories of one trial. The agent sees only these, the staged tools, and the
@@ -107,6 +111,7 @@ impl Batch {
             root: eval_root.join(name.as_str()),
             eval_root,
             eval_root_as_given,
+            staged: Vec::new(),
         };
         create_private(&batch.root)?;
         create_dirs([batch.common_tools(), batch.symposium_tools()])?;
@@ -165,6 +170,7 @@ impl Batch {
             trial.tmp(),
             trial.evidence(),
         ])?;
+        self.link_tools(&trial)?;
         copy_tree(&evals.starter_dir(task.name()), &trial.project(), "starter")
             .map_err(RunError::Copy)?;
         // Fixtures are not in the policy's writable paths, so `srt` keeps them read-only.

@@ -238,14 +238,38 @@ impl GradingCopy {
     }
 }
 
-/// Copies a tree the repository owns, which holds only files and directories. Existing
-/// entries are overlaid, replacing an entry of the other type, so a second tree can be
-/// laid over a first.
+/// Copies a tree the repository owns, which holds only files and directories, leaving out
+/// its top-level `target/`, which is build output. Existing entries are overlaid,
+/// replacing an entry of the other type, so a second tree can be laid over a first.
 ///
 /// # Errors
 ///
 /// When the tree holds anything else, or cannot be read or written.
 pub(crate) fn copy_tree(source: &Path, destination: &Path, tree: &str) -> Result<(), ImportError> {
+    copy_entries(source, destination, tree, |entry| {
+        !is_build_output(&entry.path)
+    })
+}
+
+/// Copies a tree exactly, every file and directory included, such as an installed
+/// package, which can hold a `target/` of its own. Links and special files are refused
+/// as in [`copy_tree`].
+///
+/// # Errors
+///
+/// When the tree holds anything but files and directories, or cannot be read or
+/// written.
+pub(crate) fn copy_exact(source: &Path, destination: &Path, tree: &str) -> Result<(), ImportError> {
+    copy_entries(source, destination, tree, |_| true)
+}
+
+/// Copies the entries of `source` that `keep` accepts.
+fn copy_entries(
+    source: &Path,
+    destination: &Path,
+    tree: &str,
+    keep: impl Fn(&TreeEntry) -> bool,
+) -> Result<(), ImportError> {
     let entries = tree::walk(source).map_err(|walk_error| ImportError::Trusted {
         tree: tree.to_owned(),
         source: walk_error,
@@ -253,7 +277,7 @@ pub(crate) fn copy_tree(source: &Path, destination: &Path, tree: &str) -> Result
     create_dir(destination)?;
     entries
         .into_iter()
-        .filter(|entry| !is_build_output(&entry.path))
+        .filter(keep)
         .try_for_each(|entry| copy_entry(source, destination, entry, tree))
 }
 
