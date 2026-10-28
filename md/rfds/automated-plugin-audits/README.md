@@ -6,8 +6,8 @@
 - Add a curated **audits** list, modeled on cargo-vet: one small TOML file per crate, pinning a digest of the plugin payload (its manifest and the skill files it ships). A dependency whose payload matches an audit loads with no prompt.
 - The audit asks one question: **are the skills poisoned?** Hooks, MCP servers and subcommands are code, and are left to the ecosystem's code checks (see FAQ).
 - A *System One* model does the reading: a classifier that answers a fixed set of questions with probabilities rather than generating text. A confident "unsafe" keeps a crate off the list automatically; every approval is confirmed by a human.
-- The list lives in its own repo, `symposium-dev/audits`, with its automation. Adding a crate is a PR merge, never a Symposium release. Audits are read from every configured registry, so a company can ship its own vetted list as a local directory and ignore the community one.
-- A safety audit and "do I want this plugin" stay separate. The user picks how much is accepted without asking with `[plugins] auto-accept` — `audited` (the default: audited plugins load, anything else asks and says so), `none`, or `all` — and can turn off a vetted plugin they don't want.
+- The list lives in its own repo, `symposium-dev/audits`, with its automation. Adding a crate is a PR merge, never a Symposium release. Audits are read from every configured registry, so a company can ship its own audits list as a local directory and ignore the community one.
+- A safety audit and "do I want this plugin" stay separate. The user picks how much is accepted without asking with `[plugins] auto-accept` — `audit` (the default: audited plugins load, anything else asks and says so), `none`, or `all` — and can turn off an audited plugin they don't want.
 
 ## Motivation
 
@@ -49,7 +49,7 @@ flowchart TD
 
 A revocation outranks the user's own `use`, because it marks a payload known to be harmful. Short of that, a user's `use` or `auto-enable` is deliberately a standing grant: it trusts the crate, not one release, the same way depending on the crate trusts its future code. Re-checking each release is the audit list's job, not the user's. A user who does not want an audit to skip the prompt sets `auto-accept = "none"`; their own `use` and `auto-enable` entries still stand, so they remove those to be asked again.
 
-The chart is the default, `auto-accept = "audited"`. Two others change what the last two boxes mean: `none` turns the audit box into a prompt, so an audited plugin asks like any other (today's behavior), and `all` loads everything without asking, like `auto-enable = ["*"]`. `disable` and revocations win under every setting. Whenever the prompt appears for an unvetted plugin, it says so prominently. An audit answers only "is the text safe"; whether the user wants the plugin is theirs to decide, and `[plugins] disable` turns off a vetted one they don't want.
+The chart is the default, `auto-accept = "audit"`. Two others change what the last two boxes mean: `none` turns the audit box into a prompt, so an audited plugin asks like any other (today's behavior), and `all` loads everything without asking, like `auto-enable = ["*"]`. `disable` and revocations win under every setting. Whenever the prompt appears for a plugin with no audit, it says so prominently. An audit answers only "is the text safe"; whether the user wants the plugin is theirs to decide, and `[plugins] disable` turns off an audited one they don't want.
 
 ## Detailed plans
 
@@ -125,8 +125,8 @@ The Symposium maintainers run the audits repo. An unreviewed crate is no worse o
 
 Anyone can keep an audit list by hand, for example a company in a local directory, and get the full feature.
 
-- **Auto-accept setting**: `[plugins] auto-accept = "none" | "audited" | "all"`. `none` is today's behavior and `all` loads everything without asking; until audits exist, `audited` behaves like `none`.
-- **Audits**, in two commits: read `audits/` from configured registries, compute the payload digest and enforce `[[revoked]]`; then load matching `[[audit]]` entries without a prompt under `auto-accept = "audited"`, the default.
+- **Auto-accept setting**: `[plugins] auto-accept = "none" | "audit" | "all"`. `none` is today's behavior and `all` loads everything without asking; until audits exist, `audit` behaves like `none`.
+- **Audits**, in two commits: read `audits/` from configured registries, compute the payload digest and enforce `[[revoked]]`; then load matching `[[audit]]` entries without a prompt under `auto-accept = "audit"`, the default.
 
 ### Phase 2: community list (`symposium-dev/audits`), human review
 
