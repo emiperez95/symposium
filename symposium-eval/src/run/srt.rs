@@ -366,94 +366,24 @@ mod tests {
     #[cfg(target_os = "linux")]
     mod real {
         use std::fs;
-        use std::process::Command;
         use std::thread;
-
-        use tempfile::TempDir;
 
         use super::*;
         use crate::run::env::ApiKey;
-        use crate::run::{Batch, Machine};
-        use crate::task::BatchName;
-
-        /// A batch on this machine, under the installed `srt`.
-        struct Real {
-            srt: Srt,
-            machine: Machine,
-            batch: Batch,
-            _eval_root: TempDir,
-        }
-
-        impl Real {
-            fn new() -> Self {
-                let on_path = |name: &str| {
-                    std::env::split_paths(&std::env::var_os("PATH").unwrap())
-                        .map(|dir| dir.join(name))
-                        .find(|path| path.is_file())
-                        .unwrap_or_else(|| panic!("`{name}` is not on PATH"))
-                };
-                // npm links `srt` on `PATH` to the package's `dist/cli.js`.
-                let cli = fs::canonicalize(on_path("srt")).unwrap();
-                let srt = Srt::new(&on_path("node"), &cli, &on_path("bwrap")).unwrap();
-                let sysroot = Command::new("rustc")
-                    .args(["--print", "sysroot"])
-                    .output()
-                    .unwrap();
-                let sysroot = PathBuf::from(String::from_utf8(sysroot.stdout).unwrap().trim());
-                let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-                let machine = Machine::new(Vec::new(), checkout, &sysroot).unwrap();
-                let eval_root = TempDir::new().unwrap();
-                srt.preflight(eval_root.path()).unwrap();
-                let batch =
-                    Batch::create(eval_root.path(), &BatchName::new("batch").unwrap()).unwrap();
-                Self {
-                    srt,
-                    machine,
-                    batch,
-                    _eval_root: eval_root,
-                }
-            }
-
-            /// Runs `script` with `sh -c` in a new trial under its generated policy.
-            fn run(
-                &self,
-                number: usize,
-                api_key: &ApiKey,
-                script: &str,
-                deadline: Duration,
-            ) -> (Trial, Finished) {
-                let trial = trial(&self.batch, number, Configuration::Baseline);
-                let policy =
-                    Policy::for_trial(&trial, &self.machine, "api.example.com", api_key).unwrap();
-                trial.write_policy(&policy).unwrap();
-                let invocation = Invocation {
-                    program: "sh".into(),
-                    args: vec!["-c".into(), script.into()],
-                    dir: trial.project(),
-                    env: trial.environment(&self.machine, api_key).unwrap(),
-                    log_name: "probe".to_owned(),
-                };
-                let finished = self
-                    .srt
-                    .for_trial(&trial)
-                    .unwrap()
-                    .run(&invocation, deadline, &trial.evidence())
-                    .unwrap();
-                (trial, finished)
-            }
-        }
+        use crate::run::test_support::RealSrt;
 
         #[test]
         #[ignore = "needs node, srt, and bubblewrap installed"]
         fn trials_do_not_share_temporary_files() {
-            let real = Real::new();
+            let real = RealSrt::new(api_key());
             let marker = format!("left-by-{}", std::process::id());
             let minute = Duration::from_secs(60);
 
-            let (first, finished) = real.run(
-                1,
-                &api_key(),
+            let first = real.trial(1, Configuration::Baseline);
+            let finished = real.run(
+                &first,
                 &format!("echo 1 > \"$TMPDIR/{marker}\" && echo 1 > /tmp/claude/{marker}-claude"),
+                &[],
                 minute,
             );
             assert!(finished.succeeded(), "{}", finished.stderr.tail());
@@ -462,10 +392,11 @@ mod tests {
             let shared = Path::new("/tmp/claude").join(format!("{marker}-claude"));
             assert!(!shared.exists());
 
-            let (_, finished) = real.run(
-                2,
-                &api_key(),
+            let second = real.trial(2, Configuration::Baseline);
+            let finished = real.run(
+                &second,
                 &format!("test ! -e \"$TMPDIR/{marker}\" && test ! -e /tmp/claude/{marker}-claude"),
+                &[],
                 minute,
             );
             assert!(finished.succeeded(), "{}", finished.stderr.tail());
@@ -475,13 +406,13 @@ mod tests {
         #[test]
         #[ignore = "needs node, srt, and bubblewrap installed"]
         fn the_api_key_never_enters_the_sandbox() {
-            let real = Real::new();
             let canary = format!("sk-canary-{}", std::process::id());
-            let api_key = ApiKey::new("EXAMPLE_API_KEY", canary.clone().into());
+            let real = RealSrt::new(ApiKey::new("EXAMPLE_API_KEY", canary.clone().into()));
             let script = "printf 'key=%s\\n' \"$EXAMPLE_API_KEY\"; env; \
                           for f in /proc/[0-9]*/environ; do tr '\\0' '\\n' < \"$f\"; done; true";
 
-            let (_, finished) = real.run(1, &api_key, script, Duration::from_secs(60));
+            let trial = real.trial(1, Configuration::Baseline);
+            let finished = real.run(&trial, script, &[], Duration::from_secs(60));
 
             assert!(finished.succeeded(), "{}", finished.stderr.tail());
             let stdout = fs::read_to_string(finished.stdout.log()).unwrap();
@@ -497,11 +428,12 @@ mod tests {
         #[test]
         #[ignore = "needs node, srt, and bubblewrap installed"]
         fn a_detached_process_dies_at_the_deadline() {
-            let real = Real::new();
+            let real = RealSrt::new(api_key());
             let script = "setsid sh -c 'sleep 6; echo late > \"$TMPDIR/late\"' & \
                           echo started > \"$TMPDIR/started\"; sleep 60";
 
-            let (trial, finished) = real.run(1, &api_key(), script, Duration::from_secs(5));
+            let trial = real.trial(1, Configuration::Baseline);
+            let finished = real.run(&trial, script, &[], Duration::from_secs(5));
 
             assert!(finished.timed_out());
             // Without this, a slow start would pass the test without testing anything.

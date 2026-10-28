@@ -23,6 +23,8 @@
 mod env;
 mod error;
 mod policy;
+#[cfg(all(test, target_os = "linux"))]
+mod smoke;
 mod srt;
 #[cfg(test)]
 mod test_support;

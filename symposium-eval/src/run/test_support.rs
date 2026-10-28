@@ -73,3 +73,145 @@ pub(crate) fn trial(batch: &Batch, number: usize, configuration: Configuration) 
 pub(crate) fn api_key() -> ApiKey {
     ApiKey::new("EXAMPLE_API_KEY", "sk-test".into())
 }
+
+/// A batch on this machine under the installed `srt`, for the tests that run real
+/// `node`, `srt`, and `bwrap`. Every trial's policy and environment use the one API key,
+/// so a test cannot mask one key and pass another.
+#[cfg(target_os = "linux")]
+pub(crate) struct RealSrt {
+    srt: super::srt::Srt,
+    machine: Machine,
+    batch: Batch,
+    api_key: ApiKey,
+    _eval_root: TempDir,
+    /// A home with a shell profile and an installed `cargo-agents`, denied like every
+    /// user's, so the boundary is checked against files that are surely there.
+    decoy_home: TempDir,
+}
+
+#[cfg(target_os = "linux")]
+impl RealSrt {
+    pub(crate) fn new(api_key: ApiKey) -> Self {
+        let srt = installed_srt();
+        let decoy_home = decoy_home();
+        let machine =
+            Machine::new(vec![decoy_home.path().to_owned()], &checkout(), &sysroot()).unwrap();
+        let eval_root = TempDir::new().unwrap();
+        srt.preflight(eval_root.path()).unwrap();
+        let batch = Batch::create(eval_root.path(), &BatchName::new("batch").unwrap()).unwrap();
+        Self {
+            srt,
+            machine,
+            batch,
+            api_key,
+            _eval_root: eval_root,
+            decoy_home,
+        }
+    }
+
+    pub(crate) fn batch(&self) -> &Batch {
+        &self.batch
+    }
+
+    pub(crate) fn decoy_home(&self) -> &std::path::Path {
+        self.decoy_home.path()
+    }
+
+    /// Creates a trial of `store-durability` and writes its policy.
+    pub(crate) fn trial(&self, number: usize, configuration: Configuration) -> Trial {
+        let trial = trial(&self.batch, number, configuration);
+        let policy =
+            super::Policy::for_trial(&trial, &self.machine, "api.example.com", &self.api_key)
+                .unwrap();
+        trial.write_policy(&policy).unwrap();
+        trial
+    }
+
+    /// Runs `script` with `sh -c` in `trial`'s project, under its policy, with `args` as
+    /// its positional parameters. They pass through `srt`, which handles them as text, so
+    /// a path that is not UTF-8 cannot be one.
+    pub(crate) fn run(
+        &self,
+        trial: &Trial,
+        script: &str,
+        args: &[std::ffi::OsString],
+        deadline: std::time::Duration,
+    ) -> crate::grade::process::Finished {
+        use crate::grade::process::{Backend, Invocation};
+
+        let invocation = Invocation {
+            program: "sh".into(),
+            args: ["-c".into(), script.into(), "sh".into()]
+                .into_iter()
+                .chain(args.iter().cloned())
+                .collect(),
+            dir: trial.project(),
+            env: trial.environment(&self.machine, &self.api_key).unwrap(),
+            log_name: "probe".to_owned(),
+        };
+        self.srt
+            .for_trial(trial)
+            .unwrap()
+            .run(&invocation, deadline, &trial.evidence())
+            .unwrap()
+    }
+}
+
+/// The `srt` installed on this machine, with the `node` and `bwrap` it needs.
+#[cfg(target_os = "linux")]
+fn installed_srt() -> super::srt::Srt {
+    // npm links `srt` on `PATH` to the package's `dist/cli.js`.
+    let cli = fs::canonicalize(on_path("srt")).unwrap();
+    super::srt::Srt::new(&on_path("node"), &cli, &on_path("bwrap")).unwrap()
+}
+
+/// The first file called `name` in a directory on `PATH`.
+#[cfg(target_os = "linux")]
+fn on_path(name: &str) -> PathBuf {
+    std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|dir| dir.join(name))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| panic!("`{name}` is not on PATH"))
+}
+
+/// The active toolchain's sysroot, as `rustc` reports it.
+#[cfg(target_os = "linux")]
+fn sysroot() -> PathBuf {
+    let output = std::process::Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .output()
+        .unwrap();
+    PathBuf::from(String::from_utf8(output.stdout).unwrap().trim())
+}
+
+/// A home holding a shell profile and an installed `cargo-agents`, which a trial must
+/// not read or run.
+#[cfg(target_os = "linux")]
+fn decoy_home() -> TempDir {
+    let home = TempDir::new().unwrap();
+    fs::write(home.path().join(".bashrc"), "export DECOY=1\n").unwrap();
+    // A name `sh` would need quoted, which reaches the script as an argument.
+    fs::write(home.path().join("it's private"), "decoy\n").unwrap();
+    let installed = home.path().join(".cargo/bin/cargo-agents");
+    fs::create_dir_all(installed.parent().unwrap()).unwrap();
+    executable(&installed, "#!/bin/sh\necho 'installed cargo-agents'\n");
+    home
+}
+
+/// Writes an executable shell script at `path`.
+#[cfg(target_os = "linux")]
+pub(crate) fn executable(path: &std::path::Path, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::write(path, script).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// The Symposium checkout this crate is built from.
+#[cfg(target_os = "linux")]
+pub(crate) fn checkout() -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_owned()
+}
