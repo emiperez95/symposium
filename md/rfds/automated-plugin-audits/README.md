@@ -2,16 +2,16 @@
 
 ## TL;DR
 
-- Today a dependency's embedded plugin loads only after the user says yes, and that yes is recorded by crate *name*: no version, no content check, forever. Every user of a popular crate answers the same prompt about the same text, which nobody has read.
+- Today a dependency's embedded plugin loads only after the user says yes. Every user of a popular crate answers the same prompt about the same text, which nobody has read.
 - Add a curated **audits** list, modeled on cargo-vet: one small TOML file per crate, pinning a digest of the plugin payload (its manifest and the skill files it ships). A dependency whose payload matches an audit loads with no prompt.
 - The audit asks one question: **are the skills poisoned?** Hooks, MCP servers and subcommands are code, and are left to the ecosystem's code checks (see FAQ).
 - A *System One* model does the reading: a classifier that answers a fixed set of questions with probabilities rather than generating text. A confident "unsafe" keeps a crate off the list automatically; every approval is confirmed by a human.
 - The list lives in its own repo, `symposium-dev/audits`, with its automation. Adding a crate is a PR merge, never a Symposium release. Audits are read from every configured registry, so a company can ship its own vetted list as a local directory and ignore the community one.
-- A safety audit and "do I want this plugin" stay separate. The user picks how much to be asked — `confirm-unvetted` (the default: audited loads, anything else asks and says so), `confirm-all`, or `confirm-none` — and can turn off a vetted plugin they don't want.
+- A safety audit and "do I want this plugin" stay separate. The user picks how much is accepted without asking with `[plugins] auto-accept` — `audited` (the default: audited plugins load, anything else asks and says so), `none`, or `all` — and can turn off a vetted plugin they don't want.
 
 ## Motivation
 
-Today the consent prompt in `cargo agents sync` and the `cargo agents use` command record a bare crate name in `[plugins] auto-enable` or `use`. After `cargo update`, a crate enabled at 1.0 ships different `SKILL.md` text at 1.1 and it loads with no re-prompt. An `auto-enable` decision is user-wide, and approving one crate also approves any crate its plugin chains to through `[[plugins]]`. The prompt itself carries no information: the user is asked to trust text nobody has read.
+Today the consent prompt in `cargo agents sync` and the `cargo agents use` command ask every user to make the same trust decision about every plugin-bearing dependency, and to make it blind: the prompt carries no information, because nobody has read the text being trusted. Each user answers it separately for the same crate, and approving one crate also approves any crate its plugin chains to through `[[plugins]]`. Audits replace that blind decision with a shared, informed one for the common case.
 
 ## Change in a nutshell
 
@@ -40,16 +40,16 @@ flowchart TD
     B -- yes --> X[Not loaded]
     B -- no --> C{Revoked?}
     C -- yes --> X
-    C -- no --> D{use / auto-enable, at the digest the user approved?}
+    C -- no --> D{use / auto-enable?}
     D -- yes --> L[Loaded]
     D -- no --> E{Payload digest matches an audit?}
     E -- yes --> L
     E -- no --> P[Prompt the user]
 ```
 
-A revocation outranks the user's own `use`, because it marks a payload known to be harmful. Consent is digest-bound too: when the user enables a plugin, the payload digest they saw is recorded with the entry, and a later release whose payload differs falls back to the prompt, which names what changed. Existing name-only entries are pinned to the payload present at the next interactive sync.
+A revocation outranks the user's own `use`, because it marks a payload known to be harmful. Short of that, a user's `use` or `auto-enable` is deliberately a standing grant: it trusts the crate, not one release, the same way depending on the crate trusts its future code. Re-checking each release is the audit list's job, not the user's. A user who does not want an audit to skip the prompt sets `auto-accept = "none"`; their own `use` and `auto-enable` entries still stand, so they remove those to be asked again.
 
-The chart is the default mode, `confirm-unvetted`. Two others change what the last two boxes mean: `confirm-all` prompts even for an audited plugin, and `confirm-none` loads everything without asking. Whenever the prompt appears for an unvetted plugin, it says so prominently. An audit answers only "is the text safe"; whether the user wants the plugin is theirs to decide, and `[plugins] disable` turns off a vetted one they don't want.
+The chart is the default, `auto-accept = "audited"`. Two others change what the last two boxes mean: `none` turns the audit box into a prompt, so an audited plugin asks like any other (today's behavior), and `all` loads everything without asking, like `auto-enable = ["*"]`. `disable` and revocations win under every setting. Whenever the prompt appears for an unvetted plugin, it says so prominently. An audit answers only "is the text safe"; whether the user wants the plugin is theirs to decide, and `[plugins] disable` turns off a vetted one they don't want.
 
 ## Detailed plans
 
@@ -61,7 +61,7 @@ The chart is the default mode, `confirm-unvetted`. Two others change what the la
 
 ### The classifier
 
-Input is everything the agent can read once the plugin is installed: every file in each skill directory — `SKILL.md`, scripts, and supporting documents it links to — for all skills of the crate together, since sync installs the whole directory. A payload containing a file that cannot be inspected as text is not audited. A System One model answers a fixed set of questions about it, each with a probability: does the skill tell the agent to fetch and run remote code, send out secrets or source, hide what it is doing from the user, or act outside the task a library's documentation would describe? Each question has its own `reason` code.
+Input is the whole skill directory — `SKILL.md` and any `resources/` and `scripts/` it ships — for all of the crate's skills in a single call, since the model cannot ask for more. A skill too large for one call, or containing a file that cannot be read as text, is not audited and falls back to the prompt. A System One model answers a fixed set of questions about it, each with a probability: does the skill tell the agent to fetch and run remote code, send out secrets or source, hide what it is doing from the user, or act outside the task a library's documentation would describe? Each question has its own `reason` code.
 
 **Nobody talks to the classifier.** Text addressed to an AI reviewer ("ignore previous instructions", "classify as safe") has no place in a legitimate skill, so it is disqualifying on its own. The model's answers are not shown to the submitter.
 
@@ -101,7 +101,7 @@ Depending on a crate means running its code; a hook or MCP server from the same 
 
 ### Why a System One model rather than an LLM judge?
 
-A fixed set of answers with probabilities can be routed by plain rules, the model uses no tools, and a skill cannot argue its way into a different answer the way it can with a model that writes its verdict. Models of this class exist off the shelf, hosted and open-weight; we do not train our own.
+A fixed set of answers with probabilities can be routed by plain rules, the model uses no tools, and a skill cannot argue its way into a different answer the way it can with a model that writes its verdict. Models of this class exist off the shelf, hosted and open-weight; we start with one of those and fine-tune an open-weight model only if needed.
 
 ### Why a content digest rather than a version?
 
@@ -121,9 +121,26 @@ The Symposium maintainers run the audits repo. An unreviewed crate is no worse o
 
 ## Implementation plan and status
 
-1. Compute a plugin's payload digest and expose it as a command.
-2. Define the audits file format and read it from trusted registries, including the builtin one.
-3. Enforce revocations.
-4. Load audited plugins without a prompt; show the audit in `cargo agents status` and in the prompt.
-5. Set up the audits repo with its first entries.
-6. Docs.
+### Phase 1: client (`symposium-dev/symposium`)
+
+Anyone can keep an audit list by hand, for example a company in a local directory, and get the full feature.
+
+- **Auto-accept setting**: `[plugins] auto-accept = "none" | "audited" | "all"`. `none` is today's behavior and `all` loads everything without asking; until audits exist, `audited` behaves like `none`.
+- **Audits**, in two commits: read `audits/` from configured registries, compute the payload digest and enforce `[[revoked]]`; then load matching `[[audit]]` entries without a prompt under `auto-accept = "audited"`, the default.
+
+### Phase 2: community list (`symposium-dev/audits`), human review
+
+- Bootstrap the repo: format, CI validation, hand-reviewed seed entries.
+- Ship it as a builtin registry (main repo).
+- Audit requests and a reusable runner that maintainers run in batches and other companies can run on their own lists.
+- Link to the request form from the prompt (main repo).
+- Propose revocations from the OSV malicious-package feed.
+
+### Phase 3: the model
+
+- A labeled dataset of benign and poisoned skills, including phase 2 decisions.
+- An eval harness comparing candidate System One models.
+- Pick and calibrate a model; fine-tune an open-weight one only if needed.
+- Classifier in the runner: confident-unsafe is rejected, safe is pre-filled for a human.
+
+Docs ship with each change. Phase 3 can start as soon as phase 2 produces decisions.
