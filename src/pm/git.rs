@@ -12,7 +12,7 @@ use symposium_install::UpdateLevel;
 use symposium_install::git::GitCacheManager;
 
 use super::{
-    FetchedPackage, PackageId, PackageManager, PathPm, PluginInfo, RegistrySource,
+    FetchedPackage, PackageId, PackageManager, PathPm, PluginInfo, RegistryListing, RegistrySource,
     UnvalidatedPlugin,
 };
 use crate::config::REGISTRY_CACHE_SUBDIR;
@@ -68,7 +68,7 @@ impl PackageManager for GitPm {
         self.inner.active_plugins(deps).await
     }
 
-    async fn registry_plugins(&self) -> Result<Vec<UnvalidatedPlugin>> {
+    async fn registry_plugins(&self) -> Result<RegistryListing<UnvalidatedPlugin>> {
         let name = &self.name;
         if !self.inner.dir.exists() {
             anyhow::bail!(

@@ -25,6 +25,8 @@ For each agent, `cargo agents` needs to know how to:
 
 Where these files go depends on whether the agent is configured at the user level or the project level (see [`sync --agent`](./sync-agent-flow.md)).
 
+Unregistering takes symposium's entries out of a hooks file it shares with the user, along with the event arrays and the `hooks` object that this leaves empty. Whatever else is in the file stays as it was.
+
 ## Extension locations
 
 When installing skills, `cargo agents` prefers vendor-neutral paths where possible:
@@ -57,7 +59,7 @@ At the global level, each agent has its own path:
 
 ### Hook registration
 
-Claude Code hooks live under the `"hooks"` key in settings JSON files. Each event maps to an array of matcher groups, each containing an array of hook commands.
+Claude Code hooks live under the `"hooks"` key in settings JSON files. Each event maps to an array of matcher groups, each containing an array of hook commands. The user's own handlers can share symposium's group, so unregistering removes symposium's handler from it and drops the group only once it is empty.
 
 | Scope | File |
 |-------|------|
@@ -340,6 +342,8 @@ Example hook registration:
 
 Note: An empty `matcher` string matches everything in Codex (equivalent to `"*"` in other agents).
 
+Unregistering works as in Claude Code: symposium's handler leaves its matcher group, and the group goes only once it is empty.
+
 ### Supported events
 
 | Event | Description |
@@ -389,7 +393,7 @@ OpenCode's plugin system supports these events, but Symposium does not currently
 
 ### Hook registration
 
-**Goose does not implement lifecycle hooks.** It uses MCP extensions for extensibility. `symposium` cannot register hooks for Goose.
+**Symposium registers no hooks for Goose.** Goose has lifecycle hooks of its own (a plugin can carry them in `hooks/hooks.json`), but symposium does not use them.
 
 Goose is supported as a **skills-only** agent — `cargo agents sync` will install skill files in the vendor-neutral `.agents/skills/` path.
 

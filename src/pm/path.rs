@@ -18,8 +18,8 @@ use anyhow::{Context, Result};
 use symposium_install::UpdateLevel;
 
 use super::{
-    ANY_VERSION, FetchedPackage, PackageId, PackageManager, PluginInfo, RegistrySource,
-    UnvalidatedPlugin, layout,
+    ANY_VERSION, FetchedPackage, PackageId, PackageManager, PluginInfo, RegistryListing,
+    RegistrySource, UnvalidatedPlugin, layout,
 };
 use crate::report::ReportEvent;
 
@@ -55,13 +55,16 @@ impl PackageManager for PathPm {
     /// plugin applies is decided later by its own predicates. A registry is a
     /// trust root, so these activate without consent.
     async fn active_plugins(&self, _deps: &[PackageId]) -> Vec<UnvalidatedPlugin> {
-        self.registry_plugins().await.unwrap_or_else(|e| {
-            tracing::warn!(error = %format!("{e:#}"), "cannot list registry");
-            Vec::new()
-        })
+        self.registry_plugins()
+            .await
+            .map(|listing| listing.plugins)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %format!("{e:#}"), "cannot list registry");
+                Vec::new()
+            })
     }
 
-    async fn registry_plugins(&self) -> Result<Vec<UnvalidatedPlugin>> {
+    async fn registry_plugins(&self) -> Result<RegistryListing<UnvalidatedPlugin>> {
         std::fs::read_dir(&self.dir).with_context(|| {
             format!(
                 "cannot read registry `{}` at {}",
@@ -71,22 +74,28 @@ impl PackageManager for PathPm {
         })?;
         let entries = layout::enumerate(&self.dir)
             .with_context(|| format!("cannot list registry `{}`", self.name))?;
-        let mut out = Vec::new();
+        let mut listing = RegistryListing {
+            plugins: Vec::new(),
+            complete: true,
+        };
         for entry in entries {
             match crate::plugins::entry_plugin(&self.dir, &entry.subpath, &self.name) {
-                Some(Ok(p)) => out.push(p),
-                Some(Err(e)) => tracing::warn!(
-                    report = %ReportEvent::Warning {
-                        message: format!(
-                            "skipping {}: {e:#}",
-                            crate::output::display_path(&self.dir.join(&entry.subpath))
-                        ),
-                    },
-                ),
+                Some(Ok(p)) => listing.plugins.push(p),
+                Some(Err(e)) => {
+                    listing.complete = false;
+                    tracing::warn!(
+                        report = %ReportEvent::Warning {
+                            message: format!(
+                                "skipping {}: {e:#}",
+                                crate::output::display_path(&self.dir.join(&entry.subpath))
+                            ),
+                        },
+                    );
+                }
                 None => {}
             }
         }
-        Ok(out)
+        Ok(listing)
     }
 
     /// The entry an id names (`id.name` is the entry's subpath key).

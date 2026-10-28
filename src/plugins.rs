@@ -871,7 +871,12 @@ pub async fn list_plugins(sym: &Symposium) -> Vec<ProviderInfo> {
 
     // Trusted instances only: registry entries, not dependency-embedded crates.
     for inst in pms.instances().filter(|i| i.trusted) {
-        for p in inst.registry_plugins().await.unwrap_or_default() {
+        for p in inst
+            .registry_plugins()
+            .await
+            .map(|read| read.plugins)
+            .unwrap_or_default()
+        {
             by_registry
                 .entry(inst.name.clone())
                 .or_default()
@@ -910,7 +915,12 @@ pub async fn list_plugins(sym: &Symposium) -> Vec<ProviderInfo> {
 pub async fn find_plugin(sym: &Symposium, name: &str) -> Option<Plugin> {
     let pms = sym.detached_managers();
     for inst in pms.instances().filter(|i| i.trusted) {
-        for parsed in inst.registry_plugins().await.unwrap_or_default() {
+        for parsed in inst
+            .registry_plugins()
+            .await
+            .map(|read| read.plugins)
+            .unwrap_or_default()
+        {
             if parsed.manifest.name == name {
                 return Some(parsed);
             }
@@ -1098,7 +1108,12 @@ async fn load_registry_impl(
     // never here. Each registry instance logs its own load failures.
     for inst in pms.instances().filter(|i| i.trusted) {
         match inst.registry_plugins().await {
-            Some(found) => plugins.extend(found),
+            Some(read) => {
+                if !read.complete {
+                    unreadable_registries.push(inst.name.clone());
+                }
+                plugins.extend(read.plugins);
+            }
             None => unreadable_registries.push(inst.name.clone()),
         }
     }

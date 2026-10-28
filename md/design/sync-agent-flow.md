@@ -12,12 +12,12 @@ Scans workspace dependencies, installs applicable skills into agent directories,
 
 3. **Scan dependencies** — read the full dependency graph from the workspace.
 
-4. **Match skills to dependencies** — for each plugin, parse `SKILL.md` YAML frontmatter, reject malformed or non-string metadata, warn about skipped invalid skills, then evaluate skill group dependency predicates and individual skill `depends-on` frontmatter against the workspace dependencies.
+4. **Match skills to dependencies**: for each plugin, parse `SKILL.md` YAML frontmatter, reject malformed YAML or a non-string value in a field Symposium reads, warn about skipped invalid skills, then evaluate skill group dependency predicates and individual skill `depends-on` frontmatter against the workspace dependencies.
 
 5. **Install skills per agent** — for each configured agent:
    - Copy applicable `SKILL.md` files into the agent's expected skill directory.
    - Drop a `.symposium` marker file into each installed skill directory so future syncs (and other tools) can recognize it as symposium-managed.
-   - For every skill directory symposium creates along the way (the skill directory itself or its `skills/` parent), write a `.gitignore` containing a single `*` so symposium-managed files stay out of version control.
+   - Write a `.gitignore` containing a single `*` into each installed skill directory, not its `skills/` parent, so symposium-managed files stay out of version control.
 
    An `[[agent]]` name this version does not know is skipped with a warning that names `cargo agents init --remove-agent`; every other agent syncs as usual.
 
@@ -25,9 +25,9 @@ Scans workspace dependencies, installs applicable skills into agent directories,
 
 7. **Reap stale skills**: across every known agent's skills parent directory, remove any subdirectory that contains the `.symposium` marker but wasn't installed this sync. Directories without the marker (user-managed) are left untouched, and so is any symlink, whatever it points to. Paths are compared resolved, so a skills directory that is a link to another agent's (`.claude/skills -> ../.agents/skills`) is scanned once and what this sync installed there is kept.
 
-   While a registry cannot be read, this step is skipped and a warning names the registry: it offered nothing this time, so everything it installed would look stale.
+   While a registry cannot be fully read, this step is skipped and a warning names the registry: what it could not read offered nothing this time, so everything installed from it would look stale. A registry counts as not fully read when it cannot be listed or when one of its entries fails to load.
 
-8. **Register hooks**: ensure symposium's global hook handler and MCP servers are registered for all configured agents. Unregister hooks for agents no longer in the config, and remove the MCP entries symposium recorded for them in the [MCP ledger](./state.md#mcp-server-ledger), limited to the agent's user-level file and files inside this workspace (another workspace's project file waits for a sync there). Only symposium's own handler is registered (e.g., `cargo-agents hook claude pre-tool-use`); individual plugin hooks are never written into agent configs. See [Hooks](./hooks.md) for the dispatch model.
+8. **Register hooks**: ensure symposium's global hook handler and MCP servers are registered for all configured agents. Unregister hooks for agents no longer in the config (only symposium's handler: a matcher group goes only once that leaves it empty), and remove the MCP entries symposium recorded for them in the [MCP ledger](./state.md#mcp-server-ledger), limited to the agent's user-level file and files inside this workspace (another workspace's project file waits for a sync there). For a configured agent, the entries recorded in this workspace's project-level MCP file that this sync no longer writes there come out as well, unless a registry cannot be read; entries in a user-level file stay, since another workspace may still offer them. Only symposium's own handler is registered (e.g., `cargo-agents hook claude pre-tool-use`); individual plugin hooks are never written into agent configs. See [Hooks](./hooks.md) for the dispatch model.
 
 ## Marker file
 
@@ -35,7 +35,7 @@ Each skill directory symposium installs contains an empty `.symposium` file. Cle
 
 ## Gitignore
 
-Each skill directory symposium creates (and its `skills/` parent if new) receives a `.gitignore` containing just `*`. Pre-existing directories are left alone. The wildcard also hides the marker file and the gitignore itself, so `git status` stays clean.
+Each skill directory symposium installs receives a `.gitignore` containing just `*`; parent directories such as `.claude/skills/` get none. The wildcard also hides the marker file and the gitignore itself, so `git status` stays clean.
 
 ## Auto-sync
 

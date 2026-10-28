@@ -212,6 +212,39 @@ async fn sync_installs_workspace_plugin_skills() {
     .unwrap();
 }
 
+#[tokio::test]
+async fn sync_reports_a_skill_whose_name_is_rejected() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["workspace-plugin0"],
+        async |mut ctx| {
+            let workspace_root = ctx.workspace_root.clone().unwrap();
+            let bad = workspace_root.join("skills/bad");
+            std::fs::create_dir_all(&bad)?;
+            std::fs::write(
+                bad.join("SKILL.md"),
+                "---\nname: \"a/b\"\ndescription: An unsafe name.\n---\n",
+            )?;
+
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let events = ctx.sync_with_report(tracing::Level::INFO).await?;
+            assert!(
+                events.iter().any(|e| e["kind"] == "warning"
+                    && e["message"]
+                        .as_str()
+                        .map(|m| m.replace('\\', "/"))
+                        .is_some_and(|m| m.contains("skills/bad/SKILL.md")
+                            && m.contains("plain directory name"))),
+                "the rejected skill should be reported: {events:?}"
+            );
+            find_installed_skill(&workspace_root.join(".claude/skills"), "ws-hello");
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// Antigravity reads the vendor-neutral skills path, keeps MCP in its own file,
 /// and takes hooks in a named-entry `hooks.json` — none of which share a
 /// location with its global equivalents, so project scope is worth pinning.
@@ -632,6 +665,104 @@ async fn removing_agent_removes_hooks() {
     .unwrap();
 }
 
+#[tokio::test]
+async fn removing_an_agent_reaps_its_skills_in_the_workspace() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plugins0", "workspace0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude", "--add-agent", "codex"])
+                .await?;
+            ctx.symposium(&["sync"]).await?;
+            let root = ctx.workspace_root.clone().unwrap();
+            let claude_skills = root.join(".claude/skills");
+            let codex_skills = root.join(".agents/skills");
+            assert!(!find_installed_skills(&claude_skills, "serde-guidance").is_empty());
+            assert!(!find_installed_skills(&codex_skills, "serde-guidance").is_empty());
+
+            ctx.symposium(&["init", "--remove-agent", "claude"]).await?;
+            assert!(find_installed_skills(&claude_skills, "serde-guidance").is_empty());
+            assert!(!find_installed_skills(&codex_skills, "serde-guidance").is_empty());
+
+            ctx.symposium(&["init", "--remove-agent", "codex"]).await?;
+            assert!(find_installed_skills(&codex_skills, "serde-guidance").is_empty());
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn sync_without_agents_still_reaps_stale_skills() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plugins0", "workspace0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            ctx.symposium(&["init", "--remove-agent", "claude"]).await?;
+
+            let stale = ctx
+                .workspace_root
+                .as_ref()
+                .unwrap()
+                .join(".claude/skills/left-behind");
+            std::fs::create_dir_all(&stale)?;
+            std::fs::write(stale.join("SKILL.md"), "old")?;
+            std::fs::write(stale.join(".symposium"), "")?;
+
+            ctx.symposium(&["sync"]).await?;
+            assert!(!stale.exists());
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn sync_keeps_skills_and_hooks_while_the_config_cannot_be_read() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plugins0", "workspace0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude", "--hook-scope", "global"])
+                .await?;
+            ctx.symposium(&["sync"]).await?;
+            let skills = ctx.workspace_root.clone().unwrap().join(".claude/skills");
+            let settings = ctx.sym.home_dir().join(".claude/settings.json");
+            assert!(!find_installed_skills(&skills, "serde-guidance").is_empty());
+            assert!(std::fs::read_to_string(&settings)?.contains("cargo-agents hook"));
+
+            let recommendations = symposium_install::git::GitCacheManager::new(
+                &ctx.sym.install_context(),
+                symposium::config::REGISTRY_CACHE_SUBDIR,
+            )
+            .cache_path_for_url("https://github.com/symposium-dev/recommendations")
+            .unwrap();
+            std::fs::create_dir_all(&recommendations)?;
+
+            let config_dir = ctx.sym.config_dir().to_path_buf();
+            let config = config_dir.join("config.toml");
+            let contents = std::fs::read_to_string(&config)?;
+            std::fs::write(&config, "[[[")?;
+            ctx.sym = symposium::config::Symposium::from_dir(&config_dir);
+            assert!(ctx.symposium(&["sync"]).await.is_err());
+            assert!(!find_installed_skills(&skills, "serde-guidance").is_empty());
+            assert!(std::fs::read_to_string(&settings)?.contains("cargo-agents hook"));
+
+            std::fs::write(&config, contents)?;
+            ctx.sym = symposium::config::Symposium::from_dir(&config_dir);
+            ctx.symposium(&["init", "--remove-agent", "claude"]).await?;
+            assert!(find_installed_skills(&skills, "serde-guidance").is_empty());
+            assert!(!std::fs::read_to_string(&settings)?.contains("cargo-agents hook"));
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// `--add-agent` is additive to existing agents.
 #[tokio::test]
 async fn add_agent_is_additive() {
@@ -857,6 +988,89 @@ async fn removing_an_agent_removes_only_its_registered_mcp_servers() {
             let after = std::fs::read_to_string(&codex)?;
             assert!(!after.contains("always-server"), "{after}");
             assert!(after.contains("[mcp_servers.mine]"), "{after}");
+
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// A manifest parse failure is not evidence that a plugin withdrew its MCP server.
+#[tokio::test]
+async fn sync_preserves_mcp_servers_when_plugin_manifest_is_invalid() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["dormant-plugin0"],
+        async |mut ctx| {
+            let manifest = ctx
+                .sym
+                .config_dir()
+                .join("plugins/gateless-plugin/Symposium.toml");
+            let mut contents = std::fs::read_to_string(&manifest)?;
+            contents.push_str(
+                "\n[[mcp_servers]]\nname = \"gateless-server\"\ncommand = \"/usr/bin/true\"\nargs = []\nenv = []\n",
+            );
+            std::fs::write(&manifest, contents)?;
+
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            ctx.symposium(&["use", "gateless-plugin"]).await?;
+
+            let mcp = ctx.workspace_root.clone().unwrap().join(".mcp.json");
+            let before: Value = serde_json::from_str(&std::fs::read_to_string(&mcp)?)?;
+            let registered = &before["mcpServers"]["gateless-server"];
+            assert!(registered.is_object(), "server must be registered first: {before}");
+
+            // The registry directory remains readable, but loading one plugin fails.
+            // Keep its enablement unchanged: this is not an intentional removal.
+            std::fs::write(&manifest, "name = [\n")?;
+            ctx.symposium(&["sync"]).await?;
+
+            let after: Value = serde_json::from_str(&std::fs::read_to_string(&mcp)?)?;
+            assert_eq!(
+                &after["mcpServers"]["gateless-server"],
+                registered,
+                "a plugin manifest parse failure must preserve its installed MCP server"
+            );
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn sync_removes_an_mcp_server_the_workspace_no_longer_offers() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["dormant-plugin0"],
+        async |mut ctx| {
+            let manifest = ctx
+                .sym
+                .config_dir()
+                .join("plugins/gateless-plugin/Symposium.toml");
+            let mut contents = std::fs::read_to_string(&manifest)?;
+            contents.push_str(
+                "\n[[mcp_servers]]\nname = \"gateless-server\"\ncommand = \"/usr/bin/true\"\nargs = []\nenv = []\n",
+            );
+            std::fs::write(&manifest, contents)?;
+
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            ctx.symposium(&["use", "gateless-plugin"]).await?;
+
+            let mcp = ctx.workspace_root.clone().unwrap().join(".mcp.json");
+            let mut config: Value = serde_json::from_str(&std::fs::read_to_string(&mcp)?)?;
+            assert!(config["mcpServers"]["gateless-server"].is_object(), "{config}");
+            config["mcpServers"]["mine"] = serde_json::json!({ "command": "/home/me/mine" });
+            std::fs::write(&mcp, config.to_string())?;
+
+            ctx.symposium(&["use", "--remove", "gateless-plugin"])
+                .await?;
+            ctx.symposium(&["sync"]).await?;
+
+            let after: Value = serde_json::from_str(&std::fs::read_to_string(&mcp)?)?;
+            assert!(after["mcpServers"].get("gateless-server").is_none(), "{after}");
+            assert!(after["mcpServers"]["mine"].is_object(), "{after}");
 
             Ok(())
         },

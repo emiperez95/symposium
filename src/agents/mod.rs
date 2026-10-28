@@ -718,7 +718,7 @@ fn unregister_antigravity_hooks(hooks_path: &Path, out: &Output) {
     let Some(obj) = config.as_object_mut() else {
         return;
     };
-    if obj.remove(ANTIGRAVITY_HOOK_NAME).is_some()
+    if obj.shift_remove(ANTIGRAVITY_HOOK_NAME).is_some()
         && let Ok(()) = save_json(hooks_path, &config)
     {
         out.removed(format!("{display}: removed hooks"));
@@ -867,39 +867,59 @@ fn unregister_kiro_hooks(agents_dir: &Path, out: &Output) {
 
 /// Remove symposium hooks from a Claude-style settings.json file.
 fn unregister_settings_hooks(settings_path: &Path, command_prefix: &str, out: &Output) {
-    let display = display_path(settings_path);
+    remove_hook_entries(settings_path, out, |group| {
+        let Some(handlers) = group.get_mut("hooks").and_then(|h| h.as_array_mut()) else {
+            return false;
+        };
+        let before = handlers.len();
+        handlers.retain(|h| {
+            !h.get("command")
+                .and_then(|c| c.as_str())
+                .is_some_and(|c| c.starts_with(command_prefix))
+        });
+        handlers.len() < before && handlers.is_empty()
+    });
+}
 
-    let Ok(mut settings) = load_json_or_empty(settings_path) else {
+fn remove_hook_entries(
+    config_path: &Path,
+    out: &Output,
+    drop_entry: impl Fn(&mut serde_json::Value) -> bool,
+) {
+    let display = display_path(config_path);
+
+    let Ok(mut config) = load_json_or_empty(config_path) else {
+        return;
+    };
+    let Some(root) = config.as_object_mut() else {
+        return;
+    };
+    let Some(hooks) = root.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
         return;
     };
 
-    let Some(hooks) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
-        return;
-    };
-
+    let mut emptied = Vec::new();
     let mut changed = false;
-    for (_event, arr) in hooks.iter_mut() {
-        if let Some(groups) = arr.as_array_mut() {
-            let before = groups.len();
-            groups.retain(|group| {
-                !group
-                    .get("hooks")
-                    .and_then(|h| h.as_array())
-                    .is_some_and(|hooks| {
-                        hooks.iter().any(|h| {
-                            h.get("command")
-                                .and_then(|c| c.as_str())
-                                .is_some_and(|c| c.starts_with(command_prefix))
-                        })
-                    })
-            });
-            if groups.len() < before {
+    for (event, arr) in hooks.iter_mut() {
+        if let Some(entries) = arr.as_array_mut() {
+            let before = entries.clone();
+            entries.retain_mut(|entry| !drop_entry(entry));
+            if *entries != before {
                 changed = true;
+                if entries.is_empty() {
+                    emptied.push(event.clone());
+                }
             }
         }
     }
+    for event in &emptied {
+        hooks.shift_remove(event);
+    }
+    if changed && hooks.is_empty() {
+        root.shift_remove("hooks");
+    }
 
-    if changed && let Ok(()) = save_json(settings_path, &settings) {
+    if changed && let Ok(()) = save_json(config_path, &config) {
         out.removed(format!("{display}: removed hooks"));
     }
 }
@@ -930,35 +950,12 @@ fn unregister_copilot_hooks_global(config_path: &Path, out: &Output) {
 /// Contrasts with `unregister_settings_hooks` which handles the nested
 /// `{ "hooks": [{ "command": "..." }] }` structure used by Claude/Codex.
 fn unregister_flat_hooks(config_path: &Path, command_key: &str, out: &Output) {
-    let display = display_path(config_path);
-
-    let Ok(mut config) = load_json_or_empty(config_path) else {
-        return;
-    };
-
-    let Some(hooks) = config.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
-        return;
-    };
-
-    let mut changed = false;
-    for (_event, arr) in hooks.iter_mut() {
-        if let Some(entries) = arr.as_array_mut() {
-            let before = entries.len();
-            entries.retain(|entry| {
-                !entry
-                    .get(command_key)
-                    .and_then(|c| c.as_str())
-                    .is_some_and(|c| c.starts_with("cargo-agents hook"))
-            });
-            if entries.len() < before {
-                changed = true;
-            }
-        }
-    }
-
-    if changed && let Ok(()) = save_json(config_path, &config) {
-        out.removed(format!("{display}: removed hooks"));
-    }
+    remove_hook_entries(config_path, out, |entry| {
+        entry
+            .get(command_key)
+            .and_then(|c| c.as_str())
+            .is_some_and(|c| c.starts_with("cargo-agents hook"))
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1031,7 +1028,6 @@ fn event_hooks<'a>(
 /// Bounds torn reads, not lost updates. What keeps that window from mattering is
 /// that registration writes only when an entry actually differs.
 fn save_json(path: &Path, value: &serde_json::Value) -> Result<()> {
-    let contents = serde_json::to_string_pretty(value)?;
     let target = if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
         fs::canonicalize(path)
             .with_context(|| format!("cannot resolve symlink {}", display_path(path)))?
@@ -1042,6 +1038,16 @@ fn save_json(path: &Path, value: &serde_json::Value) -> Result<()> {
         .parent()
         .with_context(|| format!("{} has no parent directory", display_path(&target)))?;
     fs::create_dir_all(parent)?;
+
+    let existing = fs::read_to_string(&target).unwrap_or_default();
+    let formatter =
+        serde_json::ser::PrettyFormatter::with_indent(json_indent(&existing).as_bytes());
+    let mut contents = Vec::new();
+    serde::Serialize::serialize(
+        value,
+        &mut serde_json::Serializer::with_formatter(&mut contents, formatter),
+    )?;
+    contents.push(b'\n');
 
     #[cfg(unix)]
     let permissions = match fs::metadata(&target) {
@@ -1067,9 +1073,19 @@ fn save_json(path: &Path, value: &serde_json::Value) -> Result<()> {
         // Restore bits that the umask may have removed during creation.
         temp.as_file().set_permissions(permissions)?;
     }
-    temp.write_all(contents.as_bytes())?;
+    temp.write_all(&contents)?;
     temp.persist(&target).map_err(|e| e.error)?;
     Ok(())
+}
+
+fn json_indent(text: &str) -> &str {
+    text.lines()
+        .find_map(|line| {
+            let rest = line.trim_start_matches([' ', '\t']);
+            (rest.starts_with('"') && rest.len() < line.len())
+                .then(|| &line[..line.len() - rest.len()])
+        })
+        .unwrap_or("  ")
 }
 
 #[cfg(test)]
@@ -1520,6 +1536,111 @@ mod tests {
 
         unregister_kiro_hooks(&agents_dir, &Output::quiet());
         assert!(!hook_file.exists());
+    }
+
+    #[test]
+    fn unregistering_hooks_leaves_the_file_as_the_user_had_it() {
+        type Register = fn(&Path, &Output) -> Result<()>;
+        type Unregister = fn(&Path, &Output);
+        let agents: [(Register, Unregister); 3] = [
+            (register_claude_hooks, unregister_claude_hooks),
+            (register_codex_hooks, unregister_codex_hooks),
+            (
+                register_copilot_hooks_global,
+                unregister_copilot_hooks_global,
+            ),
+        ];
+        let originals = [
+            json!({ "model": "opus" }),
+            json!({
+                "model": "opus",
+                "hooks": { "Notification": [], "Custom": [{ "keep": true }] }
+            }),
+        ];
+        for (register, unregister) in agents {
+            for original in &originals {
+                let tmp = tempfile::tempdir().unwrap();
+                let path = tmp.path().join("settings.json");
+                let text = format!("{}\n", serde_json::to_string_pretty(original).unwrap());
+                fs::write(&path, &text).unwrap();
+
+                register(&path, &Output::quiet()).unwrap();
+                unregister(&path, &Output::quiet());
+
+                assert_eq!(fs::read_to_string(&path).unwrap(), text);
+            }
+        }
+    }
+
+    #[test]
+    fn unregistering_keeps_user_handlers_in_symposiums_group() {
+        type Register = fn(&Path, &Output) -> Result<()>;
+        type Unregister = fn(&Path, &Output);
+        let agents: [(Register, Unregister); 2] = [
+            (register_claude_hooks, unregister_claude_hooks),
+            (register_codex_hooks, unregister_codex_hooks),
+        ];
+        let user_hook = json!({ "type": "command", "command": "user-hook" });
+        for (register, unregister) in agents {
+            let tmp = tempfile::tempdir().unwrap();
+            let path = tmp.path().join("settings.json");
+            register(&path, &Output::quiet()).unwrap();
+
+            let mut settings: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            let group = &mut settings["hooks"]["PreToolUse"][0];
+            let matcher = group["matcher"].clone();
+            group["hooks"]
+                .as_array_mut()
+                .unwrap()
+                .push(user_hook.clone());
+            fs::write(&path, settings.to_string()).unwrap();
+
+            unregister(&path, &Output::quiet());
+
+            let content = fs::read_to_string(&path).unwrap();
+            let after: serde_json::Value = serde_json::from_str(&content).unwrap();
+            assert_eq!(
+                after["hooks"]["PreToolUse"],
+                json!([{ "matcher": matcher, "hooks": [user_hook] }])
+            );
+            assert!(!content.contains("cargo-agents hook"));
+        }
+    }
+
+    #[test]
+    fn hook_registration_keeps_the_file_layout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("settings.json");
+        fs::write(
+            &path,
+            "{\n    \"model\": \"opus\",\n    \"permissions\": {}\n}\n",
+        )
+        .unwrap();
+
+        register_claude_hooks(&path, &Output::quiet()).unwrap();
+
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            text.starts_with(
+                "{\n    \"model\": \"opus\",\n    \"permissions\": {},\n    \"hooks\": {"
+            ),
+            "{text}"
+        );
+        assert!(text.ends_with("}\n"), "{text}");
+    }
+
+    #[test]
+    fn unregistering_hooks_keeps_the_order_of_the_rest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("settings.json");
+        let text = "{\n  \"hooks\": {\n    \"PreToolUse\": [\n      {\n        \"hooks\": [\n          {\n            \"command\": \"cargo-agents hook claude pre-tool-use\",\n            \"type\": \"command\"\n          }\n        ]\n      }\n    ],\n    \"A\": [],\n    \"B\": []\n  }\n}\n";
+        fs::write(&path, text).unwrap();
+        unregister_claude_hooks(&path, &Output::quiet());
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "{\n  \"hooks\": {\n    \"A\": [],\n    \"B\": []\n  }\n}\n"
+        );
     }
 
     #[test]

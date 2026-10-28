@@ -91,8 +91,11 @@ pub trait PackageManager {
 
     /// Fails instead of returning an empty list when the source cannot be
     /// read, since sync removes what a registry stops offering.
-    async fn registry_plugins(&self) -> Result<Vec<UnvalidatedPlugin>> {
-        Ok(self.active_plugins(&[]).await)
+    async fn registry_plugins(&self) -> Result<RegistryListing<UnvalidatedPlugin>> {
+        Ok(RegistryListing {
+            plugins: self.active_plugins(&[]).await,
+            complete: true,
+        })
     }
 
     /// The plugin(s) a specific id maps to — zero, one, or many. Used for
@@ -177,9 +180,16 @@ impl PmInstance {
         self.validate_all(self.pm.active_plugins(deps).await)
     }
 
-    pub async fn registry_plugins(&self) -> Option<Vec<Plugin>> {
+    pub async fn registry_plugins(&self) -> Option<RegistryListing<Plugin>> {
         match self.pm.registry_plugins().await {
-            Ok(plugins) => Some(self.validate_all(plugins)),
+            Ok(listing) => {
+                let total = listing.plugins.len();
+                let plugins = self.validate_all(listing.plugins);
+                Some(RegistryListing {
+                    complete: listing.complete && plugins.len() == total,
+                    plugins,
+                })
+            }
             Err(e) => {
                 tracing::warn!(
                     report = %crate::report::ReportEvent::Warning {
@@ -223,6 +233,12 @@ impl PmInstance {
             })
             .collect()
     }
+}
+
+#[derive(Debug)]
+pub struct RegistryListing<P> {
+    pub plugins: Vec<P>,
+    pub complete: bool,
 }
 
 /// The active set of package-manager instances — one flat collection, the cargo
