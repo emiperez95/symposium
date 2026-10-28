@@ -81,6 +81,8 @@ pub trait PackageManager {
     /// instance it is the configured registry's name.
     fn name(&self) -> &str;
 
+    fn canonical_name(&self, name: &str) -> String;
+
     /// The plugins this PM activates for the workspace's dependency set. A
     /// registry lists its own entries (deps ignored); the cargo transport
     /// surfaces the plugins its dependencies embed. Whether a dependency-embedded
@@ -249,6 +251,25 @@ impl PmRegistry {
             .ok_or_else(|| anyhow::anyhow!("unknown package manager `{pm}` in package id `{id}`"))
     }
 
+    pub fn identity(&self, id: &PackageId) -> PackageId {
+        let name = match self.owner(&id.pm, id) {
+            Ok(pm) => pm.canonical_name(&id.name),
+            Err(_) => id.name.clone(),
+        };
+        PackageId::any_version(&id.pm, name)
+    }
+
+    pub fn identify(&self, plugins: &[Plugin], name: &str) -> PackageId {
+        plugins
+            .iter()
+            .find(|p| {
+                self.identity(&PackageId::any_version(&p.canonical.pm, &p.manifest.name))
+                    == self.identity(&PackageId::any_version(&p.canonical.pm, name))
+            })
+            .map(|p| self.identity(&p.canonical))
+            .unwrap_or_else(|| self.identity(&CargoPm::id_for(name, None)))
+    }
+
     /// Fetch a package via the instance named in its id.
     pub async fn fetch(&self, id: &PackageId, update: UpdateLevel) -> Result<FetchedPackage> {
         self.owner(&id.pm, id)?.fetch(id, update).await
@@ -328,6 +349,9 @@ mod tests {
         fn name(&self) -> &str {
             "stub"
         }
+        fn canonical_name(&self, name: &str) -> String {
+            name.to_string()
+        }
         async fn active_plugins(&self, _deps: &[PackageId]) -> Vec<UnvalidatedPlugin> {
             let manifest = symposium_sdk::manifest::RawPluginManifest::parse(
                 "name = \"broken\"\n[[skills]]\n",
@@ -394,6 +418,37 @@ mod tests {
         assert!(
             err.to_string().contains("cargo agents plugin sync reg"),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn each_package_manager_decides_which_names_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pms = PmRegistry::new(vec![
+            PmInstance {
+                name: CARGO_PM.into(),
+                trusted: false,
+                kind: PluginKind::Package,
+                pm: Box::new(CargoPm::new(Arc::new(WorkspaceDeps::detached()))),
+            },
+            PmInstance {
+                name: "reg".into(),
+                trusted: true,
+                kind: PluginKind::Registry,
+                pm: Box::new(PathPm::new("reg", tmp.path())),
+            },
+        ]);
+        assert_eq!(
+            pms.identity(&PackageId::new(CARGO_PM, "widget_lib", "1.0.0")),
+            pms.identity(&PackageId::any_version(CARGO_PM, "widget-lib"))
+        );
+        assert_ne!(
+            pms.identity(&PackageId::any_version("reg", "my_plugin")),
+            pms.identity(&PackageId::any_version("reg", "my-plugin"))
+        );
+        assert_eq!(
+            pms.identify(&[], "widget_lib"),
+            PackageId::any_version(CARGO_PM, "widget_lib")
         );
     }
 

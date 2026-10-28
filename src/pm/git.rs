@@ -60,6 +60,10 @@ impl PackageManager for GitPm {
         &self.name
     }
 
+    fn canonical_name(&self, name: &str) -> String {
+        self.inner.canonical_name(name)
+    }
+
     async fn active_plugins(&self, deps: &[PackageId]) -> Vec<UnvalidatedPlugin> {
         self.inner.active_plugins(deps).await
     }

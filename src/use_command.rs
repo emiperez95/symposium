@@ -21,7 +21,7 @@ use anyhow::{Context, Result, bail};
 use symposium_install::UpdateLevel;
 
 use crate::config::{Symposium, UseEntry};
-use crate::crate_sources::normalize_crate_name;
+use crate::pm::{PackageId, PmRegistry};
 use crate::report::ReportEvent;
 
 /// Record an enablement for `name` and sync so its skills install now.
@@ -43,12 +43,14 @@ pub async fn use_plugin(
     // A configured registry is a trust root: what it offers is already
     // enabled by configuration, so there is nothing to record. The exception
     // is a dormant plugin, for which `use` is exactly the wake-up call.
+    let deps = sym.workspace_deps(cwd);
+    let pms = sym.package_managers(&deps);
     let registry = crate::plugins::load_registry(sym).await;
-    let normalized = normalize_crate_name(name);
+    let id = pms.identify(&registry.plugins, name);
     let registry_plugin = registry
         .plugins
         .iter()
-        .find(|p| normalize_crate_name(&p.manifest.name) == normalized);
+        .find(|p| pms.identity(&p.canonical) == id);
     let dormant = registry_plugin.is_some_and(|p| p.manifest.requires_use);
     let already_trusted = registry_plugin.is_some() && !dormant;
     if already_trusted {
@@ -62,14 +64,13 @@ pub async fn use_plugin(
         return Ok(());
     }
 
-    let deps = sym.workspace_deps(cwd);
     let workspace_root = deps.load().map(|ws| ws.root.clone());
     if !global && workspace_root.is_none() {
         bail!("not in a Rust workspace; pass --global to enable `{name}` everywhere");
     }
 
     if !dormant {
-        resolve_name(sym, &deps, name).await?;
+        resolve_name(&pms, &id, name).await?;
     }
 
     let entry = match &workspace_root {
@@ -81,7 +82,11 @@ pub async fn use_plugin(
         None => unreachable!("checked above"),
     };
 
-    if sym.config.plugins.used.contains(&entry) {
+    let already_enabled = sym.config.plugins.used.iter().any(|e| {
+        in_scope(e, global, workspace_root.as_deref())
+            && pms.identify(&registry.plugins, e.name()) == id
+    });
+    if already_enabled {
         tracing::info!(
             report = %ReportEvent::Info {
                 message: format!("`{name}` is already enabled; nothing changed"),
@@ -120,23 +125,15 @@ pub async fn remove_plugin(
 ) -> Result<()> {
     let deps = sym.workspace_deps(cwd);
     let workspace_root = deps.load().map(|ws| ws.root.clone());
+    let pms = sym.package_managers(&deps);
+    let registry = crate::plugins::load_registry(sym).await;
+    let id = pms.identify(&registry.plugins, name);
 
     let used = &mut sym.config.plugins.used;
     let before = used.len();
     used.retain(|entry| {
-        if normalize_crate_name(entry.name()) != normalize_crate_name(name) {
-            return true;
-        }
-        let in_scope = match entry {
-            UseEntry::Global(_) => global,
-            UseEntry::Workspace { .. } => {
-                !global
-                    && workspace_root
-                        .as_deref()
-                        .is_some_and(|root| entry.applies_in(root))
-            }
-        };
-        !in_scope
+        !in_scope(entry, global, workspace_root.as_deref())
+            || pms.identify(&registry.plugins, entry.name()) != id
     });
     if used.len() == before {
         let scope = if global { "--global" } else { "this workspace" };
@@ -156,29 +153,31 @@ pub async fn remove_plugin(
     Ok(())
 }
 
+fn in_scope(entry: &UseEntry, global: bool, workspace_root: Option<&Path>) -> bool {
+    match entry {
+        UseEntry::Global(_) => global,
+        UseEntry::Workspace { .. } => {
+            !global && workspace_root.is_some_and(|root| entry.applies_in(root))
+        }
+    }
+}
+
 /// Check that `name` resolves to something before recording it: a workspace
 /// dependency (offline-friendly) or a registry search hit.
-async fn resolve_name(
-    sym: &Symposium,
-    deps: &std::sync::Arc<crate::pm::WorkspaceDeps>,
-    name: &str,
-) -> Result<()> {
-    let normalized = normalize_crate_name(name);
-    let is_workspace_dep = deps.load().is_some_and(|ws| {
-        ws.crates
-            .iter()
-            .any(|c| normalize_crate_name(&c.name) == normalized)
-    });
+async fn resolve_name(pms: &PmRegistry, id: &PackageId, name: &str) -> Result<()> {
+    let is_workspace_dep = pms
+        .list_deps()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .any(|dep| pms.identity(dep) == *id);
     if is_workspace_dep {
         return Ok(());
     }
 
-    let found = sym
-        .package_managers(deps)
-        .search(name)
-        .await
-        .iter()
-        .any(|(_, info)| normalize_crate_name(&info.id.name) == normalized);
+    let found = pms.search(name).await.iter().any(|(_, info)| {
+        pms.identity(&info.id) == pms.identity(&PackageId::any_version(&info.id.pm, name))
+    });
     if found {
         return Ok(());
     }

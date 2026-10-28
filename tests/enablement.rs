@@ -93,6 +93,12 @@ async fn use_records_workspace_entry_and_installs() {
 
             ctx.symposium(&["use", "crate-a"]).await?;
             assert_eq!(config, read_config(&ctx), "re-using must not duplicate");
+            ctx.symposium(&["use", "crate_a"]).await?;
+            assert_eq!(
+                config,
+                read_config(&ctx),
+                "another spelling must not duplicate"
+            );
             Ok(())
         },
     )
@@ -114,6 +120,12 @@ async fn use_global_records_unscoped_entry() {
             assert!(
                 config.contains(r#"use = ["crate-a"]"#),
                 "global entry is a plain string: {config}"
+            );
+            ctx.symposium(&["use", "--global", "crate_a"]).await?;
+            assert_eq!(
+                config,
+                read_config(&ctx),
+                "another spelling must not duplicate"
             );
             Ok(())
         },
@@ -164,6 +176,29 @@ async fn use_registry_content_is_a_noop() {
         );
         Ok(())
     })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn use_matches_registry_plugin_names_exactly() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["dormant-plugin0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let err = ctx
+                .symposium(&["use", "gateless_plugin"])
+                .await
+                .expect_err("a registry plugin name is not a crate name");
+            assert!(
+                err.to_string().contains("no crate or plugin named"),
+                "{err}"
+            );
+            assert!(!read_config(&ctx).contains("gateless_plugin"));
+            Ok(())
+        },
+    )
     .await
     .unwrap();
 }
@@ -279,6 +314,14 @@ async fn search_finds_registry_content_tagged_by_origin() {
                 .iter()
                 .any(|m| m.origin == "user-plugins" && m.name == "my-skill"),
             "registry entry tagged with its instance name: {matches:?}"
+        );
+
+        let matches = symposium::search_command::find_matches(&ctx.sym, "MY-SKILL").await;
+        assert!(
+            matches
+                .iter()
+                .any(|m| m.origin == "user-plugins" && m.name == "my-skill"),
+            "registry entries match case-insensitively: {matches:?}"
         );
 
         // A query nothing matches finds nothing (and does not fail).
@@ -643,6 +686,93 @@ async fn status_reports_a_used_but_disabled_plugin_as_declined() {
                 .find(|e| e.name == "crate-a")
                 .expect("crate-a present");
             assert_eq!(entry.state, StatusState::Declined);
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn status_lists_each_declined_name_once() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["auto-enable0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let workspace_root = ctx.workspace_root.clone().unwrap();
+            ctx.sym.config.plugins.disable = ["crate_a", "*", "never-seen", "never_seen"]
+                .map(String::from)
+                .to_vec();
+
+            let deps = ctx.sym.workspace_deps(&workspace_root);
+            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+            let named = |name: &str| {
+                entries
+                    .iter()
+                    .filter(|e| e.name.replace('_', "-") == name)
+                    .collect::<Vec<_>>()
+            };
+
+            let crate_a = named("crate-a");
+            assert_eq!(crate_a.len(), 1, "{entries:?}");
+            assert_eq!(crate_a[0].state, StatusState::Declined);
+            assert_eq!(crate_a[0].version.as_deref(), Some("0.1.0"));
+            assert!(named("*").is_empty(), "{entries:?}");
+            let never_seen = named("never-seen");
+            assert_eq!(never_seen.len(), 1, "{entries:?}");
+            assert_eq!(never_seen[0].state, StatusState::Declined);
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn status_reports_a_pluginless_dependency_only_when_used() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plain-dep0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let workspace_root = ctx.workspace_root.clone().unwrap();
+            ctx.sym.config.plugins.auto_enable = vec!["*".into()];
+            ctx.sym
+                .config
+                .plugins
+                .used
+                .push(symposium::config::UseEntry::Global("not-a-dep".into()));
+
+            let deps = ctx.sym.workspace_deps(&workspace_root);
+            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+            assert!(
+                !entries.iter().any(|e| e.name == "plain-dep"),
+                "{entries:?}"
+            );
+            let crate_a = entries
+                .iter()
+                .find(|e| e.name == "crate-a")
+                .expect("crate-a present");
+            assert_eq!(crate_a.state, StatusState::Active);
+            assert_eq!(crate_a.root, "`[plugins] auto-enable`");
+            let not_a_dep = entries
+                .iter()
+                .find(|e| e.name == "not-a-dep")
+                .expect("not-a-dep present");
+            assert_eq!(not_a_dep.state, StatusState::Active);
+            assert!(not_a_dep.root.contains("not a dependency"), "{not_a_dep:?}");
+
+            ctx.sym.config.plugins.auto_enable.clear();
+            ctx.symposium(&["use", "plain-dep"]).await?;
+            let deps = ctx.sym.workspace_deps(&workspace_root);
+            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+            let plain = entries
+                .iter()
+                .find(|e| e.name == "plain-dep")
+                .expect("plain-dep present once used");
+            assert_eq!(plain.state, StatusState::Dormant);
+            assert!(!plain.root.contains("not a dependency"), "{plain:?}");
             Ok(())
         },
     )

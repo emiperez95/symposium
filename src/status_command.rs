@@ -11,8 +11,9 @@
 //!   root names the trust root: workspace membership, a configured registry,
 //!   `[plugins] auto-enable`, or a `[plugins] use` entry.
 //! - **dormant** — loaded but waiting: a registry plugin that names no
-//!   dependency ([`requires_use`](crate::plugins::PluginManifest::requires_use)), or
-//!   one whose predicates don't currently hold.
+//!   dependency ([`requires_use`](crate::plugins::PluginManifest::requires_use)),
+//!   one whose predicates don't currently hold, or a dependency named by `use`
+//!   that offers no plugin.
 //! - **candidate** — discovered in a dependency and awaiting consent. These
 //!   are exactly what the [consent prompt](crate::discovery::prompt_for_consent)
 //!   asks about.
@@ -114,7 +115,6 @@ pub async fn workspace_status(
     // Dependency-embedded plugins, with the decision the config made about
     // each. This is the same view the consent prompt works from.
     let discovery = crate::discovery::discover(sym, deps).await;
-    let mut declined_names = Vec::new();
     for found in discovery
         .active
         .iter()
@@ -122,9 +122,6 @@ pub async fn workspace_status(
         .chain(&discovery.candidates)
         .chain(&discovery.declined)
     {
-        if found.enablement == Enablement::Declined {
-            declined_names.push(found.name().to_string());
-        }
         entries.push(entry_for(found));
     }
 
@@ -133,11 +130,11 @@ pub async fn workspace_status(
     // Discovery only sees dependencies, so these are invisible above; surface
     // them from the config the same way sync loads them
     // ([`enabled_dependencies`](crate::discovery::enabled_dependencies)).
-    let normalize = crate::crate_sources::normalize_crate_name;
-    let shown: std::collections::HashSet<String> = registry
+    let pms = sym.package_managers(deps);
+    let shown: std::collections::HashSet<crate::pm::PackageId> = registry
         .plugins
         .iter()
-        .map(|p| normalize(&p.manifest.name))
+        .map(|p| pms.identity(&p.canonical))
         .chain(
             discovery
                 .active
@@ -145,25 +142,47 @@ pub async fn workspace_status(
                 .chain(&discovery.auto_enabled)
                 .chain(&discovery.candidates)
                 .chain(&discovery.declined)
-                .map(|d| normalize(d.name())),
+                .map(|d| pms.identity(&d.id)),
         )
         .collect();
     for name in crate::discovery::enabled_dependencies(sym, &dep_ids, &ws.root) {
-        if shown.contains(&normalize(&name)) {
+        let id = pms.identify(&registry.plugins, &name);
+        if shown.contains(&id) {
+            continue;
+        }
+        let dependency = dep_ids.iter().any(|dep| pms.identity(dep) == id);
+        let used = used_names
+            .iter()
+            .any(|used| pms.identify(&registry.plugins, used) == id);
+        if dependency && !used {
             continue;
         }
         entries.push(StatusEntry {
             name,
             version: None,
-            root: "`[plugins] use` (not a dependency)".to_string(),
-            state: StatusState::Active,
+            root: if dependency {
+                "`[plugins] use` (offers no plugin)"
+            } else {
+                "`[plugins] use` (not a dependency)"
+            }
+            .to_string(),
+            state: if dependency {
+                StatusState::Dormant
+            } else {
+                StatusState::Active
+            },
         });
     }
 
     // Names declined without ever being discovered (a `disable` entry for a
     // dependency whose source isn't on disk, or one added by hand).
+    let mut declined: std::collections::HashSet<crate::pm::PackageId> = discovery
+        .declined
+        .iter()
+        .map(|d| pms.identity(&d.id))
+        .collect();
     for name in &sym.config.plugins.disable {
-        if declined_names.iter().any(|n| n == name) {
+        if name == "*" || !declined.insert(pms.identify(&registry.plugins, name)) {
             continue;
         }
         entries.push(StatusEntry {

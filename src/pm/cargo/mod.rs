@@ -142,6 +142,10 @@ impl PackageManager for CargoPm {
         CARGO_PM
     }
 
+    fn canonical_name(&self, name: &str) -> String {
+        crate::crate_sources::normalize_crate_name(name)
+    }
+
     /// The plugins embedded in the workspace's dependencies: every dep in
     /// `deps` whose source tree embeds plugin content, built into a full
     /// `Plugin`. Whether each is *trusted* (may activate without consent)
