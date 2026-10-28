@@ -23,7 +23,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use super::{Policy, RunError, Trial, absolute};
+use super::{Policy, RunError, Trial, absolute, succeeded};
 use crate::grade::ProcessError;
 use crate::grade::process::{Backend, Finished, Invocation, Local};
 
@@ -138,19 +138,7 @@ impl Srt {
 
     /// Runs `invocation` for preflight and returns its trimmed output.
     fn check(tool: &'static str, invocation: &Invocation, logs: &Path) -> Result<String, RunError> {
-        let finished = Local
-            .run(invocation, PROBE_DEADLINE, logs)
-            .map_err(|source| RunError::Process { tool, source })?;
-        let Some(status) = finished.status else {
-            return Err(RunError::ToolTimeout { tool });
-        };
-        if !status.success() {
-            return Err(RunError::ToolFailed {
-                tool,
-                status,
-                stderr: finished.stderr.tail().trim().to_owned(),
-            });
-        }
+        let finished = succeeded(tool, Local.run(invocation, PROBE_DEADLINE, logs))?;
         Ok(finished.stdout.tail().trim().to_owned())
     }
 

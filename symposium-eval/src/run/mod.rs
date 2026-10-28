@@ -23,6 +23,7 @@
 mod env;
 mod error;
 mod policy;
+pub(crate) mod setup;
 #[cfg(all(test, target_os = "linux"))]
 mod smoke;
 mod srt;
@@ -41,7 +42,9 @@ pub(crate) use srt::SRT_VERSION;
 use stage::StagedTool;
 
 use crate::evals::Evals;
+use crate::grade::ProcessError;
 use crate::grade::copy_tree;
+use crate::grade::process::Finished;
 use crate::task::{BatchName, Task};
 
 /// Whether a trial can reach Symposium. Nothing is installed or uninstalled between the
@@ -173,6 +176,9 @@ impl Batch {
         self.link_tools(&trial)?;
         copy_tree(&evals.starter_dir(task.name()), &trial.project(), "starter")
             .map_err(RunError::Copy)?;
+        // `srt` write-protects `.claude/commands` in the project. Where `.claude/` is
+        // missing, it protects all of `.claude/` instead, and no skill could be installed.
+        create_dirs([trial.project().join(".claude")])?;
         // Fixtures are not in the policy's writable paths, so `srt` keeps them read-only.
         for fixture in task.fixtures() {
             let destination = trial.fixtures().join(fixture.as_str());
@@ -267,6 +273,25 @@ fn absolute(path: &Path) -> Result<&Path, RunError> {
     } else {
         Err(RunError::NotAbsolute(path.to_owned()))
     }
+}
+
+/// `finished` when the command `tool` names ran to a successful exit.
+fn succeeded(
+    tool: &'static str,
+    finished: Result<Finished, ProcessError>,
+) -> Result<Finished, RunError> {
+    let finished = finished.map_err(|source| RunError::Process { tool, source })?;
+    let Some(status) = finished.status else {
+        return Err(RunError::ToolTimeout { tool });
+    };
+    if !status.success() {
+        return Err(RunError::ToolFailed {
+            tool,
+            status,
+            stderr: finished.stderr.tail().trim().to_owned(),
+        });
+    }
+    Ok(finished)
 }
 
 /// Creates `path`, failing when it already exists.

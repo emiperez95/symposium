@@ -33,6 +33,10 @@ pub(crate) enum RunError {
     Copy(#[source] ImportError),
     #[error("cannot write the `srt` policy")]
     Policy(#[source] serde_json::Error),
+    #[error("`{}` is a baseline trial, which has no Symposium to set up", .0.display())]
+    NotSymposium(PathBuf),
+    #[error("cannot write the Symposium config")]
+    SymposiumConfig(#[source] toml::ser::Error),
     #[error("a tool named `{0}` is already staged")]
     StagedTwice(String),
     #[error("`{}` is not a file inside its package", .0.display())]
@@ -56,15 +60,15 @@ pub(crate) enum RunError {
     SrtVersion { found: String },
     #[error("`srt` needs Node 22.12 or later, but `node --version` reports `{found}`")]
     NodeTooOld { found: String },
-    #[error("the `{tool}` check exited with {status}: {stderr}")]
+    #[error("`{tool}` exited with {status}: {stderr}")]
     ToolFailed {
         tool: &'static str,
         status: ExitStatus,
         stderr: String,
     },
-    #[error("the `{tool}` check did not answer in time")]
+    #[error("`{tool}` did not finish in time")]
     ToolTimeout { tool: &'static str },
-    #[error("cannot run the `{tool}` check")]
+    #[error("cannot run `{tool}`")]
     Process {
         tool: &'static str,
         #[source]

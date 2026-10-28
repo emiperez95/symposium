@@ -113,6 +113,16 @@ impl RealSrt {
         &self.batch
     }
 
+    /// Sets up `trial`'s Symposium configuration for `client`, inside its sandbox.
+    pub(crate) fn set_up_symposium(&self, trial: &Trial, client: super::setup::Client) {
+        let backend = self.srt.for_trial(trial).unwrap();
+        let env = trial.environment(&self.machine, &self.api_key).unwrap();
+        let deadline = std::time::Duration::from_secs(60);
+        trial
+            .set_up_symposium(client, &backend, env, deadline)
+            .unwrap();
+    }
+
     /// Stages `tool` as `name`; trials created afterwards link it.
     pub(crate) fn stage(
         &mut self,
@@ -217,6 +227,44 @@ pub(crate) fn executable(path: &std::path::Path, script: &str) {
 
     fs::write(path, script).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// The `cargo-agents` under evaluation: built from this checkout, at the path Cargo
+/// reports, wherever its target directory is. Built once per test run.
+#[cfg(target_os = "linux")]
+pub(crate) fn built_cargo_agents() -> PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT.get_or_init(build_cargo_agents).clone()
+}
+
+#[cfg(target_os = "linux")]
+fn build_cargo_agents() -> PathBuf {
+    let output = std::process::Command::new(env!("CARGO"))
+        .args([
+            "build",
+            "--locked",
+            "--quiet",
+            "--package",
+            "symposium",
+            "--bin",
+            "cargo-agents",
+        ])
+        .arg("--message-format=json-render-diagnostics")
+        .current_dir(checkout())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "cannot build cargo-agents: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|message| message["target"]["name"] == "cargo-agents")
+        .and_then(|message| message["executable"].as_str().map(PathBuf::from))
+        .expect("Cargo reports the cargo-agents executable")
 }
 
 /// The Symposium checkout this crate is built from.
