@@ -417,10 +417,10 @@ fn decide(
         // Covers `auto-enable` and `auto-accept = "all"`.
         Enablement::AutoEnabled
     } else {
-        // AUDIT SEAM: under `auto-accept = "audited"`, a later change looks
+        // AUDIT SEAM: under `auto-accept = "audit"`, a later change looks
         // the offer up in the trusted registries' audits here and returns
         // `AutoEnabled` for an audited one. No audit data exists yet, so
-        // `audited` and `none` both fall through to `Candidate`.
+        // `audit` and `none` both fall through to `Candidate`.
         Enablement::Candidate
     }
 }
@@ -537,8 +537,8 @@ mod tests {
     async fn auto_accept_modes_decide_candidates() {
         let tmp = tempfile::tempdir().unwrap();
         let ws = workspace(tmp.path());
-        // `audited` has no audit data yet, so it asks like `none`.
-        for mode in ["none", "audited"] {
+        // `audit` has no audit data yet, so it asks like `none`.
+        for mode in ["none", "audit"] {
             let sym = sym_with(
                 tmp.path(),
                 &format!("[plugins]\nauto-accept = \"{mode}\"\n"),

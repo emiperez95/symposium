@@ -129,7 +129,7 @@ pub enum AutoAccept {
     /// Audited plugins load without asking; anything else asks. No audit data
     /// exists yet, so today this behaves exactly like `none`.
     #[default]
-    Audited,
+    Audit,
     /// Every dependency-embedded plugin is accepted without asking (the
     /// effect of `auto-enable = ["*"]`, without writing it).
     All,
@@ -1102,10 +1102,10 @@ mod tests {
 
     #[test]
     fn parse_auto_accept_values_and_default_is_omitted() {
-        assert_eq!(parse_config("").plugins.auto_accept, AutoAccept::Audited);
+        assert_eq!(parse_config("").plugins.auto_accept, AutoAccept::Audit);
         for (value, expected) in [
             ("none", AutoAccept::None),
-            ("audited", AutoAccept::Audited),
+            ("audit", AutoAccept::Audit),
             ("all", AutoAccept::All),
         ] {
             let config = parse_config(&format!("[plugins]\nauto-accept = \"{value}\"\n"));
@@ -1116,13 +1116,12 @@ mod tests {
             // Only the default is omitted from the written file.
             assert_eq!(
                 serialized.contains("auto-accept"),
-                expected != AutoAccept::Audited,
+                expected != AutoAccept::Audit,
                 "{serialized}"
             );
         }
         let serialized =
-            toml::to_string_pretty(&parse_config("[plugins]\nauto-accept = \"audited\"\n"))
-                .unwrap();
+            toml::to_string_pretty(&parse_config("[plugins]\nauto-accept = \"audit\"\n")).unwrap();
         assert!(!serialized.contains("[plugins]"), "{serialized}");
     }
 
@@ -1131,10 +1130,7 @@ mod tests {
         let err = toml::from_str::<RawConfig>("[plugins]\nauto-accept = \"sometimes\"\n")
             .unwrap_err()
             .to_string();
-        assert!(
-            err.contains("sometimes") && err.contains("audited"),
-            "{err}"
-        );
+        assert!(err.contains("sometimes") && err.contains("audit"), "{err}");
     }
 
     #[test]

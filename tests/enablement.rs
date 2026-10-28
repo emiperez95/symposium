@@ -906,13 +906,13 @@ async fn choosing_registry_plugin_does_not_enable_same_named_dependency() {
 // ── auto-accept ──────────────────────────────────────────────────────
 
 /// `auto-accept = "all"` accepts the candidate without asking (and without
-/// writing config); `none` and `audited` (no audit data yet) leave it asked.
+/// writing config); `none` and `audit` (no audit data yet) leave it asked.
 #[tokio::test]
 async fn auto_accept_modes_decide_the_candidate() {
     use symposium::config::AutoAccept;
     for (mode, accepted) in [
         (AutoAccept::None, false),
-        (AutoAccept::Audited, false),
+        (AutoAccept::Audit, false),
         (AutoAccept::All, true),
     ] {
         with_fixture(
