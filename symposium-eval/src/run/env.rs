@@ -15,7 +15,7 @@ use super::{Machine, RunError, Trial};
 /// Where the linker, `sh`, and the tools the clients need live.
 const SYSTEM_PATH: [&str; 2] = ["/usr/bin", "/bin"];
 
-/// The model API key, passed to the client process only.
+/// The model API key. It reaches `srt`, never the sandbox: the policy masks it.
 #[derive(Clone)]
 pub(crate) struct ApiKey {
     /// The variable the client reads: `ANTHROPIC_API_KEY` for Claude Code,
@@ -27,6 +27,10 @@ pub(crate) struct ApiKey {
 impl ApiKey {
     pub(crate) fn new(name: &'static str, value: OsString) -> Self {
         Self { name, value }
+    }
+
+    pub(crate) fn name(&self) -> &'static str {
+        self.name
     }
 }
 

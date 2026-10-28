@@ -1,12 +1,13 @@
-//! Everything preparing a trial can report.
+//! Everything preparing or launching a trial can report.
 
 use std::env::JoinPathsError;
 use std::io;
 use std::path::PathBuf;
+use std::process::ExitStatus;
 
 use thiserror::Error;
 
-use crate::grade::ImportError;
+use crate::grade::{ImportError, ProcessError};
 
 #[derive(Debug, Error)]
 pub(crate) enum RunError {
@@ -34,4 +35,27 @@ pub(crate) enum RunError {
     Policy(#[source] serde_json::Error),
     #[error("cannot build `PATH` for the trial")]
     PathList(#[source] JoinPathsError),
+    #[error("`{}` has not been written, so the trial cannot run", .0.display())]
+    NoPolicy(PathBuf),
+    #[error(
+        "`srt` reports version `{found}`, but the runner is pinned to {}",
+        super::SRT_VERSION
+    )]
+    SrtVersion { found: String },
+    #[error("`srt` needs Node 22.12 or later, but `node --version` reports `{found}`")]
+    NodeTooOld { found: String },
+    #[error("the `{tool}` check exited with {status}: {stderr}")]
+    ToolFailed {
+        tool: &'static str,
+        status: ExitStatus,
+        stderr: String,
+    },
+    #[error("the `{tool}` check did not answer in time")]
+    ToolTimeout { tool: &'static str },
+    #[error("cannot run the `{tool}` check")]
+    Process {
+        tool: &'static str,
+        #[source]
+        source: ProcessError,
+    },
 }

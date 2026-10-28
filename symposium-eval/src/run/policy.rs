@@ -11,24 +11,29 @@
 //! name a path is reached by, not its target, so each denied root is listed both as given
 //! and as resolved.
 //!
-//! FIXME: trials are not isolated from each other's temporary files. `srt` lets every
+//! The model API key is masked: inside the sandbox its variable holds a sentinel, and
+//! `srt`'s proxy, outside it, substitutes the real value only into requests to the API
+//! host, over TLS it terminates and re-encrypts to a verified upstream. So neither the
+//! client nor any tool the agent starts can read the key, from its environment or
+//! anyone's `/proc/<pid>/environ`.
+//!
+//! The policy cannot keep trials out of each other's temporary files: `srt` lets every
 //! sandbox write `/tmp/claude`, and a `denyRead` of it does not hide what is already
-//! there (sandbox-runtime issues 654 and 611). The launcher has to give each trial its
-//! own `/tmp/claude`, for example by binding the trial's `tmp/` over it in a mount
-//! namespace, and the `srt` smoke test has to show `$TMPDIR` and cross-trial reads.
+//! there (sandbox-runtime issues 654 and 611). The launcher in `srt.rs` does that instead.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use super::{Configuration, RunError, Trial, absolute};
+use super::{ApiKey, Configuration, RunError, Trial, absolute};
 
 /// The settings file `srt --settings` reads.
 #[derive(Debug, Serialize)]
 pub(crate) struct Policy {
     filesystem: Filesystem,
     network: Network,
+    credentials: Credentials,
 }
 
 #[derive(Debug, Serialize)]
@@ -37,12 +42,35 @@ struct Filesystem {
     deny_read: Vec<Literal>,
     allow_read: Vec<Literal>,
     allow_write: Vec<Literal>,
+    /// Always empty, but `srt` refuses a settings file without it.
+    deny_write: Vec<Literal>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Network {
     allowed_domains: Vec<String>,
+    /// Always empty, but `srt` refuses a settings file without it.
+    denied_domains: Vec<String>,
+    /// Required by masking: the proxy decrypts requests to substitute the key.
+    tls_terminate: TlsTerminate,
+}
+
+/// `srt` makes a CA for the run and points the sandboxed command's trust variables at it.
+#[derive(Debug, Serialize)]
+struct TlsTerminate {}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Credentials {
+    env_vars: Vec<MaskedVar>,
+}
+
+/// A variable whose real value never enters the sandbox.
+#[derive(Debug, Serialize)]
+struct MaskedVar {
+    name: &'static str,
+    mode: &'static str,
 }
 
 /// One path `srt` takes as a name, never a pattern.
@@ -169,7 +197,8 @@ fn platform_user_data_roots() -> Vec<PathBuf> {
 
 impl Policy {
     /// Confines `trial` to its own directories, the tools its configuration may run, and
-    /// the toolchain, with network access to `api_host` only.
+    /// the toolchain, with network access to `api_host` only, where `srt` sends the real
+    /// `api_key` in place of the sentinel the sandbox sees.
     ///
     /// # Errors
     ///
@@ -179,6 +208,7 @@ impl Policy {
         trial: &Trial,
         machine: &Machine,
         api_host: &str,
+        api_key: &ApiKey,
     ) -> Result<Self, RunError> {
         let batch = trial.batch();
         reject_nested(batch.eval_root(), &machine.checkout)?;
@@ -195,14 +225,18 @@ impl Policy {
             }
         }
 
+        // Only the trial's read-only directories: srt 0.0.81 rebinds an `allowRead` read-only
+        // over the writable directories inside it, and then cannot create its own guard
+        // files there. The writable directories are readable through `allowWrite`.
         let mut allow_read = vec![
-            trial.root().to_owned(),
+            trial.fixtures(),
+            trial.bin(),
             batch.common_tools(),
             machine.toolchain.clone(),
         ];
         // The one difference between the configurations: a baseline cannot read Symposium.
         if trial.configuration() == Configuration::Symposium {
-            allow_read.push(batch.symposium_tools());
+            allow_read.extend([trial.registry(), batch.symposium_tools()]);
         }
 
         let allow_write = vec![
@@ -218,22 +252,67 @@ impl Policy {
                 deny_read: literals(deny_read),
                 allow_read: literals(allow_read),
                 allow_write: literals(allow_write),
+                deny_write: Vec::new(),
             },
             network: Network {
                 allowed_domains: vec![api_host.to_owned()],
+                denied_domains: Vec::new(),
+                tls_terminate: TlsTerminate {},
+            },
+            credentials: Credentials {
+                env_vars: vec![MaskedVar {
+                    name: api_key.name(),
+                    mode: "mask",
+                }],
             },
         })
     }
 
+    /// A policy for preflight's probe: it reads like any process outside a trial, writes
+    /// only `scratch`, and starts the same network proxy, TLS termination included, as a
+    /// trial's.
+    pub(crate) fn for_preflight(scratch: &Path) -> Self {
+        Self {
+            filesystem: Filesystem {
+                deny_read: Vec::new(),
+                allow_read: Vec::new(),
+                allow_write: literals(vec![scratch.to_owned()]),
+                deny_write: Vec::new(),
+            },
+            network: Network {
+                allowed_domains: vec!["api.example.com".to_owned()],
+                denied_domains: Vec::new(),
+                tls_terminate: TlsTerminate {},
+            },
+            credentials: Credentials {
+                env_vars: Vec::new(),
+            },
+        }
+    }
+
+    /// Writes the settings file `srt --settings` reads.
+    ///
+    /// # Errors
+    ///
+    /// When the file cannot be written.
+    pub(crate) fn write(&self, path: &Path) -> Result<(), RunError> {
+        let text = serde_json::to_string_pretty(self).map_err(RunError::Policy)?;
+        fs::write(path, text).map_err(|source| RunError::Create {
+            path: path.to_owned(),
+            source,
+        })
+    }
+
     /// Whether `srt` lets the trial read `path`: no `denyRead` covers it, or the most
-    /// specific `allowRead` covering it is at least as specific as every such deny.
+    /// specific `allowRead` or `allowWrite` covering it is at least as specific as every
+    /// such deny. `srt` binds a writable directory read-write, so it is readable too.
     pub(crate) fn can_read(&self, path: &Path) -> bool {
         let filesystem = &self.filesystem;
         match most_specific(&filesystem.deny_read, path) {
             None => true,
-            Some(deny) => {
-                most_specific(&filesystem.allow_read, path).is_some_and(|allow| allow >= deny)
-            }
+            Some(deny) => most_specific(&filesystem.allow_read, path)
+                .max(most_specific(&filesystem.allow_write, path))
+                .is_some_and(|allow| allow >= deny),
         }
     }
 
@@ -297,11 +376,11 @@ mod tests {
 
     use super::*;
     use crate::run::Batch;
-    use crate::run::test_support::{Host, trial};
+    use crate::run::test_support::{Host, api_key, trial};
     use crate::task::BatchName;
 
     fn policy(trial: &Trial, machine: &Machine) -> Policy {
-        Policy::for_trial(trial, machine, "api.example.com").unwrap()
+        Policy::for_trial(trial, machine, "api.example.com", &api_key()).unwrap()
     }
 
     #[test]
@@ -313,8 +392,12 @@ mod tests {
 
         let policy = policy(&first, &host.machine());
 
+        let fixture = "fixture-store/src/lib.rs";
         assert!(policy.can_read(&first.project().join("src/lib.rs")));
+        assert!(policy.can_read(&first.fixtures().join(fixture)));
+        assert!(policy.can_read(&first.registry().join("fixture-store/Symposium.toml")));
         assert!(!policy.can_read(&second.project().join("src/lib.rs")));
+        assert!(!policy.can_read(&second.fixtures().join(fixture)));
         assert!(!policy.can_read(&second.policy_file()));
     }
 
@@ -400,9 +483,11 @@ mod tests {
                     at("checkout"),
                 ],
                 "allowRead": [
-                    at("eval/batch/trial-1-with-symposium"),
+                    trial_dir("fixtures"),
+                    trial_dir("bin"),
                     at("eval/batch/tools/common"),
                     at("home/dev/.rustup/toolchains/stable"),
+                    trial_dir("registry"),
                     at("eval/batch/tools/symposium"),
                 ],
                 "allowWrite": [
@@ -412,8 +497,16 @@ mod tests {
                     trial_dir("tmp"),
                     trial_dir("evidence"),
                 ],
+                "denyWrite": [],
             },
-            "network": { "allowedDomains": ["api.example.com"] },
+            "network": {
+                "allowedDomains": ["api.example.com"],
+                "deniedDomains": [],
+                "tlsTerminate": {},
+            },
+            "credentials": {
+                "envVars": [{ "name": "EXAMPLE_API_KEY", "mode": "mask" }],
+            },
         });
         assert_eq!(policy, expected);
     }
@@ -483,7 +576,7 @@ mod tests {
         let inside_checkout =
             Batch::create(&host.join("checkout/eval"), &BatchName::new("b").unwrap()).unwrap();
         let trial = trial(&inside_checkout, 1, Configuration::Baseline);
-        let result = Policy::for_trial(&trial, &machine, "api.example.com");
+        let result = Policy::for_trial(&trial, &machine, "api.example.com", &api_key());
         assert!(matches!(result, Err(RunError::Nested { .. })), "{result:?}");
 
         let toolchain = host.add_toolchain("checkout/toolchain");

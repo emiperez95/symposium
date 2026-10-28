@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use tempfile::TempDir;
 
-use super::{Batch, Configuration, Machine, Trial};
+use super::{ApiKey, Batch, Configuration, Machine, Trial};
 use crate::evals::Evals;
 use crate::task::{BatchName, Task, TaskName};
 
@@ -67,4 +67,9 @@ pub(crate) fn trial(batch: &Batch, number: usize, configuration: Configuration) 
     batch
         .create_trial(number, configuration, &evals, &task)
         .unwrap()
+}
+
+/// A key for tests that never leave the sandbox's proxy.
+pub(crate) fn api_key() -> ApiKey {
+    ApiKey::new("EXAMPLE_API_KEY", "sk-test".into())
 }

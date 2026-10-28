@@ -23,6 +23,7 @@
 mod env;
 mod error;
 mod policy;
+mod srt;
 #[cfg(test)]
 mod test_support;
 
@@ -30,8 +31,10 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub(crate) use env::ApiKey;
 pub(crate) use error::RunError;
 pub(crate) use policy::{Machine, Policy};
+pub(crate) use srt::SRT_VERSION;
 
 use crate::evals::Evals;
 use crate::grade::copy_tree;
@@ -244,9 +247,7 @@ impl Trial {
     ///
     /// When the file cannot be written.
     pub(crate) fn write_policy(&self, policy: &Policy) -> Result<(), RunError> {
-        let text = serde_json::to_string_pretty(policy).map_err(RunError::Policy)?;
-        let path = self.policy_file();
-        fs::write(&path, text).map_err(|source| RunError::Create { path, source })
+        policy.write(&self.policy_file())
     }
 }
 
