@@ -113,7 +113,7 @@ pub async fn workspace_status(
 
     // Dependency-embedded plugins, with the decision the config made about
     // each. This is the same view the consent prompt works from.
-    let discovery = crate::discovery::discover(sym, deps).await;
+    let discovery = crate::discovery::discover(sym, deps, &registry.plugins).await;
     for found in discovery
         .active
         .iter()
@@ -152,6 +152,9 @@ pub async fn workspace_status(
         UpdateLevel::None,
     )
     .await;
+    let used =
+        crate::discovery::resolve_used(sym, &pms, &registry.plugins, &ws.root, UpdateLevel::None)
+            .await;
     for id in enabled {
         if shown.contains(&pms.identity(&id)) {
             continue;
@@ -159,8 +162,8 @@ pub async fn workspace_status(
         let dependency = dep_ids
             .iter()
             .any(|dep| pms.identity(dep) == pms.identity(&id));
-        let used = sym.config.plugins.is_used_in(&pms, &id, &ws.root);
-        if dependency && !used {
+        let named = used.iter().any(|(_, used)| *used == pms.identity(&id));
+        if dependency && !named {
             continue;
         }
         entries.push(StatusEntry {

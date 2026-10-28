@@ -118,12 +118,22 @@ impl Discovery {
 /// cache-only — for a workspace dependency, into the source `cargo metadata`
 /// already extracted (no probe, no network) — so every dependency-embedded
 /// plugin is discoverable, registry crates included.
-pub async fn discover(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Discovery {
+pub async fn discover(
+    sym: &Symposium,
+    deps: &Arc<WorkspaceDeps>,
+    registry: &[Plugin],
+) -> Discovery {
     let Some(workspace_root) = deps.workspace_root().map(Path::to_path_buf) else {
         return Discovery::default();
     };
     let pms = sym.package_managers(deps);
     let dep_ids = pms.list_deps().await.unwrap_or_default();
+    let used: HashSet<PackageId> =
+        resolve_used(sym, &pms, registry, &workspace_root, UpdateLevel::None)
+            .await
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect();
 
     let mut discovery = Discovery::default();
     // Untrusted instances = the cargo transport: its `active_plugins` are the
@@ -133,7 +143,7 @@ pub async fn discover(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Discovery {
         for plugin in inst.active_plugins(&dep_ids).await {
             let name = plugin.canonical.name.clone();
             let description = Some(describe_plugin(&plugin.manifest));
-            let enablement = decide(sym, &pms, &plugin.canonical, &workspace_root);
+            let enablement = decide(sym, &pms, &used, &plugin.canonical);
             let discovered = DiscoveredPlugin {
                 registry: inst.name.clone(),
                 id: plugin.canonical,
@@ -176,25 +186,19 @@ pub async fn enabled_dependencies(
     update: UpdateLevel,
 ) -> Vec<PackageId> {
     let plugins = &sym.config.plugins;
+    let used = resolve_used(sym, pms, registry, workspace_root, update).await;
     let mut enabled = Vec::new();
     let mut known = HashSet::new();
     for id in dep_ids.iter().filter(|id| id.pm == CARGO_PM) {
-        known.insert(pms.identity(id));
-        if !plugins.is_disabled(pms, id)
-            && (plugins.is_auto_enabled(pms, id) || plugins.is_used_in(pms, id, workspace_root))
-        {
+        let identity = pms.identity(id);
+        let is_used = used.iter().any(|(_, used)| *used == identity);
+        known.insert(identity);
+        if !plugins.is_disabled(pms, id) && (plugins.is_auto_enabled(pms, id) || is_used) {
             enabled.push(PackageId::any_version(&id.pm, &id.name));
         }
     }
 
-    for name in plugins.used_names_in(workspace_root) {
-        let id = match pms.identify(registry, name, update).await {
-            Ok(id) => id,
-            Err(e) => {
-                tracing::warn!(error = %e, "skipping `[plugins] use` entry");
-                continue;
-            }
-        };
+    for (name, id) in used {
         let named = PackageId::any_version(&id.pm, name);
         if !registry.iter().any(|p| pms.identity(&p.canonical) == id)
             && !plugins.is_disabled(pms, &named)
@@ -205,6 +209,23 @@ pub async fn enabled_dependencies(
     }
 
     enabled
+}
+
+pub(crate) async fn resolve_used<'a>(
+    sym: &'a Symposium,
+    pms: &PmRegistry,
+    registry: &[Plugin],
+    workspace_root: &Path,
+    update: UpdateLevel,
+) -> Vec<(&'a str, PackageId)> {
+    let mut used = Vec::new();
+    for name in sym.config.plugins.used_names_in(workspace_root) {
+        match pms.identify(registry, name, update).await {
+            Ok(id) => used.push((name, id)),
+            Err(e) => tracing::warn!(error = %e, "skipping `[plugins] use` entry"),
+        }
+    }
+    used
 }
 
 /// The canonical ids of the `plugins` an applicable `use` entry names, which
@@ -226,10 +247,13 @@ pub fn used_plugins(
         .collect()
 }
 
-/// Run [`discover`] for the workspace `deps` points at, or an empty
-/// [`Discovery`] when there is no workspace.
+/// Run [`discover`] for the workspace `deps` points at, against the plugins
+/// its registries and members define, or an empty [`Discovery`] when there is
+/// no workspace.
 pub async fn discover_for(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Discovery {
-    discover(sym, deps).await
+    let workspace = deps.load().cloned();
+    let registry = crate::plugins::load_registry_with_workspace(sym, workspace.as_deref()).await;
+    discover(sym, deps, &registry.plugins).await
 }
 
 /// The names of the discovered offers still awaiting consent, deduplicated
@@ -372,7 +396,12 @@ fn count_phrase(n: usize, singular: &str, plural: &str) -> Option<String> {
 /// Classify one offer against the `[plugins]` config. An explicit decision —
 /// `use`, then `disable` — outranks the standing `auto-enable`, so a name the
 /// user declined stays declined.
-fn decide(sym: &Symposium, pms: &PmRegistry, id: &PackageId, workspace_root: &Path) -> Enablement {
+fn decide(
+    sym: &Symposium,
+    pms: &PmRegistry,
+    used: &HashSet<PackageId>,
+    id: &PackageId,
+) -> Enablement {
     let plugins = &sym.config.plugins;
     // `disable` is tested first because it is the last word: every other
     // entry says a plugin *may* run, and this is the only one that says it
@@ -381,7 +410,7 @@ fn decide(sym: &Symposium, pms: &PmRegistry, id: &PackageId, workspace_root: &Pa
     // off.
     if plugins.is_disabled(pms, id) {
         Enablement::Declined
-    } else if plugins.is_used_in(pms, id, workspace_root) {
+    } else if used.contains(&pms.identity(id)) {
         Enablement::Used
     } else if plugins.is_auto_enabled(pms, id) {
         Enablement::AutoEnabled
@@ -442,7 +471,7 @@ mod tests {
         let ws = workspace(tmp.path());
         let sym = sym_with(tmp.path(), "");
 
-        let found = discover(&sym, &ws).await;
+        let found = discover(&sym, &ws, &[]).await;
         assert!(found.active.is_empty());
         assert!(found.auto_enabled.is_empty());
         let names: Vec<&str> = found.candidates.iter().map(|c| c.name()).collect();
@@ -462,7 +491,7 @@ mod tests {
             "#},
         );
 
-        let found = discover(&sym, &ws).await;
+        let found = discover(&sym, &ws, &[]).await;
         assert!(found.candidates.is_empty());
         let names: Vec<&str> = found.auto_enabled.iter().map(|c| c.name()).collect();
         assert_eq!(names, vec!["widget-lib"]);
@@ -481,7 +510,7 @@ mod tests {
                 use = ["widget-lib"]
             "#},
         );
-        let found = discover(&sym, &ws).await;
+        let found = discover(&sym, &ws, &[]).await;
         assert_eq!(found.active.len(), 1);
         assert_eq!(found.active[0].enablement, Enablement::Used);
 
@@ -493,9 +522,34 @@ mod tests {
                 disable = ["widget-lib"]
             "#},
         );
-        let found = discover(&sym, &ws).await;
+        let found = discover(&sym, &ws, &[]).await;
         assert!(found.auto_enabled.is_empty());
         assert_eq!(found.declined.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn use_naming_a_registry_plugin_leaves_the_dependency_undecided() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = workspace(tmp.path());
+        let sym = sym_with(
+            tmp.path(),
+            indoc! {r#"
+                [plugins]
+                use = ["widget-lib"]
+
+                [[registry]]
+                name = "reg"
+                path = "reg"
+            "#},
+        );
+        let entry = tmp.path().join("config/reg/widget-lib");
+        std::fs::create_dir_all(&entry).unwrap();
+        std::fs::write(entry.join("Symposium.toml"), "name = \"widget-lib\"\n").unwrap();
+        let registry = crate::plugins::load_registry(&sym).await;
+
+        let found = discover(&sym, &ws, &registry.plugins).await;
+        assert!(found.active.is_empty());
+        assert_eq!(found.candidates.len(), 1);
     }
 
     /// A `use` entry recorded for another workspace does not enable anything
@@ -512,7 +566,7 @@ mod tests {
             "#},
         );
 
-        let found = discover(&sym, &ws).await;
+        let found = discover(&sym, &ws, &[]).await;
         assert!(found.active.is_empty());
         assert_eq!(found.candidates.len(), 1);
     }
