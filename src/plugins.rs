@@ -312,9 +312,9 @@ pub struct Plugin {
     /// real package identity, so this is a placeholder id tagged with the source
     /// name (registry) or `"local"` (workspace).
     ///
-    /// Used only to key chained-plugin cycle/diamond detection on the normalized
-    /// crate name (see `skills::expand_chained_plugins`). It does *not* affect
-    /// skill identity — that is the `SKILL.md` path hash.
+    /// Keys chained-plugin cycle/diamond detection on its package identity
+    /// ([`PmRegistry::identity`](crate::pm::PmRegistry::identity)). It does
+    /// *not* affect skill identity, which is the `SKILL.md` path hash.
     ///
     /// FIXME: the registry/workspace placeholder `pm` tags (`"user-plugins"`,
     /// `"local"`, …) should become real `path` PM ids once that PM lands.
@@ -323,14 +323,18 @@ pub struct Plugin {
 
 impl Plugin {
     /// Evaluate the plugin-level predicate set, stamping this plugin's
-    /// provenance into the context first. Use this — not
-    /// `plugin.applies()` directly — when iterating loaded plugins, so
-    /// `workspace-member()` sees the right plugin's provenance. The stamp
-    /// carries over to the plugin's nested component evaluations (groups,
-    /// skills, hooks, MCP servers, subcommands) on the same context.
+    /// provenance into the context first, so `workspace-member()` sees the
+    /// right plugin's provenance. The stamp carries over to the plugin's
+    /// nested component evaluations (groups, skills, hooks, MCP servers,
+    /// subcommands) on the same context. A dormant plugin
+    /// ([`requires_use`](PluginManifest::requires_use)) applies only when an
+    /// applicable `[plugins] use` entry names it.
     pub fn applies(&self, ctx: &mut crate::predicate::PredicateContext) -> bool {
         ctx.set_workspace_member(self.workspace_member);
-        self.manifest.applies(ctx)
+        if self.manifest.requires_use && !ctx.is_used(&self.canonical) {
+            return false;
+        }
+        self.manifest.predicates.evaluate(ctx)
     }
 }
 
@@ -398,16 +402,6 @@ pub struct ChainedPlugin {
 }
 
 impl PluginManifest {
-    /// Check if this plugin's activation predicates hold in `ctx`. A dormant
-    /// plugin ([`requires_use`](Self::requires_use)) applies only when an
-    /// applicable `[plugins] use` entry names it.
-    pub fn applies(&self, ctx: &mut crate::predicate::PredicateContext) -> bool {
-        if self.requires_use && !ctx.is_used(&self.name) {
-            return false;
-        }
-        self.predicates.evaluate(ctx)
-    }
-
     /// Look up a named installation on this plugin.
     pub fn get_installation(&self, name: &str) -> Option<&Installation> {
         self.installations.iter().find(|i| i.name == name)
@@ -1119,8 +1113,13 @@ async fn load_registry_impl(
     }
 
     if let Some(ws) = workspace {
+        let member_dirs: Vec<PathBuf> = ws
+            .member_crates
+            .iter()
+            .filter_map(|m| m.path.clone())
+            .collect();
         let (ws_plugins, ws_warnings) =
-            workspace_plugins(&ws.root, &ws.members, sym.config.agents_syncing);
+            workspace_plugins(&ws.root, &member_dirs, sym.config.agents_syncing);
         plugins.extend(ws_plugins);
         warnings.extend(ws_warnings);
     }
@@ -1148,8 +1147,6 @@ async fn load_registry_impl(
 /// plugin-level gate; a facet still calls [`Plugin::applies`] before its
 /// own predicates, to re-stamp `workspace-member()` for the plugin being read.
 ///
-/// Crate loading goes through `pms` ([`crate::pm::PmRegistry::load_plugin`]),
-/// which fetches cache-only, so this is safe on the per-event hook path.
 /// `ctx.deps` supplies the dependency list expansion evaluates against.
 pub async fn active_plugins(
     sym: &Symposium,
@@ -1157,6 +1154,7 @@ pub async fn active_plugins(
     pms: &crate::pm::PmRegistry,
     workspace_root: Option<&Path>,
     ctx: &mut crate::predicate::PredicateContext<'_>,
+    update: UpdateLevel,
 ) -> Vec<Plugin> {
     let mut active = Vec::new();
     // Crate identities already loaded through the set, keyed on `(pm, name)` so
@@ -1173,44 +1171,33 @@ pub async fn active_plugins(
         record_active(parsed.clone(), ctx, &mut active, &mut worklist);
     }
 
-    // Enabled crates: consented dependencies and `use`d crates that aren't
-    // dependencies. A name a registry already provides as a plugin was seeded
-    // above, so skip it here rather than also fetching it as a crate.
+    // Enabled packages: consented dependencies and what `use` entries name,
+    // each resolved by the package managers.
     if let Some(root) = workspace_root {
-        let registry_names: std::collections::HashSet<String> = registry
-            .plugins
-            .iter()
-            .map(|p| crate::crate_sources::normalize_crate_name(&p.manifest.name))
-            .collect();
-        for name in crate::discovery::enabled_dependencies(sym, ctx.deps, root) {
-            if !registry_names.contains(&crate::crate_sources::normalize_crate_name(&name)) {
-                worklist.push(crate::pm::CargoPm::id_for(&name, None));
-            }
-        }
+        worklist.extend(
+            crate::discovery::enabled_dependencies(
+                sym,
+                pms,
+                &registry.plugins,
+                ctx.deps,
+                root,
+                update,
+            )
+            .await,
+        );
     }
 
     // Fixed-point: resolve each id through the set, record any new plugin, and
     // enqueue its own chained references.
     while let Some(id) = worklist.pop() {
-        for plugin in pms.load_plugin(&id).await {
-            if visited.insert(plugin_key(&plugin.canonical)) {
+        for plugin in pms.load_plugin(&id, update).await {
+            if visited.insert(pms.identity(&plugin.canonical)) {
                 record_active(plugin, ctx, &mut active, &mut worklist);
             }
         }
     }
 
     active
-}
-
-/// The dedup key for a loaded crate plugin: its ecosystem plus normalized name,
-/// so hyphen/underscore spellings collapse but a registry plugin and a crate of
-/// the same name stay distinct.
-fn plugin_key(id: &crate::pm::PackageId) -> String {
-    format!(
-        "{}/{}",
-        id.pm,
-        crate::crate_sources::normalize_crate_name(&id.name)
-    )
 }
 
 /// Gate `plugin` and, if it passes, record it into `active` and enqueue its
@@ -1984,8 +1971,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plugin.name, "widget-tools");
-        assert!(plugin.applies(&mut ctx(&[PackageId::new("cargo", "widget-lib", "1.0.0")])));
-        assert!(!plugin.applies(&mut ctx(&[PackageId::new("cargo", "serde", "1.0.0")])));
+        assert!(plugin.predicates.evaluate(&mut ctx(&[PackageId::new(
+            "cargo",
+            "widget-lib",
+            "1.0.0"
+        )])));
+        assert!(
+            !plugin
+                .predicates
+                .evaluate(&mut ctx(&[PackageId::new("cargo", "serde", "1.0.0")]))
+        );
     }
 
     #[test]
@@ -2931,7 +2926,11 @@ mod tests {
             chained: vec![],
             requires_use: false,
         };
-        assert!(plugin_wildcard.applies(&mut ctx(&workspace_crates)));
+        assert!(
+            plugin_wildcard
+                .predicates
+                .evaluate(&mut ctx(&workspace_crates))
+        );
 
         // Plugin targeting serde - should apply
         let plugin_serde = PluginManifest {
@@ -2946,7 +2945,11 @@ mod tests {
             chained: vec![],
             requires_use: false,
         };
-        assert!(plugin_serde.applies(&mut ctx(&workspace_crates)));
+        assert!(
+            plugin_serde
+                .predicates
+                .evaluate(&mut ctx(&workspace_crates))
+        );
 
         // Plugin targeting non-existent crate - should not apply
         let plugin_other = PluginManifest {
@@ -2961,7 +2964,11 @@ mod tests {
             chained: vec![],
             requires_use: false,
         };
-        assert!(!plugin_other.applies(&mut ctx(&workspace_crates)));
+        assert!(
+            !plugin_other
+                .predicates
+                .evaluate(&mut ctx(&workspace_crates))
+        );
 
         // Plugin with version predicate - should reject wrong version
         let plugin_version = PluginManifest {
@@ -2976,7 +2983,11 @@ mod tests {
             chained: vec![],
             requires_use: false,
         };
-        assert!(!plugin_version.applies(&mut ctx(&workspace_crates)));
+        assert!(
+            !plugin_version
+                .predicates
+                .evaluate(&mut ctx(&workspace_crates))
+        );
     }
 
     #[test]
@@ -3138,14 +3149,18 @@ mod tests {
     #[test]
     fn dormant_plugin_applies_only_when_used() {
         let manifest: RawPluginManifest = toml::from_str(r#"name = "gate-less""#).unwrap();
-        let plugin = validate_manifest(manifest, ManifestOrigin::Registry).unwrap();
-        assert!(plugin.requires_use);
+        let plugin = Plugin {
+            manifest: validate_manifest(manifest, ManifestOrigin::Registry).unwrap(),
+            workspace_member: false,
+            canonical: PackageId::any_version("reg", "gate-less"),
+        };
+        assert!(plugin.manifest.requires_use);
 
         let deps: Vec<PackageId> = Vec::new();
+        let other = PackageId::any_version("reg", "something-else");
         assert!(!plugin.applies(&mut ctx(&deps)));
-        assert!(!plugin.applies(&mut ctx(&deps).with_used_names(&["something-else"])));
-        // Hyphen/underscore spellings name the same plugin.
-        assert!(plugin.applies(&mut ctx(&deps).with_used_names(&["gate_less"])));
+        assert!(!plugin.applies(&mut ctx(&deps).with_used(&[other])));
+        assert!(plugin.applies(&mut ctx(&deps).with_used(std::slice::from_ref(&plugin.canonical))));
     }
 
     #[test]

@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::Level;
 
+use crate::pm::{PackageId, PmRegistry};
+
 // ---------------------------------------------------------------------------
 // User configuration (~/.symposium/config.toml)
 // ---------------------------------------------------------------------------
@@ -126,8 +128,7 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 pub struct PluginsConfig {
     /// Dependency names whose embedded plugins load without being asked
-    /// about; `"*"` pre-consents to every dependency. Matched
-    /// hyphen/underscore-insensitively, like crate names.
+    /// about; `"*"` pre-consents to every dependency.
     #[serde(default, rename = "auto-enable", skip_serializing_if = "Vec::is_empty")]
     pub auto_enable: Vec<String>,
 
@@ -159,23 +160,26 @@ impl PluginsConfig {
             .collect()
     }
 
-    /// Does `name` appear in `auto-enable` (directly or via `"*"`)?
-    pub fn is_auto_enabled(&self, name: &str) -> bool {
+    /// Does `auto-enable` name the package `id` (directly or via `"*"`)?
+    pub fn is_auto_enabled(&self, pms: &PmRegistry, id: &PackageId) -> bool {
         self.auto_enable
             .iter()
-            .any(|entry| name_matches(entry, name))
+            .any(|entry| name_matches(pms, entry, id))
     }
 
-    /// Does `name` appear in `disable`?
-    pub fn is_disabled(&self, name: &str) -> bool {
-        self.disable.iter().any(|entry| name_matches(entry, name))
+    /// Does `disable` name the package `id`?
+    pub fn is_disabled(&self, pms: &PmRegistry, id: &PackageId) -> bool {
+        self.disable
+            .iter()
+            .any(|entry| name_matches(pms, entry, id))
     }
 
-    /// Is `name` enabled by a `use` entry applicable in `workspace_root`?
-    pub fn is_used_in(&self, name: &str, workspace_root: &Path) -> bool {
+    /// Is the package `id` enabled by a `use` entry applicable in
+    /// `workspace_root`?
+    pub fn is_used_in(&self, pms: &PmRegistry, id: &PackageId, workspace_root: &Path) -> bool {
         self.used_names_in(workspace_root)
             .iter()
-            .any(|entry| name_matches(entry, name))
+            .any(|entry| name_matches(pms, entry, id))
     }
 
     /// Whether any enablement entry could pull in a crate plugin. With neither
@@ -188,13 +192,11 @@ impl PluginsConfig {
     }
 }
 
-/// Does a configured entry name `name`? `"*"` matches everything; otherwise
-/// the comparison is hyphen/underscore-insensitive, since these entries are
-/// user-typed package names.
-fn name_matches(entry: &str, name: &str) -> bool {
-    entry == "*"
-        || crate::crate_sources::normalize_crate_name(entry)
-            == crate::crate_sources::normalize_crate_name(name)
+/// Does a configured entry name the package `id`? `"*"` matches everything.
+/// An entry carries no package manager of its own, so the one owning `id`
+/// decides whether the two names are the same package.
+fn name_matches(pms: &PmRegistry, entry: &str, id: &PackageId) -> bool {
+    entry == "*" || pms.identity(&PackageId::any_version(&id.pm, entry)) == pms.identity(id)
 }
 
 /// One `[plugins] use` entry: a plugin name enabled deliberately, scoped
@@ -1065,9 +1067,12 @@ mod tests {
             use = ["everywhere", { name = "scoped", workspace = "/ws/a" }]
         "#});
 
-        assert!(config.plugins.is_auto_enabled("widget_lib"));
-        assert!(!config.plugins.is_auto_enabled("other"));
-        assert!(config.plugins.is_disabled("noisy-crate"));
+        let tmp = tempfile::tempdir().unwrap();
+        let pms = Symposium::from_dir(tmp.path()).detached_managers();
+        let krate = |name| PackageId::new(crate::pm::CARGO_PM, name, "1.0.0");
+        assert!(config.plugins.is_auto_enabled(&pms, &krate("widget_lib")));
+        assert!(!config.plugins.is_auto_enabled(&pms, &krate("other")));
+        assert!(config.plugins.is_disabled(&pms, &krate("noisy-crate")));
 
         assert_eq!(
             config.plugins.used,
@@ -1087,8 +1092,16 @@ mod tests {
             config.plugins.used_names_in(Path::new("/ws/other")),
             vec!["everywhere"]
         );
-        assert!(config.plugins.is_used_in("scoped", Path::new("/ws/a")));
-        assert!(!config.plugins.is_used_in("scoped", Path::new("/ws/other")));
+        assert!(
+            config
+                .plugins
+                .is_used_in(&pms, &krate("scoped"), Path::new("/ws/a"))
+        );
+        assert!(
+            !config
+                .plugins
+                .is_used_in(&pms, &krate("scoped"), Path::new("/ws/other"))
+        );
 
         // Entries survive a round trip through the config file.
         let reparsed = parse_config(&toml::to_string_pretty(&config).unwrap());
@@ -1101,7 +1114,48 @@ mod tests {
             [plugins]
             auto-enable = ["*"]
         "#});
-        assert!(config.plugins.is_auto_enabled("anything"));
+        let tmp = tempfile::tempdir().unwrap();
+        let pms = Symposium::from_dir(tmp.path()).detached_managers();
+        assert!(
+            config
+                .plugins
+                .is_auto_enabled(&pms, &PackageId::any_version("anything", "anything"))
+        );
+    }
+
+    /// An entry names a package the way that package's manager compares
+    /// names: cargo folds `-` and `_`, a registry compares exactly.
+    #[test]
+    fn plugins_entries_match_under_the_owning_package_manager() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            indoc! {r#"
+                [plugins]
+                auto-enable = ["widget_lib"]
+                disable = ["noisy_crate", "my_plugin"]
+                use = ["serde_json", "my_plugin"]
+
+                [[registry]]
+                name = "reg"
+                path = "reg"
+            "#},
+        )
+        .unwrap();
+        let sym = Symposium::from_dir(tmp.path());
+        let pms = sym.detached_managers();
+        let plugins = &sym.config.plugins;
+        let krate = |name| PackageId::new(crate::pm::CARGO_PM, name, "1.0.0");
+        let plugin = |name| PackageId::any_version("reg", name);
+
+        assert!(plugins.is_auto_enabled(&pms, &krate("widget-lib")));
+        assert!(plugins.is_disabled(&pms, &krate("noisy-crate")));
+        assert!(plugins.is_used_in(&pms, &krate("serde-json"), tmp.path()));
+
+        assert!(plugins.is_disabled(&pms, &plugin("my_plugin")));
+        assert!(plugins.is_used_in(&pms, &plugin("my_plugin"), tmp.path()));
+        assert!(!plugins.is_disabled(&pms, &plugin("my-plugin")));
+        assert!(!plugins.is_used_in(&pms, &plugin("my-plugin"), tmp.path()));
     }
 
     #[test]

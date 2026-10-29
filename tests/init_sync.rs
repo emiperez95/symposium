@@ -1397,6 +1397,69 @@ async fn crate_info_resolves_patched_crate_to_local_path() {
     .unwrap();
 }
 
+#[tokio::test]
+async fn crate_info_resolves_workspace_member_to_its_directory() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["member-agents-skills0"],
+        async |ctx| {
+            let root = ctx.workspace_root.as_ref().unwrap();
+            for (name, dir) in [("tool", root.join("tool")), ("app", root.clone())] {
+                let output = match symposium::crate_command::dispatch_crate(
+                    &ctx.sym, name, None, root,
+                )
+                .await
+                {
+                    symposium::crate_command::DispatchResult::Ok(output) => output,
+                    symposium::crate_command::DispatchResult::Err(e) => {
+                        panic!("crate-info {name} failed: {e}")
+                    }
+                };
+                assert!(output.contains("Version: 0.1.0"), "{output}");
+                let source = output
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Source: "))
+                    .unwrap();
+                assert_eq!(
+                    std::fs::canonicalize(source)?,
+                    std::fs::canonicalize(&dir)?,
+                    "{output}"
+                );
+            }
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn sync_reports_why_the_workspace_could_not_be_loaded() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["workspace-plugin0"],
+        async |mut ctx| {
+            let manifest = ctx.workspace_root.as_ref().unwrap().join("Cargo.toml");
+            std::fs::write(
+                &manifest,
+                "[package]\nname = \"broken\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \n",
+            )?;
+            for command in ["sync", "status"] {
+                let err = format!("{:#}", ctx.symposium(&[command]).await.unwrap_err());
+                assert!(err.contains("Cargo.toml"), "{command}: {err}");
+                assert!(!err.contains("not in a Rust workspace"), "{command}: {err}");
+            }
+
+            std::fs::remove_file(&manifest)?;
+            let err = format!("{:#}", ctx.symposium(&["sync"]).await.unwrap_err());
+            assert!(err.contains("not in a Rust workspace"), "{err}");
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// `sync` installs skills from a `[patch.crates-io]`-overridden crate.
 #[tokio::test]
 async fn sync_installs_skill_from_patched_crate() {

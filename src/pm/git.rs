@@ -78,8 +78,8 @@ impl PackageManager for GitPm {
         self.inner.registry_plugins().await
     }
 
-    async fn load_plugin(&self, id: &PackageId) -> Vec<UnvalidatedPlugin> {
-        self.inner.load_plugin(id).await
+    async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<UnvalidatedPlugin> {
+        self.inner.load_plugin(id, update).await
     }
 
     async fn list_deps(&self) -> Result<Vec<PackageId>> {

@@ -146,6 +146,27 @@ impl PackageManager for CargoPm {
         crate::crate_sources::normalize_crate_name(name)
     }
 
+    /// A workspace dependency of that name, or a crate in cargo's extracted
+    /// sources; above [`UpdateLevel::None`], otherwise a crate crates.io has.
+    async fn find(&self, name: &str, update: UpdateLevel) -> Option<PackageId> {
+        let wanted = self.canonical_name(name);
+        let same = |id: &PackageId| self.canonical_name(&id.name) == wanted;
+        if let Some(dep) = self.list_deps().await.ok()?.into_iter().find(same) {
+            return Some(dep);
+        }
+        if let Ok(cached) = self
+            .fetch(&Self::id_for(name, None), UpdateLevel::None)
+            .await
+        {
+            return Some(cached.id);
+        }
+        if matches!(update, UpdateLevel::None) {
+            return None;
+        }
+        let found = self.search(name).await.ok()?;
+        found.into_iter().map(|info| info.id).find(same)
+    }
+
     /// The plugins embedded in the workspace's dependencies: every dep in
     /// `deps` whose source tree embeds plugin content, built into a full
     /// `Plugin`. Whether each is *trusted* (may activate without consent)
@@ -183,9 +204,9 @@ impl PackageManager for CargoPm {
     /// Resolve a specific crate id to its plugin (a chained reference or an
     /// enabled crate). Unlike `active_plugins`, this loads the named crate
     /// whatever it embeds — any fetchable crate yields at least the default
-    /// `skills/` plugin. Fetched cache-only.
-    async fn load_plugin(&self, id: &PackageId) -> Vec<UnvalidatedPlugin> {
-        let fetched = match self.fetch(id, UpdateLevel::None).await {
+    /// `skills/` plugin.
+    async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<UnvalidatedPlugin> {
+        let fetched = match self.fetch(id, update).await {
             Ok(f) => f,
             Err(e) => {
                 tracing::warn!(id = %id, error = %e, "failed to fetch crate for plugin");
@@ -222,11 +243,12 @@ impl PackageManager for CargoPm {
             .collect())
     }
 
-    async fn fetch(&self, id: &PackageId, _update: UpdateLevel) -> Result<FetchedPackage> {
+    async fn fetch(&self, id: &PackageId, update: UpdateLevel) -> Result<FetchedPackage> {
         debug_assert_eq!(id.pm, CARGO_PM);
         // `crates()` drives the lazy `cargo metadata` resolution — the cargo PM
         // owns the call, resolving against its own workspace.
-        let mut fetch = RustCrateFetch::new(&id.name, self.workspace.crates());
+        let mut fetch = RustCrateFetch::new(&id.name, self.workspace.crates())
+            .offline(matches!(update, UpdateLevel::None));
         if id.version != ANY_VERSION {
             fetch = fetch.version(&id.version);
         }
@@ -304,5 +326,22 @@ mod tests {
         // The plugin points at the crate source; the default `skills/` group is
         // added by validation, not by the PM.
         assert!(active[0].root.join("skills").is_dir());
+    }
+
+    #[tokio::test]
+    async fn load_plugin_without_update_reads_only_the_cargo_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pm = CargoPm::new(crate::pm::WorkspaceDeps::fixture(
+            tmp.path().to_path_buf(),
+            vec![],
+        ));
+
+        let loaded = pm
+            .load_plugin(
+                &CargoPm::id_for("zz-symposium-no-such-crate", None),
+                UpdateLevel::None,
+            )
+            .await;
+        assert!(loaded.is_empty());
     }
 }

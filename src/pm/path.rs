@@ -99,7 +99,7 @@ impl PackageManager for PathPm {
     }
 
     /// The entry an id names (`id.name` is the entry's subpath key).
-    async fn load_plugin(&self, id: &PackageId) -> Vec<UnvalidatedPlugin> {
+    async fn load_plugin(&self, id: &PackageId, _update: UpdateLevel) -> Vec<UnvalidatedPlugin> {
         if id.pm != self.name {
             return Vec::new();
         }
@@ -183,7 +183,10 @@ mod tests {
 
         // load_plugin by the entry's subpath key.
         let one = pm
-            .load_plugin(&PackageId::new("user-plugins", "tools", ANY_VERSION))
+            .load_plugin(
+                &PackageId::new("user-plugins", "tools", ANY_VERSION),
+                UpdateLevel::None,
+            )
             .await;
         assert_eq!(one.len(), 1);
         assert_eq!(one[0].manifest.name.as_deref(), Some("tools"));

@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use crate::pm::WorkspaceCrate;
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 mod probe;
 
@@ -37,6 +37,7 @@ pub struct RustCrateFetch<'a> {
     crate_name: String,
     version_spec: Option<String>,
     workspace: &'a [WorkspaceCrate],
+    offline: bool,
 }
 
 impl<'a> RustCrateFetch<'a> {
@@ -46,6 +47,7 @@ impl<'a> RustCrateFetch<'a> {
             crate_name: name.to_string(),
             version_spec: None,
             workspace,
+            offline: false,
         }
     }
 
@@ -55,16 +57,12 @@ impl<'a> RustCrateFetch<'a> {
         self
     }
 
+    pub fn offline(mut self, offline: bool) -> Self {
+        self.offline = offline;
+        self
+    }
+
     /// Fetch the crate sources, returning a path to the source directory.
-    ///
-    /// Resolution order:
-    /// 1. If the crate is a workspace dependency with a known extracted source
-    ///    (and no explicit `--version` was requested), return that directory
-    ///    directly — the workspace's own `cargo metadata` already located it,
-    ///    for both path *and* registry crates, so no probe is needed.
-    /// 2. Otherwise, run `cargo fetch` in a temporary dummy package to
-    ///    populate cargo's registry cache, then read `cargo metadata` to get
-    ///    the extracted source path under `~/.cargo/registry/src/`.
     pub async fn fetch(self) -> Result<FetchResult> {
         // Serve a workspace dependency from its already-extracted source.
         if self.version_spec.is_none() {
@@ -84,6 +82,10 @@ impl<'a> RustCrateFetch<'a> {
         }
 
         let (name, version_req) = self.resolve_registry_spec();
+        if self.offline {
+            let cargo_home = home::cargo_home().context("failed to locate cargo home")?;
+            return probe::find_cached(&name, &version_req, &cargo_home);
+        }
         probe::fetch_via_cargo(&name, &version_req).await
     }
 
