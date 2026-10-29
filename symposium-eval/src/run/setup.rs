@@ -17,25 +17,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+use super::client::Client;
 use super::{Configuration, RunError, Trial, succeeded};
 use crate::grade::process::{Backend, Invocation};
-
-/// A coding agent trials can run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Client {
-    ClaudeCode,
-    Codex,
-}
-
-impl Client {
-    /// The name `cargo agents init --add-agent` takes.
-    pub(crate) fn symposium_name(self) -> &'static str {
-        match self {
-            Self::ClaudeCode => "claude",
-            Self::Codex => "codex",
-        }
-    }
-}
 
 /// `~/.symposium/config.toml` for a Symposium trial.
 #[derive(Debug, Serialize)]

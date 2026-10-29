@@ -114,13 +114,24 @@ impl RealSrt {
     }
 
     /// Sets up `trial`'s Symposium configuration for `client`, inside its sandbox.
-    pub(crate) fn set_up_symposium(&self, trial: &Trial, client: super::setup::Client) {
+    pub(crate) fn set_up_symposium(&self, trial: &Trial, client: super::client::Client) {
         let backend = self.srt.for_trial(trial).unwrap();
         let env = trial.environment(&self.machine, &self.api_key).unwrap();
         let deadline = std::time::Duration::from_secs(60);
         trial
             .set_up_symposium(client, &backend, env, deadline)
             .unwrap();
+    }
+
+    /// Runs the pre-launch checks on this machine, with the environment `trial` launches
+    /// with.
+    pub(crate) fn check_before_launch(
+        &self,
+        trial: &Trial,
+        client: super::client::Client,
+    ) -> Result<(), super::RunError> {
+        let env = trial.environment(&self.machine, &self.api_key).unwrap();
+        trial.check_before_launch(client, &env)
     }
 
     /// Stages `tool` as `name`; trials created afterwards link it.

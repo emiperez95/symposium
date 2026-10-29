@@ -20,9 +20,11 @@
 //! [`Batch`] keeps its root both as given and canonical, and a [`Trial`] carries its
 //! batch, so the two cannot be paired wrongly.
 
+pub(crate) mod client;
 mod env;
 mod error;
 mod policy;
+mod prelaunch;
 pub(crate) mod setup;
 #[cfg(all(test, target_os = "linux"))]
 mod smoke;
@@ -36,7 +38,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(crate) use env::ApiKey;
-pub(crate) use error::RunError;
+pub(crate) use error::{RunError, Unready};
 pub(crate) use policy::{Machine, Policy};
 pub(crate) use srt::SRT_VERSION;
 use stage::StagedTool;

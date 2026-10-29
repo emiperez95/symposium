@@ -74,4 +74,27 @@ pub(crate) enum RunError {
         #[source]
         source: ProcessError,
     },
+    #[error("cannot inspect `{}` before launch", .path.display())]
+    Inspect {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("`{}` {why}", .path.display())]
+    NotReady { path: PathBuf, why: Unready },
+}
+
+/// What a pre-launch check found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub(crate) enum Unready {
+    #[error("holds a skill before the agent starts")]
+    SkillInstalled,
+    #[error("holds managed settings, which override the trial's own")]
+    ManagedSettings,
+    #[error("puts `cargo-agents` on a baseline trial's `PATH`")]
+    CargoAgentsOnPath,
+    #[error("is a Symposium config, in a baseline trial")]
+    SymposiumConfig,
+    #[error("runs `cargo-agents`, in a baseline trial")]
+    SymposiumEntry,
 }
