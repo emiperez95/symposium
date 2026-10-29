@@ -5,6 +5,61 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use symposium_testlib::{TestMode, with_fixture};
 
+/// A desired skill remains installed when refreshing its source fails.
+/// In particular, stale cleanup must not mistake a failed update for removal.
+#[cfg(unix)]
+#[tokio::test]
+async fn sync_preserves_installed_skill_after_failed_update() {
+    use std::os::unix::fs::PermissionsExt;
+
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plugins0", "workspace0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            ctx.symposium(&["sync"]).await?;
+            ctx.sym.config.sync_debounce_secs = 0;
+
+            let root = ctx.workspace_root.clone().unwrap();
+            let installed = find_installed_skill(&root.join(".claude/skills"), "serde-guidance");
+            let old_content = std::fs::read(installed.join("SKILL.md"))?;
+            assert!(installed.join(".symposium").exists());
+
+            // Adding a file forces a refresh. Making it unreadable lets source
+            // discovery succeed but prevents the installer copying the tree.
+            let notes = ctx.sym.config_dir().join("plugins/my-skill/notes.txt");
+            std::fs::write(&notes, "new source content")?;
+            std::fs::set_permissions(&notes, std::fs::Permissions::from_mode(0o000))?;
+            if std::fs::read(&notes).is_ok() {
+                // Privileged users can bypass permission bits.
+                std::fs::set_permissions(&notes, std::fs::Permissions::from_mode(0o644))?;
+                return Ok(());
+            }
+
+            let result = ctx.sync_with_report(tracing::Level::INFO).await;
+            std::fs::set_permissions(&notes, std::fs::Permissions::from_mode(0o644))?;
+            let reports = result?;
+            assert!(
+                reports.iter().any(|r| r["message"].as_str().is_some_and(
+                    |message| message.contains("failed to install skill serde-guidance")
+                )),
+                "the update must actually fail: {reports:?}"
+            );
+
+            assert_eq!(
+                std::fs::read(installed.join("SKILL.md")).expect(
+                    "cleanup must preserve the previous installation after an update fails"
+                ),
+                old_content
+            );
+            assert!(installed.join(".symposium").exists());
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// Read the user config file from the test context.
 fn read_user_config(ctx: &symposium_testlib::TestContext) -> String {
     let path = ctx.sym.config_dir().join("config.toml");
@@ -1914,6 +1969,110 @@ async fn sync_falls_back_to_hashed_name_when_user_dir_in_the_way() {
                 Some("serde-guidance"),
                 "must not use the unsuffixed slot when a user dir occupies it"
             );
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sync_falls_back_to_hashed_name_when_a_dangling_link_is_in_the_way() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plugins0", "workspace0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+
+            let skills_dir = ctx.workspace_root.as_ref().unwrap().join(".claude/skills");
+            std::fs::create_dir_all(&skills_dir)?;
+            let link = skills_dir.join("serde-guidance");
+            std::os::unix::fs::symlink("../../missing/serde-guidance", &link)?;
+
+            ctx.symposium(&["sync"]).await?;
+
+            assert!(std::fs::symlink_metadata(&link)?.file_type().is_symlink());
+            assert_eq!(
+                std::fs::read_link(&link)?,
+                Path::new("../../missing/serde-guidance")
+            );
+            let installed = find_installed_skill(&skills_dir, "serde-guidance");
+            assert_ne!(installed, link);
+            assert!(installed.join(".symposium").exists());
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn concurrent_syncs_keep_every_skill() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["plugins0", "workspace-plugin0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let config = ctx.sym.config_dir().join("config.toml");
+            let toml = std::fs::read_to_string(&config)?;
+            std::fs::write(&config, format!("auto-update = \"off\"\n{toml}"))?;
+
+            let root = ctx.workspace_root.clone().unwrap();
+            for i in 0..20 {
+                let dir = root.join(format!("skills/s{i}"));
+                std::fs::create_dir_all(&dir)?;
+                std::fs::write(
+                    dir.join("SKILL.md"),
+                    format!("---\nname: s{i}\ndescription: skill s{i}\n---\n"),
+                )?;
+                for j in 0..30 {
+                    std::fs::write(dir.join(format!("f{j}.txt")), "x".repeat(2000))?;
+                }
+            }
+
+            let skills_dir = root.join(".claude/skills");
+            let entries = || -> std::io::Result<Vec<_>> {
+                let mut names = std::fs::read_dir(&skills_dir)?
+                    .map(|entry| entry.map(|e| e.file_name()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                names.sort();
+                Ok(names)
+            };
+            ctx.symposium(&["sync"]).await?;
+            let expected = entries()?;
+
+            let binary =
+                std::env::var("CARGO_BIN_EXE_cargo-agents").expect("must run via cargo test");
+            for _ in 0..5 {
+                std::fs::remove_dir_all(root.join(".claude"))?;
+                let children: Vec<_> = (0..3)
+                    .map(|_| {
+                        std::process::Command::new(&binary)
+                            .arg("sync")
+                            .env("SYMPOSIUM_HOME", ctx.sym.config_dir())
+                            .current_dir(&root)
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .spawn()
+                    })
+                    .collect::<Result<_, _>>()?;
+                for child in children {
+                    let output = child.wait_with_output()?;
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+
+                assert_eq!(entries()?, expected);
+                for i in 0..20 {
+                    let dir = skills_dir.join(format!("s{i}"));
+                    assert!(dir.join(".symposium").exists(), "{}", dir.display());
+                    assert!(dir.join("f29.txt").exists(), "{}", dir.display());
+                }
+            }
             Ok(())
         },
     )

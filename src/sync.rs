@@ -71,11 +71,15 @@ fn mark_generated_skill_directory(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Does `dir` contain the `.symposium` marker, i.e. is it a symposium-managed
-/// skill directory? Returns `false` for user-authored skills and for any
-/// directory symposium did not create.
-fn has_symposium_marker(dir: &Path) -> bool {
-    dir.join(MARKER_FILE).exists()
+fn slot_taken(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
+}
+
+/// Is `path` a real directory holding the `.symposium` marker, i.e. a
+/// symposium-managed skill directory? Returns `false` for user-authored skills,
+/// for any directory symposium did not create, and for any symlink.
+fn is_managed_skill_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) && path.join(MARKER_FILE).exists()
 }
 
 /// One entry of a source tree as the installer sees it: a path relative to the
@@ -219,8 +223,8 @@ fn dir_contents_differ(source_dir: &Path, dest_dir: &Path) -> Result<bool> {
 ///    — if so, skips entirely.
 /// 2. Compares source and dest content — if identical, touches the marker
 ///    to reset the debounce window and returns without modifying content.
-/// 3. Otherwise removes `dest_dir`, re-creates it with the source content,
-///    and writes the marker + gitignore.
+/// 3. Otherwise builds a complete, marked copy beside `dest_dir` and swaps it
+///    in, so a failed copy leaves the slot as it was.
 ///
 /// Returns `Ok(true)` if the destination was created or updated (callers
 /// record it as installed). Returns `Ok(false)` if skipped (no-op).
@@ -235,10 +239,8 @@ fn sync_skill_dir(
     }
 
     // If the destination doesn't exist yet, do a fresh install.
-    if !dest_dir.exists() {
-        create_managed_dir_all(dest_dir, project_root)?;
-        copy_dir_recursive(source_dir, dest_dir)?;
-        mark_generated_skill_directory(dest_dir)?;
+    if !slot_taken(dest_dir) {
+        install_skill_dir(source_dir, dest_dir, project_root)?;
         return Ok(true);
     }
 
@@ -262,11 +264,32 @@ fn sync_skill_dir(
     }
 
     // Content changed: replace entirely.
-    fs::remove_dir_all(dest_dir).with_context(|| format!("remove {}", dest_dir.display()))?;
-    create_managed_dir_all(dest_dir, project_root)?;
-    copy_dir_recursive(source_dir, dest_dir)?;
-    mark_generated_skill_directory(dest_dir)?;
+    install_skill_dir(source_dir, dest_dir, project_root)?;
     Ok(true)
+}
+
+fn install_skill_dir(source_dir: &Path, dest_dir: &Path, project_root: &Path) -> Result<()> {
+    let parent = dest_dir.parent().expect("skill dir must have parent");
+    create_managed_dir_all(parent, project_root)?;
+    let mut staging = tempfile::Builder::new()
+        .prefix(".symposium-tmp-")
+        .tempdir_in(parent)
+        .with_context(|| format!("create staging dir in {}", parent.display()))?;
+    mark_generated_skill_directory(staging.path())?;
+    copy_dir_recursive(source_dir, staging.path())?;
+    mark_generated_skill_directory(staging.path())?;
+    if slot_taken(dest_dir) {
+        fs::remove_dir_all(dest_dir).with_context(|| format!("remove {}", dest_dir.display()))?;
+    }
+    fs::rename(staging.path(), dest_dir).with_context(|| {
+        format!(
+            "rename {} -> {}",
+            staging.path().display(),
+            dest_dir.display()
+        )
+    })?;
+    staging.disable_cleanup(true);
+    Ok(())
 }
 
 /// Update the marker file's mtime to now without changing content.
@@ -450,6 +473,8 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
         "sync started"
     );
 
+    let _lock = lock_sync(sym)?;
+
     if agent_names.is_empty() {
         tracing::info!(
             report = %crate::report::ReportEvent::Info {
@@ -458,8 +483,9 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
         );
     }
 
-    // Track every skill directory we (re)install during this sync. Anything
-    // we find later that has the marker file but isn't in this set is stale.
+    // Track every skill directory this sync wants, even one whose refresh
+    // failed. Anything we find later that has the marker file but isn't in
+    // this set is stale.
     let mut installed_dirs: BTreeSet<PathBuf> = BTreeSet::new();
     let skip_cleanup = !registry.unreadable_registries.is_empty();
 
@@ -575,7 +601,7 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
             //   distinct origins coexist and we never clobber a
             //   user-managed directory.
             let unique_name = name_counts.get(skill_name).copied().unwrap_or(0) == 1;
-            let plain_available = !plain_dir.exists() || has_symposium_marker(&plain_dir);
+            let plain_available = !slot_taken(&plain_dir) || is_managed_skill_dir(&plain_dir);
             let dir_name = if unique_name && plain_available {
                 skill_name.clone()
             } else {
@@ -584,7 +610,7 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
             let dest_dir = agent.project_skill_dir(&project_root, &dir_name);
 
             // If the dest exists but is user-managed, skip it.
-            if dest_dir.exists() && !has_symposium_marker(&dest_dir) {
+            if slot_taken(&dest_dir) && !is_managed_skill_dir(&dest_dir) {
                 tracing::info!(
                     report = %crate::report::ReportEvent::Warning {
                         message: format!(
@@ -596,9 +622,9 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
                 continue;
             }
 
+            installed_dirs.insert(dest_dir.clone());
             match sync_skill_dir(source_dir, &dest_dir, &project_root, debounce) {
                 Ok(true) => {
-                    installed_dirs.insert(dest_dir.clone());
                     tracing::info!(
                         report = %crate::report::ReportEvent::SkillInstalled {
                             skill: dir_name.clone(),
@@ -607,11 +633,7 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
                         },
                     );
                 }
-                Ok(false) => {
-                    // Debounced or unchanged — still record as installed
-                    // so stale-cleanup doesn't remove it.
-                    installed_dirs.insert(dest_dir.clone());
-                }
+                Ok(false) => {}
                 Err(e) => {
                     tracing::info!(
                         report = %crate::report::ReportEvent::Warning {
@@ -644,14 +666,8 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
             continue;
         };
         for entry in entries.flatten() {
-            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
-                continue;
-            }
             let path = entry.path();
-            if installed.contains(&path) {
-                continue;
-            }
-            if !has_symposium_marker(&path) {
+            if installed.contains(&path) || !is_managed_skill_dir(&path) {
                 continue;
             }
             match fs::remove_dir_all(&path) {
@@ -716,6 +732,21 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
     }
 
     Ok(())
+}
+
+fn lock_sync(sym: &Symposium) -> Result<fs::File> {
+    let cache_dir = sym.cache_dir();
+    fs::create_dir_all(cache_dir).with_context(|| format!("create {}", cache_dir.display()))?;
+    let path = cache_dir.join("sync.lock");
+    let file = fs::File::options()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .with_context(|| format!("open {}", path.display()))?;
+    file.lock()
+        .with_context(|| format!("lock {}", path.display()))?;
+    Ok(file)
 }
 
 /// Register global hooks for all configured agents.
@@ -978,5 +1009,57 @@ mod tests {
         mark_generated_skill_directory(&dst).unwrap();
 
         assert!(!dir_contents_differ(&src, &dst).unwrap());
+    }
+
+    #[test]
+    fn install_preserves_unmarked_directory_at_staging_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("SKILL.md"), "skill").unwrap();
+
+        let skills = tmp.path().join("skills");
+        let user_dir = skills.join(".symposium-tmp-alpha");
+        fs::create_dir_all(&user_dir).unwrap();
+        let notes = user_dir.join("notes.txt");
+        fs::write(&notes, "user-owned notes").unwrap();
+        assert!(!user_dir.join(MARKER_FILE).exists());
+
+        // Either choose another staging path or fail safely. Neither outcome
+        // may delete or adopt this pre-existing, unmarked directory.
+        let _ = sync_skill_dir(&src, &skills.join("alpha"), tmp.path(), Duration::ZERO);
+
+        assert_eq!(
+            fs::read_to_string(&notes).expect("install must preserve user-owned files"),
+            "user-owned notes"
+        );
+        assert!(!user_dir.join(MARKER_FILE).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_install_leaves_the_slot_free() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("SKILL.md"), "skill").unwrap();
+        let notes = src.join("notes.txt");
+        fs::write(&notes, "notes").unwrap();
+        fs::set_permissions(&notes, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read(&notes).is_ok() {
+            return;
+        }
+        let skills = tmp.path().join("skills");
+        let dst = skills.join("alpha");
+
+        assert!(sync_skill_dir(&src, &dst, tmp.path(), Duration::ZERO).is_err());
+        assert_eq!(fs::read_dir(&skills).unwrap().count(), 0);
+
+        fs::set_permissions(&notes, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(sync_skill_dir(&src, &dst, tmp.path(), Duration::ZERO).unwrap());
+        assert!(dst.join(MARKER_FILE).exists());
+        assert_eq!(fs::read_to_string(dst.join("notes.txt")).unwrap(), "notes");
     }
 }

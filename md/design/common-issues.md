@@ -50,7 +50,7 @@ both, and the unit tests assert the shape per event for exactly this reason.
 
 And when two walks over one tree feed each other — a copy, and the comparison that decides whether to copy — they have to be the same traversal. Fixing one and not the other does not show up as a wrong file; it shows up as a sync that reinstalls the same skill forever.
 
-Destinations need the opposite treatment. A link found in an agent's skills directory is the user's, so `sync` never follows it, and since one agent's skills directory can itself be a link to another's, install targets are compared by resolved path. Comparing literal paths there made the reap delete, through the link, the skills it had just installed.
+Destinations need the opposite treatment. A link found in an agent's skills directory is the user's, so `sync` never follows it, and since one agent's skills directory can itself be a link to another's, install targets are compared by resolved path. Comparing literal paths there made the reap delete, through the link, the skills it had just installed. To ask whether a destination slot is taken, use `fs::symlink_metadata`: `Path::exists()` follows the link and reports a dangling one as absent, and installing into that slot then fails on every sync.
 
 ## Plugin-supplied names are untrusted input
 
