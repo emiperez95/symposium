@@ -21,14 +21,20 @@ Each item has one of these statuses:
 
 - **Feature**: an epic or initiative, made of several pieces of work. For example #393 (Agent plugins) or #394 (Automated plugin audits).
 - **Task**: one ticket-sized piece of work, usually one PR. For example #399.
+- **Bug**: something Symposium does wrong. For example #380.
 
 The type carries the size, so don't add "Size: epic" or similar to the description.
 
 ## Ticket, RFD, or epic?
 
-- If the design is settled and only the work remains, write a **Task**.
-- If the change is larger and the design or its user-facing impact is still contested, write an [RFD](../rfds/rfd-process/README.md) first.
-- If it is a whole initiative, open a **Feature** and break it down into RFDs and Tasks as the design firms up.
+These are guidelines, not rules. The person filing the issue makes the call, and a reviewer may suggest a different one.
+
+- If the design is settled and only the work remains, it is usually a **Task**.
+- If the change is larger and the design or its user-facing impact is still contested, consider an [RFD](../rfds/rfd-process/README.md) first.
+- If it is a whole initiative, it is usually a **Feature**, broken down into RFDs and Tasks as the design firms up.
+- If Symposium does something wrong, it is a **Bug**.
+
+An agent drafting a ticket suggests a type, and whether an RFD might be needed, and asks the person it works for to confirm.
 
 ## Writing a ticket
 
@@ -38,6 +44,8 @@ Say what changes, in plain words. No scenario numbers or `[tag]` prefixes.
 
 - Bad: `[S3] notice`
 - Good: `Show the plugin consent notice once per session`
+
+RFD PRs are titled `RFD: <title>`, for example `RFD: Automated plugin audits`.
 
 ### Requirements and examples
 
@@ -79,6 +87,18 @@ Open Features with the **Initiative** issue form (`.github/ISSUE_TEMPLATE/initia
 - **RFD**: the RFD PR, if there is one.
 - **Code PRs**: a checklist filled in as PRs open. Each PR says "Part of #N" in its description.
 - **Notes**: the roadmap it came from, dependencies on other initiatives, and open questions.
+
+### Bug layout
+
+Open bugs with the **Bug** issue form (`.github/ISSUE_TEMPLATE/bug.yml`), which sets the type and the `bug` label. See #380 or #369 for full examples. The form's sections:
+
+- **What happens**: one or two sentences.
+- **Steps to reproduce**: numbered, with the config or manifest involved.
+- **Actual result** and **Expected result**: exact output or error text for the actual one.
+- **Environment**: Symposium version or commit, agent and its version, OS.
+- **Notes**: suspected cause, possible fixes, related issues or PRs.
+
+A bug needs no description review before it is fixed, unless the expected result is itself a design question. Then treat it like a Task.
 
 ## From ticket to PR
 
