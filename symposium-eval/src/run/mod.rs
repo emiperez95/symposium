@@ -23,6 +23,7 @@
 pub(crate) mod client;
 mod env;
 mod error;
+mod exploratory;
 mod policy;
 mod prelaunch;
 pub(crate) mod setup;
@@ -39,7 +40,7 @@ use std::path::{Path, PathBuf};
 
 pub(crate) use env::ApiKey;
 pub(crate) use error::{RunError, Unready};
-pub(crate) use policy::{Machine, Policy};
+pub(crate) use policy::{Machine, Policy, Reach};
 pub(crate) use srt::SRT_VERSION;
 use stage::StagedTool;
 

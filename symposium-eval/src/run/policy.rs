@@ -195,21 +195,25 @@ fn platform_user_data_roots() -> Vec<PathBuf> {
     roots.iter().map(PathBuf::from).collect()
 }
 
-impl Policy {
+/// What a trial may read and write under `srt`, and in exploratory mode under Claude
+/// Code's sandbox, which is built on `srt` and reads the same rules. Codex's sandbox
+/// cannot express it.
+#[derive(Debug, Clone)]
+pub(crate) struct Reach {
+    pub(crate) deny_read: Vec<PathBuf>,
+    pub(crate) allow_read: Vec<PathBuf>,
+    pub(crate) allow_write: Vec<PathBuf>,
+}
+
+impl Reach {
     /// Confines `trial` to its own directories, the tools its configuration may run, and
-    /// the toolchain, with network access to `api_host` only, where `srt` sends the real
-    /// `api_key` in place of the sentinel the sandbox sees.
+    /// the toolchain.
     ///
     /// # Errors
     ///
     /// When the evaluation root lies inside the checkout, or the toolchain inside the
     /// evaluation root: either would let one rule silently undo another.
-    pub(crate) fn for_trial(
-        trial: &Trial,
-        machine: &Machine,
-        api_host: &str,
-        api_key: &ApiKey,
-    ) -> Result<Self, RunError> {
+    pub(crate) fn for_trial(trial: &Trial, machine: &Machine) -> Result<Self, RunError> {
         let batch = trial.batch();
         reject_nested(batch.eval_root(), &machine.checkout)?;
         reject_nested(&machine.toolchain, batch.eval_root())?;
@@ -246,12 +250,33 @@ impl Policy {
             trial.tmp(),
             trial.evidence(),
         ];
+        Ok(Self {
+            deny_read,
+            allow_read,
+            allow_write,
+        })
+    }
+}
 
+impl Policy {
+    /// [`Reach::for_trial`], with network access to `api_host` only, where `srt` sends
+    /// the real `api_key` in place of the sentinel the sandbox sees.
+    ///
+    /// # Errors
+    ///
+    /// As [`Reach::for_trial`].
+    pub(crate) fn for_trial(
+        trial: &Trial,
+        machine: &Machine,
+        api_host: &str,
+        api_key: &ApiKey,
+    ) -> Result<Self, RunError> {
+        let reach = Reach::for_trial(trial, machine)?;
         Ok(Self {
             filesystem: Filesystem {
-                deny_read: literals(deny_read),
-                allow_read: literals(allow_read),
-                allow_write: literals(allow_write),
+                deny_read: literals(reach.deny_read),
+                allow_read: literals(reach.allow_read),
+                allow_write: literals(reach.allow_write),
                 deny_write: Vec::new(),
             },
             network: Network {
