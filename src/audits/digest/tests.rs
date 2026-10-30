@@ -55,6 +55,40 @@ fn golden_digest() {
     assert_eq!(digest_of(tmp.path()), GOLDEN);
 }
 
+/// Metadata covering every TOML type, nested tables and an escaped string.
+const RICH_CARGO_TOML: &[u8] = b"[package]\nname = \"rich\"\nversion = \"1.0.0\"\n\n\
+    [package.metadata.symposium]\ndepends-on = [\"serde\"]\n\n\
+    [package.metadata.symposium.extra]\ncount = 42\nratio = 0.1\nwhole = 100.0\nflag = true\n\
+    when = 2024-01-02T03:04:05Z\nnote = \"say \\\"hi\\\"\\n\\u00e9 \\u0001 /\"\n\n\
+    [package.metadata.symposium.extra.deep]\nz = \"last\"\na = [1, 2]\n";
+
+/// Golden for [`RICH_CARGO_TOML`] plus one skill. Computed by an independent
+/// python3 implementation of the scheme in the module docs: `tomllib` for the
+/// table, `json.dumps(sort_keys=True, separators=(",", ":"),
+/// ensure_ascii=False)` for the metadata entry, then the framing and SHA-256.
+const RICH_GOLDEN: &str = "sha256:17971a166d5cbf065b57531ab2def02d23b4aefe9c5701f42d2cd1b09f817c2f";
+
+#[test]
+fn golden_digest_of_rich_metadata() {
+    let tmp = tempfile::tempdir().unwrap();
+    write(tmp.path(), "Cargo.toml", RICH_CARGO_TOML);
+    write(
+        tmp.path(),
+        "skills/one/SKILL.md",
+        b"---\nname: one\ndescription: first\n---\nbody\n",
+    );
+    let mut json = String::new();
+    let table = crate::crate_metadata::symposium_metadata(&tmp.path().join("Cargo.toml"))
+        .unwrap()
+        .unwrap();
+    canonical_json(&toml::Value::Table(table), &mut json);
+    assert_eq!(
+        json,
+        "{\"depends-on\":[\"serde\"],\"extra\":{\"count\":42,\"deep\":{\"a\":[1,2],\"z\":\"last\"},\"flag\":true,\"note\":\"say \\\"hi\\\"\\n\u{e9} \\u0001 /\",\"ratio\":0.1,\"when\":\"2024-01-02T03:04:05Z\",\"whole\":100.0}}"
+    );
+    assert_eq!(digest_of(tmp.path()), RICH_GOLDEN);
+}
+
 #[test]
 fn a_skill_resource_changes_the_digest() {
     let tmp = tmp_fixture();
@@ -413,5 +447,17 @@ fn canonical_json_sorts_keys_and_stringifies_datetimes() {
     assert_eq!(
         out,
         r#"{"a":[true,1.5,"x\"y"],"m":{"a":2,"b":1},"when":"2024-01-02T03:04:05Z","z":1}"#
+    );
+}
+
+#[test]
+fn canonical_json_spells_floats_and_non_finite_values() {
+    let value: toml::Value =
+        toml::from_str("a = 1e21\nb = 2.5e-7\nc = nan\nd = inf\ne = -inf\nf = 100.0\n").unwrap();
+    let mut out = String::new();
+    canonical_json(&value, &mut out);
+    assert_eq!(
+        out,
+        r#"{"a":1e+21,"b":2.5e-7,"c":"NaN","d":"inf","e":"-inf","f":100.0}"#
     );
 }

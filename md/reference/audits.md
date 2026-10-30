@@ -75,10 +75,23 @@ An audit covers the *plugin payload* of a crate, not its code: the manifest that
 The payload is these entries:
 
 1. `Symposium.toml` at the crate root, byte for byte, when there is one.
-2. `[package.metadata.symposium]` from `Cargo.toml`, when there is one, as compact JSON with sorted keys (TOML datetimes as strings). Nothing else in `Cargo.toml` is part of the payload.
+2. `[package.metadata.symposium]` from `Cargo.toml`, when there is one, as canonical compact JSON (see below), under the entry name `Cargo.toml#package.metadata.symposium`. That name is a label, not a file path: no file is read from it, and a file with that exact name inside a skill directory makes the payload ineligible so it cannot collide. Nothing else in `Cargo.toml` is part of the payload.
 3. Every file, of any type, in each *skill directory* the manifest names inside the crate. The manifest names them with its `[[skills]]` groups that set `source.path`, plus the default `skills/` group unless `[defaults] skills = false`. A skill directory is one that contains a `SKILL.md`, and everything beneath it counts, so a `SKILL.md` that points at a file in `resources/` is covered together with that file. A file reachable through two groups counts once. Group `predicates` are not consulted, so the digest does not depend on the workspace it is computed in.
 
-Entries are named by their path relative to the crate root, with `/` separators, and sorted bytewise by name. The digest is SHA-256 over the prefix `symposium-payload-v1\0` followed, for each entry, by the name length as 8 bytes big-endian, the name, the content length as 8 bytes big-endian, and the content. Bytes are hashed as published: line endings are not normalized. Symlinks are followed, and the entry is named by the link's path.
+Entries are named by their path relative to the crate root, with `/` separators, and sorted bytewise (by the UTF-8 bytes of the name). The digest is SHA-256 over the prefix `symposium-payload-v1\0` followed, for each entry, by the name length as 8 bytes big-endian, the name, the content length as 8 bytes big-endian, and the content. Bytes are hashed as published: line endings are not normalized. Symlinks are followed, and the entry is named by the link's path.
+
+### Canonical JSON for the metadata entry
+
+The table is written with no whitespace, and:
+
+- Object keys are sorted bytewise by their UTF-8 bytes, at every nesting level. Arrays keep their order. An empty table is `{}` and an empty array `[]`.
+- Strings are JSON strings as `serde_json` writes them (RFC 8259): `"` and `\` are escaped, the control characters U+0008, U+000C, U+000A, U+000D and U+0009 are written `\b`, `\f`, `\n`, `\r` and `\t`, every other character below U+0020 is `\u00XX` with lowercase hex digits, and everything else, including `/` and non-ASCII characters, is written as is in UTF-8.
+- Integers are decimal. Booleans are `true` and `false`.
+- Floats use the shortest representation that round-trips, as `serde_json` (Rust's `ryu`) writes it: `0.1`, `100.0`, `1.5`, and exponent form for very large and very small magnitudes (`1e+21`, `2.5e-7`). Python's `repr` differs for some values (Python writes `2.5e-07`), so do not use it for floats there.
+- `nan`, `inf` and `-inf` have no JSON number, so they are written as the JSON strings `"NaN"`, `"inf"` and `"-inf"`.
+- A datetime is the JSON string of its TOML text form, for example `"2024-01-02T03:04:05Z"`.
+
+The digest tests carry two golden vectors, one with a manifest, skills and CRLF bytes, and one with a metadata table exercising nested tables, every scalar type, and a string that needs escaping.
 
 ### When there is no digest
 
@@ -86,7 +99,7 @@ Some payloads cannot be pinned, so they have no digest and an audit cannot match
 
 - a `[[skills]]` group with `source.git` (what it fetches can change under the same crate release);
 - a skill path that leaves the crate directory;
-- a broken symlink, or a directory symlink that loops back, inside a skill directory;
+- a broken symlink, or a directory symlink that loops back, inside a skill directory, a skill group directory that is a dangling link, or any file or directory in the payload that cannot be read (a permission or I/O error is never read as "not there");
 - an entry in a skill directory that is neither a file nor a directory, or a path that is not UTF-8;
 - a manifest that does not parse as a plugin manifest;
 - more than 4 MiB of payload content.
