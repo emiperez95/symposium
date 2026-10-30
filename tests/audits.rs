@@ -755,20 +755,32 @@ async fn a_changed_payload_is_no_longer_covered_by_the_audit() {
     .unwrap();
 }
 
-/// A payload with no digest (a `source.git` group) cannot match an audit.
+/// A payload with no digest (a `source.git` group) cannot match an audit, and
+/// is reported as ineligible rather than as unaudited or differing.
 #[tokio::test]
 async fn an_ineligible_payload_stays_a_candidate() {
     with_fixture(TestMode::SimulationOnly, &["audits0"], async |mut ctx| {
+        // The audit covers the payload as shipped...
         let skills = init_audited(&mut ctx, Reg::Company).await;
+        ctx.symposium(&["sync"]).await?;
+        assert_eq!(installed(&skills, "d-guidance").len(), 1);
+
+        // ...then the crate fetches skills from outside itself.
         std::fs::write(
             crate_d(&ctx).join("Symposium.toml"),
             "[[skills]]\nsource.git = \"https://github.com/example/skills\"\n",
         )?;
         ctx.symposium(&["sync"]).await?;
-        assert!(installed(&skills, "d-guidance").is_empty());
+        assert!(installed(&skills, "d-guidance").is_empty(), "reaped");
         assert_eq!(
             entry(&status(&ctx).await, "crate-d").state,
             StatusState::Candidate
+        );
+        let deps = ctx.sym.workspace_deps(ctx.workspace_root.as_ref().unwrap());
+        let found = symposium::discovery::discover_for(&ctx.sym, &deps).await;
+        assert_eq!(
+            found.candidates[0].audit,
+            symposium::audits::AuditLookup::Ineligible
         );
         Ok(())
     })

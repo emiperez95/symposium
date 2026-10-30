@@ -324,3 +324,35 @@ fn lookup_distinguishes_audited_differing_and_unaudited() {
     std::fs::write(crate_dir.join("skills/s/SKILL.md"), "changed").unwrap();
     assert_eq!(index.lookup(&id, &crate_dir), AuditLookup::PayloadDiffers);
 }
+
+#[test]
+fn a_crate_with_audits_but_an_ineligible_payload_is_ineligible_not_unaudited() {
+    let tmp = tempfile::tempdir().unwrap();
+    let crate_dir = tmp.path().join("src-widget");
+    std::fs::create_dir_all(crate_dir.join("skills/s")).unwrap();
+    std::fs::write(crate_dir.join("skills/s/SKILL.md"), "hello").unwrap();
+
+    let registry = tmp.path().join("reg");
+    let index = AuditIndex::new(vec![AuditSource {
+        registry: "reg".into(),
+        dir: registry.clone(),
+    }]);
+    write_audits(
+        &registry,
+        "widget_lib.toml",
+        &format!(
+            "format = 1\ncrate = \"widget-lib\"\n[[audit]]\ndigest = \"{}\"\n",
+            digest(A)
+        ),
+    );
+    std::fs::write(
+        crate_dir.join("Symposium.toml"),
+        "[[skills]]\nsource.git = \"https://github.com/example/skills\"\n",
+    )
+    .unwrap();
+    let id = PackageId::new(CARGO_PM, "widget-lib", "1.0.0");
+    assert_eq!(index.lookup(&id, &crate_dir), AuditLookup::Ineligible);
+    // The same payload under a crate nobody audited is simply unaudited.
+    let other = PackageId::new(CARGO_PM, "other-lib", "1.0.0");
+    assert_eq!(index.lookup(&other, &crate_dir), AuditLookup::Unaudited);
+}
