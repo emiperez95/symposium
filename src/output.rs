@@ -59,6 +59,7 @@ impl Output {
     /// check alone would not guarantee that, since `cargo test` inherits the
     /// developer's terminal.
     pub fn is_interactive(&self) -> bool {
+        // {impl}`design.requirements.hooks.no_prompt`
         use std::io::IsTerminal;
         !self.quiet
             && self.capture.is_none()

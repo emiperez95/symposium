@@ -22,6 +22,7 @@ pub async fn run_install_commands(commands: &[String]) -> Result<()> {
         let status = tokio::process::Command::new("sh")
             .arg("-c")
             .arg(cmd)
+            // {impl}`design.requirements.hooks.stdout_protocol`
             .stdout(std::io::stderr())
             .status()
             .await?;

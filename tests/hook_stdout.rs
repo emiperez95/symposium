@@ -9,6 +9,8 @@ use symposium_testlib::{HookStep, TestContext, TestMode, with_fixture};
 
 /// A `SessionStart` that syncs (so sync reports progress) still answers every
 /// agent with nothing but its own output: here, the consent hint for `crate-a`.
+// {test}`design.requirements.hooks.stdout_protocol`
+// {test}`design.requirements.hooks.pending_consent`
 #[tokio::test(flavor = "multi_thread")]
 async fn sync_progress_stays_off_hook_stdout() {
     with_fixture(TestMode::SimulationOnly, &["auto-enable0"], async |ctx| {
@@ -43,6 +45,7 @@ async fn sync_progress_stays_off_hook_stdout() {
 
 /// A plugin's install commands run on every dispatch of the hook that needs
 /// them; what they print must not reach the agent's stdout.
+// {test}`design.requirements.hooks.stdout_protocol`
 #[tokio::test(flavor = "multi_thread")]
 async fn install_command_output_stays_off_hook_stdout() {
     with_fixture(TestMode::SimulationOnly, &["install-noise0"], async |ctx| {
@@ -107,6 +110,7 @@ async fn hook_runs_when_the_logs_dir_is_unwritable() {
     .unwrap();
 }
 
+// {test}`design.requirements.hooks.stdout_protocol`
 #[tokio::test(flavor = "multi_thread")]
 async fn rejected_skill_warning_stays_off_hook_stdout() {
     with_fixture(

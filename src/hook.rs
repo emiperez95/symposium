@@ -352,6 +352,7 @@ pub async fn run(sym: &Symposium, agent: HookAgent, event: HookEvent) -> ExitCod
     match execute_hook(sym, agent, event, &input).await {
         Ok(response) => {
             write_hook_trace(agent, event, &input, &response);
+            // {impl}`design.requirements.hooks.stdout_protocol`
             if !response.stdout.is_empty() {
                 std::io::stdout().write_all(&response.stdout).unwrap();
             }

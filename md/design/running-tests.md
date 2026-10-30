@@ -74,7 +74,10 @@ cargo test --test hook_agent skill_installed_by_session_start -- --nocapture
 cargo test --test hook_agent       # just the agent integration tests
 cargo test --test init_sync        # just the init/sync tests
 cargo test --test dispatch         # just the CLI dispatch tests
+cargo test --test habeas           # just the requirement evidence check
 ```
+
+The `habeas` test fails when a requirement's evidence no longer matches the code it quotes; see [Requirements and evidence](./requirements-workflow.md) for how to refresh it.
 
 ## Debugging test failures
 
