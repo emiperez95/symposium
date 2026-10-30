@@ -11,6 +11,10 @@
 //! version. A path dependency, a workspace member and a git checkout can
 //! change under an unchanged version, so those are always hashed.
 //!
+//! That immutability is an assumption, not a check: a hit is trusted without
+//! re-reading the tree, so it holds only while nothing edits the registry's
+//! extracted sources (`~/.cargo/registry/src`) in place.
+//!
 //! The cache is an optimisation and never an authority: any failure to read,
 //! parse or write an entry falls back to hashing, silently.
 
@@ -131,6 +135,39 @@ mod tests {
         // Another version is another key.
         let other = PackageId::new(CARGO_PM, "widget-lib", "1.0.1");
         assert!(!is_immutable(&other, &root), "the directory names 1.0.0");
+    }
+
+    #[test]
+    fn the_key_names_both_the_package_and_its_version() {
+        let cache = Path::new("/cache");
+        let id = |name: &str, version: &str| PackageId::new(CARGO_PM, name, version);
+        let base = entry_path(cache, &id("widget-lib", "1.0.0"));
+        assert_eq!(base, entry_path(cache, &id("widget-lib", "1.0.0")));
+        assert_ne!(base, entry_path(cache, &id("widget-lib", "1.0.1")));
+        assert_ne!(base, entry_path(cache, &id("other", "1.0.0")));
+    }
+
+    #[test]
+    fn another_version_with_other_content_is_digested_fresh() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp.path().join("cache");
+        let source = "index.crates.io-1949cf8c6b5b557f";
+        let (id, root) = registry_crate(tmp.path(), source);
+        let first = payload_digest_cached(Some(&cache), &id, &root).unwrap();
+        assert_eq!(entries(&cache), 1);
+
+        let next_root = tmp
+            .path()
+            .join(format!(".cargo/registry/src/{source}/widget-lib-1.0.1"));
+        std::fs::create_dir_all(next_root.join("skills/s")).unwrap();
+        std::fs::write(next_root.join("skills/s/SKILL.md"), "different").unwrap();
+        let next = PackageId::new(CARGO_PM, "widget-lib", "1.0.1");
+        assert!(is_immutable(&next, &next_root));
+
+        let digest = payload_digest_cached(Some(&cache), &next, &next_root).unwrap();
+        assert_eq!(digest, payload_digest(&next_root).unwrap());
+        assert_ne!(digest, first, "not the other version's cached digest");
+        assert_eq!(entries(&cache), 2, "its own entry");
     }
 
     #[test]
