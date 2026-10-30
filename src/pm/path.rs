@@ -140,6 +140,10 @@ impl PackageManager for PathPm {
         })
     }
 
+    fn content_dir(&self) -> Option<PathBuf> {
+        Some(self.dir.clone())
+    }
+
     fn registry_source(&self) -> Option<RegistrySource> {
         Some(RegistrySource::Path {
             dir: self.dir.clone(),
@@ -198,6 +202,27 @@ mod tests {
         let hits = pm.search("TOO").await.unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id.name, "tools");
+    }
+
+    /// A registry's `audits/` directory is data for the audits reader, not a
+    /// place plugins live, whatever it contains.
+    #[tokio::test]
+    async fn audits_directory_is_not_enumerated_as_plugins() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("registry");
+        std::fs::create_dir_all(source.join("audits/stray")).unwrap();
+        std::fs::write(source.join("audits/stray/SKILL.md"), "").unwrap();
+        std::fs::write(source.join("audits/Symposium.toml"), "name = \"x\"").unwrap();
+        std::fs::create_dir_all(source.join("tools")).unwrap();
+        std::fs::write(source.join("tools/Symposium.toml"), "name = \"tools\"").unwrap();
+
+        let pm = PathPm::new("reg", &source);
+        let plugins = pm.registry_plugins().await.unwrap();
+        assert!(plugins.complete);
+        let names: Vec<_> = plugins.plugins.iter().map(|p| p.id.name.as_str()).collect();
+        assert_eq!(names, vec!["tools"]);
+        assert_eq!(pm.search("stray").await.unwrap().len(), 0);
+        assert_eq!(pm.content_dir(), Some(source));
     }
 
     #[tokio::test]

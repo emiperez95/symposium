@@ -133,6 +133,14 @@ pub trait PackageManager {
         Ok(false)
     }
 
+    /// The local directory a registry instance's content is read from, once it
+    /// is on disk: a path registry's directory, a git registry's cache. It is
+    /// where files that are not plugins live, such as [`audits`](crate::audits).
+    /// `None` for the cargo transport.
+    fn content_dir(&self) -> Option<PathBuf> {
+        None
+    }
+
     /// How a registry instance's content is sourced, for `plugin list`
     /// display. `None` for the cargo transport, which is not a configured
     /// registry.
@@ -183,9 +191,10 @@ pub struct PmInstance {
 }
 
 impl PmInstance {
-    /// This instance's active plugins, validated. A plugin that fails
-    /// validation is logged and dropped: best-effort, like the PM layer above.
-    pub async fn active_plugins(&self, deps: &[PackageId]) -> Vec<Plugin> {
+    /// This instance's active plugins, validated, each with the directory its
+    /// content was read from. A plugin that fails validation is logged and
+    /// dropped: best-effort, like the PM layer above.
+    pub async fn active_plugins(&self, deps: &[PackageId]) -> Vec<LoadedPlugin> {
         self.validate_all(self.pm.active_plugins(deps).await)
     }
 
@@ -193,7 +202,11 @@ impl PmInstance {
         match self.pm.registry_plugins().await {
             Ok(listing) => {
                 let total = listing.plugins.len();
-                let plugins = self.validate_all(listing.plugins);
+                let plugins: Vec<Plugin> = self
+                    .validate_all(listing.plugins)
+                    .into_iter()
+                    .map(|l| l.plugin)
+                    .collect();
                 Some(RegistryListing {
                     complete: listing.complete && plugins.len() == total,
                     plugins,
@@ -210,21 +223,23 @@ impl PmInstance {
         }
     }
 
-    /// The plugin(s) an id maps to, validated.
-    pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<Plugin> {
+    /// The plugin(s) an id maps to, validated, each with the directory its
+    /// content was read from.
+    pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<LoadedPlugin> {
         self.validate_all(self.pm.load_plugin(id, update).await)
     }
 
     /// A registry entry that fails validation is the user's to fix, so it is
     /// reported. A package's is its author's, and the hook path must not print
     /// it next to the agent's JSON, so it is only logged.
-    fn validate_all(&self, unvalidated: Vec<UnvalidatedPlugin>) -> Vec<Plugin> {
+    fn validate_all(&self, unvalidated: Vec<UnvalidatedPlugin>) -> Vec<LoadedPlugin> {
         unvalidated
             .into_iter()
             .filter_map(|plugin| {
                 let id = plugin.id.clone();
+                let root = plugin.root.clone();
                 match crate::plugins::validate_plugin(plugin, self.kind) {
-                    Ok(p) => Some(p),
+                    Ok(plugin) => Some(LoadedPlugin { plugin, root }),
                     Err(e) => {
                         match self.kind {
                             PluginKind::Registry => tracing::warn!(
@@ -242,6 +257,18 @@ impl PmInstance {
             })
             .collect()
     }
+}
+
+/// A validated plugin with the directory its content was read from.
+///
+/// A [`Plugin`] carries no location, only its identity; the audits layer needs
+/// the directory (to compute a payload digest) and so is handed it alongside.
+#[derive(Debug, Clone)]
+pub struct LoadedPlugin {
+    pub plugin: Plugin,
+    /// The package's content directory: a crate's source tree, a registry
+    /// entry's directory.
+    pub root: PathBuf,
 }
 
 #[derive(Debug)]
@@ -282,6 +309,24 @@ impl PmRegistry {
             Err(_) => id.name.clone(),
         };
         PackageId::any_version(&id.pm, name)
+    }
+
+    /// The audits of the trusted registries: every trust-root instance that
+    /// has a content directory, in order. Cheap to build; files are read when a
+    /// crate is looked up.
+    pub fn audit_index(&self) -> crate::audits::AuditIndex {
+        crate::audits::AuditIndex::new(
+            self.instances
+                .iter()
+                .filter(|inst| inst.trusted)
+                .filter_map(|inst| {
+                    Some(crate::audits::AuditSource {
+                        registry: inst.name.clone(),
+                        dir: inst.pm.content_dir()?,
+                    })
+                })
+                .collect(),
+        )
     }
 
     /// The identity of the package a user-typed `name` refers to. A plugin in
@@ -326,7 +371,7 @@ impl PmRegistry {
     /// Load the plugin(s) an id maps to, asking every instance. Any instance may
     /// contribute a plugin relevant to the id, so this can return several. Each
     /// instance's plugins are validated under its own [`PluginKind`].
-    pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<Plugin> {
+    pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<LoadedPlugin> {
         let mut out = Vec::new();
         for inst in &self.instances {
             out.extend(inst.load_plugin(id, update).await);
@@ -510,7 +555,12 @@ mod tests {
             kind: PluginKind::Registry,
             pm: Box::new(PathPm::new("reg", reg)),
         };
-        let plugins = registry.active_plugins(&[]).await;
+        let plugins: Vec<Plugin> = registry
+            .active_plugins(&[])
+            .await
+            .into_iter()
+            .map(|l| l.plugin)
+            .collect();
         assert_eq!(plugins.len(), 2);
         (PmRegistry::new(vec![cargo, registry]), plugins)
     }
@@ -578,6 +628,38 @@ mod tests {
                 .unwrap_err();
             assert_eq!(err.to_string(), format!("no package named `{name}`"));
         }
+    }
+
+    /// The audit index covers the trust-root instances with a directory, in
+    /// order, and not the cargo transport.
+    #[test]
+    fn audit_index_is_built_from_trusted_registries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (cargo, _) = crate::test_utils::FakeCargo::instance(&[], &[]);
+        let registry = |name: &str, trusted: bool| PmInstance {
+            name: name.into(),
+            trusted,
+            kind: PluginKind::Registry,
+            pm: Box::new(PathPm::new(name, tmp.path().join(name))),
+        };
+        let pms = PmRegistry::new(vec![
+            cargo,
+            registry("first", true),
+            registry("untrusted", false),
+            registry("second", true),
+        ]);
+        let index = pms.audit_index();
+        std::fs::create_dir_all(tmp.path().join("second/audits")).unwrap();
+        std::fs::write(
+            tmp.path().join("second/audits/widget_lib.toml"),
+            "format = 1\ncrate = \"widget-lib\"\n[[revoked]]\nversions = \"*\"\nreason = \"report\"\n",
+        )
+        .unwrap();
+        let hit = index
+            .for_crate("widget-lib")
+            .revocation(Some(&semver::Version::new(1, 0, 0)), None)
+            .unwrap();
+        assert_eq!(hit.registry, "second");
     }
 
     #[tokio::test]

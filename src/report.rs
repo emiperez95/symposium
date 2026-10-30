@@ -23,6 +23,17 @@ pub enum ReportMode {
     Json,
 }
 
+/// The outcome of `cargo agents plugin digest`: a digest, or the reason the
+/// payload has none. Exactly one, by construction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DigestOutcome {
+    /// The payload digest (`sha256:<hex>` in JSON).
+    Digest(symposium_sdk::audits::Digest),
+    /// Why there is no digest.
+    Ineligible(String),
+}
+
 /// A structured event emitted during command execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -150,8 +161,21 @@ pub enum ReportEvent {
         /// Why the entry is in the state it is: its enablement root, or the
         /// reason it will not load.
         root: String,
-        /// `active`, `dormant`, `candidate`, or `declined`.
+        /// `active`, `dormant`, `candidate`, `declined`, or `revoked`.
         state: String,
+    },
+
+    /// The result of `cargo agents plugin digest`.
+    PayloadDigest {
+        /// What was asked about: a directory or a crate name.
+        target: String,
+        /// The crate and version, when the target was a crate.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        krate: Option<String>,
+        /// Either the payload digest or why there is none. Flattened, so the
+        /// JSON keys are `digest` or `ineligible`.
+        #[serde(flatten)]
+        outcome: DigestOutcome,
     },
 
     /// A provider was listed with its plugins.
@@ -329,6 +353,16 @@ impl ReportEvent {
                 };
                 format!("➖ removed the {name} enablement for {scope}")
             }
+            // A bare digest on success, so `$(cargo agents plugin digest ..)`
+            // is usable in scripts.
+            Self::PayloadDigest {
+                target, outcome, ..
+            } => match outcome {
+                DigestOutcome::Digest(digest) => digest.to_string(),
+                DigestOutcome::Ineligible(why) => {
+                    format!("no payload digest for {target}: {why}")
+                }
+            },
             Self::PluginStatus {
                 name,
                 version,
@@ -339,6 +373,7 @@ impl ReportEvent {
                     "active" => "✅",
                     "dormant" => "💤",
                     "candidate" => "❓",
+                    "revoked" => "⛔",
                     _ => "➖",
                 };
                 let version = version

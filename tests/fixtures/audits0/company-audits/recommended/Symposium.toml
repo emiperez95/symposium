@@ -1,0 +1,2 @@
+name = "recommended"
+depends-on = ["*"]

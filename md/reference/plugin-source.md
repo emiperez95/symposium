@@ -11,6 +11,8 @@ Symposium scans a registry recursively to find plugins and standalone skills:
 
 **We do not allow these entries to be nested within one another.** When we find a directory that is either a plugin or a skill, we do not search its contents any further. The registry root itself must not be an entry: a root that contains a `Symposium.toml` or a `SKILL.md` is an error (`cargo agents plugin validate` fails, and a configured registry loads nothing). Put each plugin or skill in a subdirectory instead.
 
+The one exception is a root-level `audits/` directory, which is never searched for entries: it holds [audits files](./audits.md), and anything in it that looks like a plugin or a skill is not one.
+
 ### Example structure
 
 ```text

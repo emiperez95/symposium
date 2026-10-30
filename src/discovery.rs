@@ -41,6 +41,7 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 use symposium_install::UpdateLevel;
 
+use crate::audits::Revocation;
 use crate::config::{AutoAccept, Symposium};
 use crate::output::Output;
 use crate::plugins::Plugin;
@@ -48,7 +49,7 @@ use crate::pm::{CARGO_PM, CargoPm, PackageId, PmRegistry};
 use crate::report::ReportEvent;
 
 /// Why a discovered offer is (or is not) enabled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Enablement {
     /// Enabled by a `[plugins] use` entry naming it.
     Used,
@@ -59,13 +60,16 @@ pub enum Enablement {
     AutoAccepted,
     /// Declined: `[plugins] disable` names it.
     Declined,
+    /// A trusted registry's audits revoke this release or payload. Outranks
+    /// `use`, `auto-enable` and `auto-accept`; only `disable` outranks it.
+    Revoked(Revocation),
     /// Nobody has decided yet — this is what a consent prompt would ask about.
     Candidate,
 }
 
 impl Enablement {
     /// Does this decision let the plugin run?
-    pub fn is_enabled(self) -> bool {
+    pub fn is_enabled(&self) -> bool {
         matches!(self, Self::Used | Self::AutoEnabled | Self::AutoAccepted)
     }
 }
@@ -107,6 +111,9 @@ pub struct Discovery {
     pub candidates: Vec<DiscoveredPlugin>,
     /// Declined previously, recorded in `[plugins] disable`.
     pub declined: Vec<DiscoveredPlugin>,
+    /// Revoked by a trusted registry's audits. Never loaded, whatever else
+    /// says it may be.
+    pub revoked: Vec<DiscoveredPlugin>,
 }
 
 impl Discovery {
@@ -135,6 +142,7 @@ pub async fn discover(
         return Discovery::default();
     };
     let pms = sym.package_managers(deps);
+    let audits = pms.audit_index();
     let dep_ids = pms.list_deps().await.unwrap_or_default();
     let used: HashSet<PackageId> =
         resolve_used(sym, &pms, registry, &workspace_root, UpdateLevel::None)
@@ -148,10 +156,12 @@ pub async fn discover(
     // plugins embedded in dependencies, which run only with consent. Classify
     // each against the `[plugins]` config.
     for inst in pms.instances().filter(|i| !i.trusted) {
-        for plugin in inst.active_plugins(&dep_ids).await {
+        for loaded in inst.active_plugins(&dep_ids).await {
+            let plugin = loaded.plugin;
             let name = plugin.canonical.name.clone();
             let description = Some(describe_plugin(&plugin.manifest));
-            let enablement = decide(sym, &pms, &used, &plugin.canonical);
+            let revocation = audits.revocation(&plugin.canonical, &loaded.root);
+            let enablement = decide(sym, &pms, &used, &plugin.canonical, revocation);
             let discovered = DiscoveredPlugin {
                 registry: inst.name.clone(),
                 id: plugin.canonical,
@@ -159,11 +169,12 @@ pub async fn discover(
                 description,
                 enablement,
             };
-            match enablement {
+            match discovered.enablement {
                 Enablement::Used => discovery.active.push(discovered),
                 Enablement::AutoEnabled => discovery.auto_enabled.push(discovered),
                 Enablement::AutoAccepted => discovery.auto_accepted.push(discovered),
                 Enablement::Declined => discovery.declined.push(discovered),
+                Enablement::Revoked(_) => discovery.revoked.push(discovered),
                 Enablement::Candidate => discovery.candidates.push(discovered),
             }
         }
@@ -403,14 +414,20 @@ fn count_phrase(n: usize, singular: &str, plural: &str) -> Option<String> {
     (n > 0).then(|| format!("{n} {}", if n == 1 { singular } else { plural }))
 }
 
-/// Classify one offer against the `[plugins]` config. An explicit decision —
-/// `disable`, then `use` — outranks the standing grants (`auto-enable`, then
-/// `auto-accept = "all"`), so a name the user declined stays declined.
+/// Classify one offer against the `[plugins]` config and the registries'
+/// revocations (`revocation`, as [`AuditIndex::revocation`] answered for it).
+/// `disable` is the last word and `revoked` comes next: both outrank `use`,
+/// which outranks the standing grants (`auto-enable`, then
+/// `auto-accept = "all"`), so a name the user declined stays declined and a
+/// revoked release stays out whatever consented to it.
+///
+/// [`AuditIndex::revocation`]: crate::audits::AuditIndex::revocation
 fn decide(
     sym: &Symposium,
     pms: &PmRegistry,
     used: &HashSet<PackageId>,
     id: &PackageId,
+    revocation: Option<Revocation>,
 ) -> Enablement {
     let plugins = &sym.config.plugins;
     // `disable` is tested first because it is the last word: every other
@@ -420,6 +437,8 @@ fn decide(
     // off.
     if plugins.is_disabled(pms, id) {
         Enablement::Declined
+    } else if let Some(revocation) = revocation {
+        Enablement::Revoked(revocation)
     } else if used.contains(&pms.identity(id)) {
         Enablement::Used
     } else if plugins.is_auto_enabled(pms, id) {
@@ -513,6 +532,44 @@ mod tests {
         let names: Vec<&str> = found.auto_enabled.iter().map(|c| c.name()).collect();
         assert_eq!(names, vec!["widget-lib"]);
         assert!(found.enabled().count() == 1);
+    }
+
+    /// A revocation outranks every grant (`use`, `auto-enable`,
+    /// `auto-accept = all`) and is outranked only by `disable`.
+    #[test]
+    fn revocation_outranks_grants_and_only_disable_outranks_it() {
+        use crate::config::AutoAccept;
+        use symposium_sdk::audits::RevokeReason;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let id = CargoPm::id_for("widget-lib", Some("1.0.0"));
+        let revocation = || Revocation {
+            registry: "reg".into(),
+            reason: RevokeReason::Exfiltration,
+        };
+        let classify = |config: &str, used: bool, accept_all: bool| {
+            let mut sym = sym_with(tmp.path(), config);
+            if accept_all {
+                sym.config.plugins.auto_accept = AutoAccept::All;
+            }
+            let pms = sym.detached_managers();
+            let used: HashSet<PackageId> = used.then(|| pms.identity(&id)).into_iter().collect();
+            decide(&sym, &pms, &used, &id, Some(revocation()))
+        };
+        let revoked = Enablement::Revoked(revocation());
+        assert_eq!(classify("", false, false), revoked);
+        assert_eq!(classify("", true, false), revoked, "use");
+        assert_eq!(
+            classify("[plugins]\nauto-enable = [\"widget-lib\"]", false, false),
+            revoked,
+            "auto-enable"
+        );
+        assert_eq!(classify("", false, true), revoked, "auto-accept = all");
+        assert_eq!(
+            classify("[plugins]\ndisable = [\"widget_lib\"]", true, true),
+            Enablement::Declined
+        );
+        assert!(!revoked.is_enabled());
     }
 
     #[tokio::test]
