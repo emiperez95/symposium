@@ -194,6 +194,12 @@ impl PmInstance {
     /// This instance's active plugins, validated. A plugin that fails
     /// validation is logged and dropped: best-effort, like the PM layer above.
     pub async fn active_plugins(&self, deps: &[PackageId]) -> Vec<Plugin> {
+        into_plugins(self.active_plugins_rooted(deps).await)
+    }
+
+    /// [`active_plugins`](Self::active_plugins), each with the directory its
+    /// content was read from.
+    pub async fn active_plugins_rooted(&self, deps: &[PackageId]) -> Vec<LoadedPlugin> {
         self.validate_all(self.pm.active_plugins(deps).await)
     }
 
@@ -201,7 +207,7 @@ impl PmInstance {
         match self.pm.registry_plugins().await {
             Ok(listing) => {
                 let total = listing.plugins.len();
-                let plugins = self.validate_all(listing.plugins);
+                let plugins = into_plugins(self.validate_all(listing.plugins));
                 Some(RegistryListing {
                     complete: listing.complete && plugins.len() == total,
                     plugins,
@@ -220,19 +226,30 @@ impl PmInstance {
 
     /// The plugin(s) an id maps to, validated.
     pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<Plugin> {
+        into_plugins(self.load_plugin_rooted(id, update).await)
+    }
+
+    /// [`load_plugin`](Self::load_plugin), each with the directory its content
+    /// was read from.
+    pub async fn load_plugin_rooted(
+        &self,
+        id: &PackageId,
+        update: UpdateLevel,
+    ) -> Vec<LoadedPlugin> {
         self.validate_all(self.pm.load_plugin(id, update).await)
     }
 
     /// A registry entry that fails validation is the user's to fix, so it is
     /// reported. A package's is its author's, and the hook path must not print
     /// it next to the agent's JSON, so it is only logged.
-    fn validate_all(&self, unvalidated: Vec<UnvalidatedPlugin>) -> Vec<Plugin> {
+    fn validate_all(&self, unvalidated: Vec<UnvalidatedPlugin>) -> Vec<LoadedPlugin> {
         unvalidated
             .into_iter()
             .filter_map(|plugin| {
                 let id = plugin.id.clone();
+                let root = plugin.root.clone();
                 match crate::plugins::validate_plugin(plugin, self.kind) {
-                    Ok(p) => Some(p),
+                    Ok(plugin) => Some(LoadedPlugin { plugin, root }),
                     Err(e) => {
                         match self.kind {
                             PluginKind::Registry => tracing::warn!(
@@ -250,6 +267,22 @@ impl PmInstance {
             })
             .collect()
     }
+}
+
+/// A validated plugin with the directory its content was read from.
+///
+/// A [`Plugin`] carries no location, only its identity; the audits layer needs
+/// the directory (to compute a payload digest) and so is handed it alongside.
+#[derive(Debug, Clone)]
+pub struct LoadedPlugin {
+    pub plugin: Plugin,
+    /// The package's content directory: a crate's source tree, a registry
+    /// entry's directory.
+    pub root: PathBuf,
+}
+
+fn into_plugins(loaded: Vec<LoadedPlugin>) -> Vec<Plugin> {
+    loaded.into_iter().map(|l| l.plugin).collect()
 }
 
 #[derive(Debug)]
@@ -353,9 +386,19 @@ impl PmRegistry {
     /// contribute a plugin relevant to the id, so this can return several. Each
     /// instance's plugins are validated under its own [`PluginKind`].
     pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<Plugin> {
+        into_plugins(self.load_plugin_rooted(id, update).await)
+    }
+
+    /// [`load_plugin`](Self::load_plugin), each plugin with the directory its
+    /// content was read from.
+    pub async fn load_plugin_rooted(
+        &self,
+        id: &PackageId,
+        update: UpdateLevel,
+    ) -> Vec<LoadedPlugin> {
         let mut out = Vec::new();
         for inst in &self.instances {
-            out.extend(inst.load_plugin(id, update).await);
+            out.extend(inst.load_plugin_rooted(id, update).await);
         }
         out
     }

@@ -35,6 +35,7 @@
 use std::path::{Path, PathBuf};
 
 use symposium_sdk::audits::{AUDITS_DIR, Digest, FORMAT, RawAudit, RawRevoked, RevokeReason};
+use symposium_sdk::pm::{CARGO_PM, PackageId};
 
 pub mod digest;
 pub mod digest_command;
@@ -101,6 +102,35 @@ impl AuditIndex {
         self.for_crate(crate_name)
             .audited_by(digest)
             .map(str::to_string)
+    }
+
+    /// Whether a registry revoked `id`, a cargo-sourced package whose content
+    /// is at `root`. `None` for any other package manager's package.
+    ///
+    /// Matches by version (the resolved version in `id`, skipped when it is not
+    /// valid semver) or by payload digest. The digest is computed only when a
+    /// file holds a digest revocation, and a payload that is
+    /// [ineligible](digest::Ineligible) for a digest simply cannot match one.
+    pub fn revocation(&self, id: &PackageId, root: &Path) -> Option<Revocation> {
+        if id.pm != CARGO_PM {
+            return None;
+        }
+        let audits = self.for_crate(&id.name);
+        if audits.revoked.is_empty() {
+            return None;
+        }
+        let version = semver::Version::parse(&id.version).ok();
+        let digest = audits
+            .has_digest_revocation()
+            .then(|| digest::payload_digest(root))
+            .and_then(|result| match result {
+                Ok(d) => Some(d),
+                Err(why) => {
+                    tracing::debug!(id = %id, %why, "no payload digest; digest revocations cannot match");
+                    None
+                }
+            });
+        audits.revocation(version.as_ref(), digest.as_ref())
     }
 }
 

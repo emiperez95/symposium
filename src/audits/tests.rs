@@ -209,3 +209,61 @@ fn missing_files_are_no_audits() {
     assert!(index.for_crate("widget-lib").is_empty());
     assert!(AuditIndex::default().for_crate("widget-lib").is_empty());
 }
+
+/// `AuditIndex::revocation` matches a cargo package by version or by the
+/// digest of the payload at its root, and only a cargo package.
+#[test]
+fn revocation_matches_a_cargo_package_by_version_or_payload() {
+    use symposium_sdk::pm::CARGO_PM;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let krate = tmp.path().join("crate");
+    std::fs::create_dir_all(krate.join("skills/s")).unwrap();
+    std::fs::write(krate.join("skills/s/SKILL.md"), "---\nname: s\n---\n").unwrap();
+    let payload = digest::payload_digest(&krate).unwrap();
+
+    let registry = tmp.path().join("registry");
+    write_audits(
+        &registry,
+        "widget_lib.toml",
+        &format!(
+            "format = 1\ncrate = \"widget-lib\"\n\
+             [[revoked]]\nversions = \">=2.0.0, <2.1.0\"\nreason = \"advisory\"\n\
+             [[revoked]]\ndigest = \"{payload}\"\nreason = \"injection-bait\"\n"
+        ),
+    );
+    let index = AuditIndex::new(vec![AuditSource {
+        registry: "reg".into(),
+        dir: registry,
+    }]);
+    let id = |version: &str| PackageId::new(CARGO_PM, "widget-lib", version);
+
+    // By payload, whatever the version (including one that is not semver).
+    let by_payload = index.revocation(&id("9.9.9"), &krate).unwrap();
+    assert_eq!(by_payload.reason, RevokeReason::InjectionBait);
+    assert!(index.revocation(&id("*"), &krate).is_some());
+
+    // By version, when the payload differs.
+    let other = tmp.path().join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    let hit = index.revocation(&id("2.0.5"), &other).unwrap();
+    assert_eq!(
+        (hit.registry.as_str(), hit.reason),
+        ("reg", RevokeReason::Advisory)
+    );
+    assert!(index.revocation(&id("2.1.0"), &other).is_none());
+    assert!(index.revocation(&id("not-semver"), &other).is_none());
+
+    // A payload with no digest cannot match a digest revocation, but a version
+    // revocation still applies.
+    let missing = tmp.path().join("missing");
+    assert!(index.revocation(&id("2.1.0"), &missing).is_none());
+    assert!(index.revocation(&id("2.0.1"), &missing).is_some());
+
+    // Only cargo packages are covered.
+    let registry_plugin = PackageId::new("reg", "widget-lib", "2.0.5");
+    assert!(index.revocation(&registry_plugin, &other).is_none());
+    // A crate nobody audited costs nothing and matches nothing.
+    let unaudited = PackageId::new(CARGO_PM, "gadget", "1.0.0");
+    assert!(index.revocation(&unaudited, &krate).is_none());
+}

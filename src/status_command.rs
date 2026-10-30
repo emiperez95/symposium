@@ -5,7 +5,7 @@
 //! per plugin, each naming its enablement root — so it answers "why is
 //! serde-skills here?" with "enabled via serde".
 //!
-//! Four states, matching the axis:
+//! Five states, matching the axis:
 //!
 //! - **active** — enabled and its predicates hold for this workspace. The
 //!   root names the trust root: workspace membership, a configured registry,
@@ -19,6 +19,10 @@
 //!   asks about.
 //! - **declined** — recorded in `[plugins] disable`, the record of pruned
 //!   nodes and declined discoveries.
+//! - **revoked** — a trusted registry's [audits](crate::audits) revoke this
+//!   release or payload, for the stated reason. It is not loaded, whatever
+//!   `use`, `auto-enable` or `auto-accept` say; only `disable` outranks it, in
+//!   which case the plugin shows as declined.
 
 use std::path::Path;
 
@@ -27,6 +31,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use symposium_install::UpdateLevel;
 
+use crate::audits::Revocation;
 use crate::config::Symposium;
 use crate::discovery::{DiscoveredPlugin, Enablement};
 use crate::report::ReportEvent;
@@ -42,6 +47,8 @@ pub enum StatusState {
     Candidate,
     /// Declined, via `[plugins] disable`.
     Declined,
+    /// Revoked by a trusted registry's audits.
+    Revoked,
 }
 
 impl StatusState {
@@ -52,6 +59,7 @@ impl StatusState {
             Self::Dormant => "dormant",
             Self::Candidate => "candidate",
             Self::Declined => "declined",
+            Self::Revoked => "revoked",
         }
     }
 }
@@ -121,6 +129,7 @@ pub async fn workspace_status(
         .chain(&discovery.auto_accepted)
         .chain(&discovery.candidates)
         .chain(&discovery.declined)
+        .chain(&discovery.revoked)
     {
         entries.push(entry_for(found));
     }
@@ -142,6 +151,7 @@ pub async fn workspace_status(
                 .chain(&discovery.auto_accepted)
                 .chain(&discovery.candidates)
                 .chain(&discovery.declined)
+                .chain(&discovery.revoked)
                 .map(|d| pms.identity(&d.id)),
         )
         .collect();
@@ -157,6 +167,7 @@ pub async fn workspace_status(
     let used =
         crate::discovery::resolve_used(sym, &pms, &registry.plugins, &ws.root, UpdateLevel::None)
             .await;
+    let audits = pms.audit_index();
     for id in enabled {
         if shown.contains(&pms.identity(&id)) {
             continue;
@@ -166,6 +177,21 @@ pub async fn workspace_status(
             .any(|dep| pms.identity(dep) == pms.identity(&id));
         let named = used.iter().any(|(_, used)| *used == pms.identity(&id));
         if dependency && !named {
+            continue;
+        }
+        // A `use`d crate the workspace does not depend on is loaded from
+        // cargo's cache, so its release is known without fetching: a
+        // revocation applies to it like to any other cargo-sourced plugin.
+        if !dependency
+            && let Ok(fetched) = pms.fetch(&id, UpdateLevel::None).await
+            && let Some(revocation) = audits.revocation(&fetched.id, &fetched.root)
+        {
+            entries.push(StatusEntry {
+                name: id.name,
+                version: Some(fetched.id.version),
+                root: revoked_root(&revocation),
+                state: StatusState::Revoked,
+            });
             continue;
         }
         entries.push(StatusEntry {
@@ -239,7 +265,7 @@ pub async fn workspace_status(
 
 /// Render one discovered dependency plugin as a status line.
 fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
-    let (state, root) = match found.enablement {
+    let (state, root) = match &found.enablement {
         Enablement::Used => (StatusState::Active, "`[plugins] use`".to_string()),
         Enablement::AutoEnabled => (StatusState::Active, "`[plugins] auto-enable`".to_string()),
         Enablement::AutoAccepted => (StatusState::Active, "`[plugins] auto-accept`".to_string()),
@@ -247,6 +273,7 @@ fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
             StatusState::Declined,
             "declined (`[plugins] disable`)".to_string(),
         ),
+        Enablement::Revoked(revocation) => (StatusState::Revoked, revoked_root(revocation)),
         Enablement::Candidate => (
             StatusState::Candidate,
             format!(
@@ -262,6 +289,15 @@ fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
         root,
         state,
     }
+}
+
+/// The status text for a revocation: who issued it and why.
+fn revoked_root(revocation: &Revocation) -> String {
+    format!(
+        "revoked by registry `{}`: it {}",
+        revocation.registry,
+        revocation.reason.sentence()
+    )
 }
 
 /// The `cargo agents status` entry point.

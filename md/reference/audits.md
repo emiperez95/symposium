@@ -93,6 +93,19 @@ Some payloads cannot be pinned, so they have no digest and an audit cannot match
 
 `cargo agents plugin digest` prints which of these applies.
 
+## Revocations
+
+A revocation stops a crate's plugin from loading. It is checked every time the active plugins are resolved (sync, hooks, subcommands), against the crate version that resolved and, when a `digest` revocation exists, the payload digest of the crate's source.
+
+- It applies to **cargo-sourced plugins** only: a plugin embedded in a dependency, and a crate reached through a `[[plugins]]` chained reference. It does not apply to registry plugins or workspace plugins, which are content you chose to trust.
+- It outranks every grant: [`[plugins] use`](./configuration.md#plugins), `auto-enable`, and `auto-accept = "all"` do not load a revoked crate.
+- [`[plugins] disable`](./configuration.md#plugins) outranks it. A crate that is both revoked and disabled shows as declined.
+- A payload with no [digest](#when-there-is-no-digest) cannot match a `digest` revocation; a `versions` revocation still applies to it.
+- A `versions` requirement is matched against the resolved version only when that is valid semver.
+- The check never prompts and never prints. A revoked plugin is skipped quietly, noted in the log, and shown by [`cargo agents status`](./cargo-agents-status.md) as `revoked`, with the registry and the reason. A revoked crate that is reached only deep in a chain of references is not listed there; it shows in the debug trace (`-v`).
+
+Audits themselves do not yet change what loads: an audited payload is still asked about like any other.
+
 ## How Symposium reads it
 
 Symposium is lenient where the tooling that maintains a list is strict:
@@ -102,4 +115,4 @@ Symposium is lenient where the tooling that maintains a list is strict:
 - Unknown keys are ignored.
 - Warnings go to the log, never to standard output, because the same reader runs inside agent hooks.
 
-An audit or a revocation in *any* registry counts, and Symposium remembers which registry each came from. Where a registry or its content is unreachable, nothing is read from it.
+An audit or a revocation in *any* registry counts, and Symposium remembers which registry each came from. A registry that is unreachable, or whose content has not been fetched yet, contributes nothing.

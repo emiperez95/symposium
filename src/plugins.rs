@@ -1166,8 +1166,15 @@ pub async fn active_plugins(
     // Package ids still to resolve through the set.
     let mut worklist: Vec<crate::pm::PackageId> = Vec::new();
 
-    // Seed with the trust-root plugins (registry + workspace), gated.
+    let audits = pms.audit_index();
+
+    // Seed with the trust-root plugins (registry + workspace), gated. A
+    // revocation has nothing to say about what the user put there, but
+    // `disable` is the last word for every source.
     for parsed in &registry.plugins {
+        if withheld(sym, pms, &audits, parsed, None).is_some() {
+            continue;
+        }
         record_active(parsed.clone(), ctx, &mut active, &mut worklist);
     }
 
@@ -1190,14 +1197,74 @@ pub async fn active_plugins(
     // Fixed-point: resolve each id through the set, record any new plugin, and
     // enqueue its own chained references.
     while let Some(id) = worklist.pop() {
-        for plugin in pms.load_plugin(&id, update).await {
-            if visited.insert(pms.identity(&plugin.canonical)) {
+        for loaded in pms.load_plugin_rooted(&id, update).await {
+            let plugin = loaded.plugin;
+            if visited.insert(pms.identity(&plugin.canonical))
+                && withheld(sym, pms, &audits, &plugin, Some(&loaded.root)).is_none()
+            {
                 record_active(plugin, ctx, &mut active, &mut worklist);
             }
         }
     }
 
     active
+}
+
+/// Why activation refuses a plugin before its own predicates are consulted.
+#[derive(Debug, PartialEq, Eq)]
+enum Withheld {
+    /// `[plugins] disable` names it: the last word, for every source.
+    Disabled,
+    /// A trusted registry's audits revoke this release or payload. Beats `use`,
+    /// `auto-enable` and `auto-accept`.
+    Revoked(crate::audits::Revocation),
+}
+
+/// Whether `plugin` may not run at all. `root` is the directory its content was
+/// read from, when it has one worth reading: it is what a revocation by payload
+/// digest hashes, so `None` skips revocation (the seeded registry and
+/// workspace plugins, which a revocation does not cover). Only a cargo-sourced
+/// plugin, one the user did not put there themselves, can be revoked.
+///
+/// Reports at debug level and logs, never prints: this runs on the hook path,
+/// where stdout is the agent's. [`cargo agents status`](crate::status_command)
+/// is where a revoked plugin is shown to the user.
+fn withheld(
+    sym: &Symposium,
+    pms: &crate::pm::PmRegistry,
+    audits: &crate::audits::AuditIndex,
+    plugin: &Plugin,
+    root: Option<&Path>,
+) -> Option<Withheld> {
+    let why = if sym.config.plugins.is_disabled(pms, &plugin.canonical) {
+        Withheld::Disabled
+    } else {
+        Withheld::Revoked(audits.revocation(&plugin.canonical, root?)?)
+    };
+    let reason = match &why {
+        Withheld::Disabled => "disabled by `[plugins] disable`".to_string(),
+        Withheld::Revoked(revocation) => {
+            tracing::warn!(
+                plugin = %plugin.canonical,
+                registry = %revocation.registry,
+                reason = ?revocation.reason,
+                "not loading a revoked plugin"
+            );
+            format!(
+                "revoked by registry `{}`: it {}",
+                revocation.registry,
+                revocation.reason.sentence()
+            )
+        }
+    };
+    tracing::debug!(
+        report = %crate::report::ReportEvent::PluginConsidered {
+            plugin: plugin.manifest.name.clone(),
+            matched: false,
+            reason: Some(reason),
+        },
+    );
+    Some(why)
 }
 
 /// Gate `plugin` and, if it passes, record it into `active` and enqueue its

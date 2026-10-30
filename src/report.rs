@@ -150,7 +150,7 @@ pub enum ReportEvent {
         /// Why the entry is in the state it is: its enablement root, or the
         /// reason it will not load.
         root: String,
-        /// `active`, `dormant`, `candidate`, or `declined`.
+        /// `active`, `dormant`, `candidate`, `declined`, or `revoked`.
         state: String,
     },
 
@@ -368,6 +368,7 @@ impl ReportEvent {
                     "active" => "✅",
                     "dormant" => "💤",
                     "candidate" => "❓",
+                    "revoked" => "⛔",
                     _ => "➖",
                 };
                 let version = version
