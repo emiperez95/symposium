@@ -214,13 +214,17 @@ pub async fn discover(
 }
 
 /// The packages whose plugins the user has enabled, to load at sync time.
-/// Two sources:
+/// Three sources:
 ///
 /// 1. workspace **dependencies** covered by `[plugins] auto-enable`,
-///    `auto-accept = "all"`, or an applicable `use` entry, and
+///    `auto-accept = "all"`, or an applicable `use` entry;
 /// 2. packages named by a `use` entry that are **not** dependencies:
 ///    `cargo agents use <crate>` pulls a plugin in from crates.io whether or
-///    not the workspace depends on it.
+///    not the workspace depends on it, and
+/// 3. under `auto-accept = "audit"`, workspace dependencies whose payload a
+///    trusted registry audited, with no config entry at all. This fetches
+///    the dependency cache-only (the source already on disk) and hashes its
+///    payload, but only for a crate with `[[audit]]` entries.
 ///
 /// `auto-enable` and `auto-accept` intentionally contribute only (1): they are
 /// consent for what a dependency you already have carries, not a way to add crates. Declined
