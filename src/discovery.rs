@@ -8,7 +8,7 @@
 //!    its dependencies embed ([`PackageManager::active_plugins`]).
 //!
 //! Each such offer is then classified against the `[plugins]` config:
-//! already enabled, auto-enabled, declined, or a candidate still awaiting
+//! already enabled, auto-enabled (or auto-accepted), declined, or a candidate still awaiting
 //! consent. Discovery itself neither fetches nor writes.
 //!
 //! On top of that read side sits the consent write side:
