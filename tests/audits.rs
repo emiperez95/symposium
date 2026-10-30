@@ -747,7 +747,7 @@ async fn a_changed_payload_is_no_longer_covered_by_the_audit() {
         let found = symposium::discovery::discover_for(&ctx.sym, &deps).await;
         assert_eq!(
             found.candidates[0].audit,
-            symposium::audits::AuditLookup::PayloadDiffers
+            Some(symposium::audits::AuditLookup::PayloadDiffers)
         );
         Ok(())
     })
@@ -780,7 +780,7 @@ async fn an_ineligible_payload_stays_a_candidate() {
         let found = symposium::discovery::discover_for(&ctx.sym, &deps).await;
         assert_eq!(
             found.candidates[0].audit,
-            symposium::audits::AuditLookup::Ineligible
+            Some(symposium::audits::AuditLookup::Ineligible)
         );
         Ok(())
     })

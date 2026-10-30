@@ -63,7 +63,7 @@ pub struct AuditIndex {
 }
 
 /// What the registries' audits say about one crate's payload.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuditLookup {
     /// A registry audited exactly this payload.
     Audited(String),
@@ -75,7 +75,6 @@ pub enum AuditLookup {
     /// (it fetches skills from outside the crate, or is too large).
     Ineligible,
     /// No registry audited this crate (or the package is not cargo-sourced).
-    #[default]
     Unaudited,
 }
 

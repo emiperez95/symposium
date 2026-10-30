@@ -97,10 +97,11 @@ pub struct DiscoveredPlugin {
     pub description: Option<String>,
     /// How the `[plugins]` config decided this offer.
     pub enablement: Enablement,
-    /// What the registries' audits say about this payload. Computed only for
-    /// an offer that reached the audit step (not disabled, revoked or already
-    /// enabled), so it is `Unaudited` for the others.
-    pub audit: AuditLookup,
+    /// What the registries' audits say about this payload. `None` means no
+    /// lookup was made: it is computed only for an offer that reached the audit
+    /// step (not disabled, revoked or already enabled), which is every
+    /// [`Enablement::Candidate`] and [`Enablement::Audited`] offer.
+    pub audit: Option<AuditLookup>,
 }
 
 impl DiscoveredPlugin {
@@ -451,16 +452,17 @@ fn consent_question(candidate: &DiscoveredPlugin) -> String {
         .as_deref()
         .unwrap_or("agent extensions");
     let status = match &candidate.audit {
-        AuditLookup::Unaudited => {
+        None => "Audit status unknown.".to_string(),
+        Some(AuditLookup::Unaudited) => {
             "NOT AUDITED: no trusted registry has audited this plugin.".to_string()
         }
-        AuditLookup::Ineligible => format!(
+        Some(AuditLookup::Ineligible) => format!(
             "NOT AUDITED: a registry has audited `{name}`, but this plugin's payload cannot be checked against an audit (it fetches skills from outside the crate, or is too large)."
         ),
-        AuditLookup::PayloadDiffers => format!(
+        Some(AuditLookup::PayloadDiffers) => format!(
             "NOT AUDITED: a registry has audited `{name}`, but that audit does not cover this release's payload."
         ),
-        AuditLookup::Audited(registry) => format!(
+        Some(AuditLookup::Audited(registry)) => format!(
             "Audited by registry `{registry}`, but `[plugins] auto-accept` is `none`, so it asks anyway."
         ),
     };
@@ -497,7 +499,8 @@ fn count_phrase(n: usize, singular: &str, plural: &str) -> Option<String> {
 /// revocations (`revocation`, as [`AuditIndex::revocation`] answered for it),
 /// and, for one nobody has decided, their audits (`lookup`, run only then, so
 /// a payload is hashed only when the answer can matter). Returns the decision
-/// and what the audit lookup found.
+/// and what the audit lookup found (`None` when the offer was
+/// decided before the lookup would run).
 ///
 /// First match wins, in this order:
 ///
@@ -523,7 +526,7 @@ fn decide(
     id: &PackageId,
     revocation: Option<Revocation>,
     lookup: impl FnOnce() -> AuditLookup,
-) -> (Enablement, AuditLookup) {
+) -> (Enablement, Option<AuditLookup>) {
     let plugins = &sym.config.plugins;
     // `disable` is tested first because it is the last word: every other
     // entry says a plugin *may* run, and this is the only one that says it
@@ -548,12 +551,12 @@ fn decide(
                 Enablement::Audited {
                     registry: registry.clone(),
                 },
-                audit,
+                Some(audit),
             ),
-            _ => (Enablement::Candidate, audit),
+            _ => (Enablement::Candidate, Some(audit)),
         };
     };
-    (enablement, AuditLookup::Unaudited)
+    (enablement, None)
 }
 
 #[cfg(test)]
@@ -960,7 +963,7 @@ mod tests {
             recommends: "widget-lib".into(),
             description: Some("1 skill group".into()),
             enablement: Enablement::Candidate,
-            audit,
+            audit: Some(audit),
         }
     }
 
@@ -977,6 +980,10 @@ mod tests {
         let q = consent_question(&candidate_with(AuditLookup::PayloadDiffers));
         assert!(q.starts_with("NOT AUDITED"), "{q}");
         assert!(q.contains("does not cover this release's payload"), "{q}");
+
+        let mut unlooked = candidate_with(AuditLookup::Unaudited);
+        unlooked.audit = None;
+        assert!(consent_question(&unlooked).starts_with("Audit status unknown."));
 
         let q = consent_question(&candidate_with(AuditLookup::Audited("reg".into())));
         assert!(!q.contains("NOT AUDITED"), "{q}");
