@@ -630,6 +630,7 @@ async fn status_reports_dormant_registry_plugin() {
 /// inherits the developer's terminal, so a stdin-only check would make this
 /// test hang on an interactive machine. Quiet and capturing outputs — the
 /// ones hook dispatch and the library harness use — are never interactive.
+// {test}`design.requirements.hooks.no_prompt`
 #[tokio::test]
 async fn consent_prompt_never_fires_non_interactively() {
     with_fixture(

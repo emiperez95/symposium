@@ -23,6 +23,7 @@ pub struct InitOpts {
 
 /// Whether we can prompt the user interactively.
 fn interactive(out: &Output) -> bool {
+    // {impl}`design.requirements.hooks.no_prompt`
     out.is_interactive()
 }
 

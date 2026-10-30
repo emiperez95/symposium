@@ -331,6 +331,7 @@ pub async fn prompt_for_consent(
     deps: &Arc<WorkspaceDeps>,
     out: &Output,
 ) -> Result<()> {
+    // {impl}`design.requirements.hooks.no_prompt`
     if !out.is_interactive() {
         return Ok(());
     }

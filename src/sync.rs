@@ -369,6 +369,7 @@ pub async fn sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, update: UpdateLeve
             display_path(&sym.config_dir().join("config.toml")),
         );
     }
+    // {impl}`design.requirements.hooks.stdout_protocol`
     let out = &Output::quiet();
     let loaded = deps.require()?;
     let project_root = loaded.root.clone();
