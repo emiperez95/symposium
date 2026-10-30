@@ -472,7 +472,7 @@ async fn run_auto_sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, session_start
 fn hook_dispatch_needs_deps(
     sym: &Symposium,
     registry_plugins: &[Plugin],
-    deps: &Arc<WorkspaceDeps>,
+    pms: &crate::pm::PmRegistry,
 ) -> bool {
     registry_plugins
         .iter()
@@ -482,7 +482,7 @@ fn hook_dispatch_needs_deps(
         // with no config entry, so the graph is needed whenever some trusted
         // registry carries audits at all (a directory check, no file reads).
         || (sym.config.plugins.auto_accept == crate::config::AutoAccept::Audit
-            && sym.audit_index(&sym.package_managers(deps)).any_audits_dir())
+            && sym.audit_index(pms).any_audits_dir())
 }
 
 /// Refresh the source cache for every hook the workspace could fire this
@@ -502,12 +502,12 @@ async fn prewarm_hook_sources(sym: &Symposium, deps: &Arc<WorkspaceDeps>) {
     // Resolving the workspace runs cargo, so only do it when some hook's
     // gating references a concrete crate, or there is crate-plugin expansion to
     // perform (mirrors dispatch).
-    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins, deps) {
-        crate::pm::workspace_dep_ids(sym, deps).await
+    let pms = sym.package_managers(deps);
+    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins, &pms) {
+        crate::pm::dep_ids(&pms).await
     } else {
         Vec::new()
     };
-    let pms = sym.package_managers(deps);
     let used = workspace
         .as_ref()
         .map(|ws| crate::discovery::used_plugins(sym, &pms, &registry.plugins, &ws.root))
@@ -744,12 +744,12 @@ pub async fn dispatch_plugin_hooks(
     // wildcard or env/shell/path predicate never needs the crate graph), or
     // when there is crate-plugin expansion to perform — that too evaluates
     // predicates against the crate graph.
-    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins, deps) {
-        crate::pm::workspace_dep_ids(sym, deps).await
+    let pms = sym.package_managers(deps);
+    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins, &pms) {
+        crate::pm::dep_ids(&pms).await
     } else {
         Vec::new()
     };
-    let pms = sym.package_managers(deps);
     let used = workspace
         .as_ref()
         .map(|ws| crate::discovery::used_plugins(sym, &pms, &registry.plugins, &ws.root))
@@ -1128,7 +1128,7 @@ mod tests {
             }
             let sym = Symposium::from_dir(&config_dir);
             let deps = Arc::new(WorkspaceDeps::detached());
-            hook_dispatch_needs_deps(&sym, &[], &deps)
+            hook_dispatch_needs_deps(&sym, &[], &sym.package_managers(&deps))
         };
         assert!(needs("audit", true));
         assert!(!needs("none", true));

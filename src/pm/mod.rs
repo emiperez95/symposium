@@ -405,7 +405,12 @@ pub async fn workspace_dep_ids(
     sym: &crate::config::Symposium,
     deps: &Arc<WorkspaceDeps>,
 ) -> Vec<PackageId> {
-    match sym.package_managers(deps).list_deps().await {
+    dep_ids(&sym.package_managers(deps)).await
+}
+
+/// [`workspace_dep_ids`] for a caller that already built the package managers.
+pub async fn dep_ids(pms: &PmRegistry) -> Vec<PackageId> {
+    match pms.list_deps().await {
         Ok(deps) => deps,
         Err(e) => {
             tracing::warn!(error = %e, "failed to list workspace dependencies");
