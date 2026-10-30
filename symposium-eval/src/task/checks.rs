@@ -64,6 +64,8 @@ pub(crate) enum CheckError {
     Ignored { file: String },
     #[error("`checks/{file}` passes arguments to `#[test]`")]
     TestArguments { file: String },
+    #[error("`checks/{file}` repeats `#[test]` on one function, which registers multiple tests")]
+    DuplicateTestAttribute { file: String },
     #[error(
         "`checks/{file}` declares test `{function}` with parameters, generics, `async`, or `unsafe`"
     )]
@@ -291,7 +293,14 @@ impl Scan<'_> {
         let mut markers = TestMarkers::default();
         for attribute in attributes {
             match classify(attribute) {
-                AttributeKind::Test => markers.is_test = true,
+                AttributeKind::Test => {
+                    if markers.is_test {
+                        self.errors.push(CheckError::DuplicateTestAttribute {
+                            file: self.file.to_owned(),
+                        });
+                    }
+                    markers.is_test = true;
+                }
                 AttributeKind::TestWithArguments => {
                     markers.is_test = true;
                     self.errors.push(CheckError::TestArguments {
@@ -483,6 +492,14 @@ mod tests {
         assert_eq!(
             messages("#[test] fn first() {}\n#[test] fn second() {}\n"),
             ["`checks/demo.rs` holds 2 top-level tests; it must hold exactly one"]
+        );
+    }
+
+    #[test]
+    fn duplicate_test_attributes_are_rejected() {
+        assert_eq!(
+            messages("#[test] #[test] fn works() {}"),
+            ["`checks/demo.rs` repeats `#[test]` on one function, which registers multiple tests"]
         );
     }
 
