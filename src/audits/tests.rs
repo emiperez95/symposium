@@ -288,3 +288,39 @@ fn revocation_matches_a_cargo_package_by_version_or_payload() {
     let unaudited = PackageId::new(CARGO_PM, "gadget", "1.0.0");
     assert!(index.revocation(&unaudited, &krate).is_none());
 }
+
+#[test]
+fn lookup_distinguishes_audited_differing_and_unaudited() {
+    let tmp = tempfile::tempdir().unwrap();
+    let crate_dir = tmp.path().join("src-widget");
+    std::fs::create_dir_all(crate_dir.join("skills/s")).unwrap();
+    std::fs::write(crate_dir.join("skills/s/SKILL.md"), "hello").unwrap();
+    let payload = digest::payload_digest(&crate_dir).unwrap();
+
+    let registry = tmp.path().join("reg");
+    let index = AuditIndex::new(vec![AuditSource {
+        registry: "reg".into(),
+        dir: registry.clone(),
+    }]);
+    let id = PackageId::new(CARGO_PM, "widget-lib", "1.0.0");
+    assert!(!index.any_audits_dir());
+    assert_eq!(index.lookup(&id, &crate_dir), AuditLookup::Unaudited);
+
+    write_audits(
+        &registry,
+        "widget_lib.toml",
+        &format!("format = 1\ncrate = \"widget-lib\"\n[[audit]]\ndigest = \"{payload}\"\n"),
+    );
+    assert!(index.any_audits_dir());
+    assert!(index.has_audits("widget_lib"));
+    assert_eq!(
+        index.lookup(&id, &crate_dir),
+        AuditLookup::Audited("reg".into())
+    );
+    // Another package manager's package is never audited.
+    let other = PackageId::new("reg", "widget-lib", "1.0.0");
+    assert_eq!(index.lookup(&other, &crate_dir), AuditLookup::Unaudited);
+
+    std::fs::write(crate_dir.join("skills/s/SKILL.md"), "changed").unwrap();
+    assert_eq!(index.lookup(&id, &crate_dir), AuditLookup::PayloadDiffers);
+}

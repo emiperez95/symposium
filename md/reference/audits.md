@@ -117,7 +117,18 @@ A revocation stops a crate's plugin from loading. It is checked every time the a
 - A `versions` requirement is matched against the resolved version only when that is valid semver.
 - The check never prompts and never prints. A revoked plugin is skipped quietly, noted in the log, and shown by [`cargo agents status`](./cargo-agents-status.md) as `revoked`, with the registry and the reason. A revoked crate that is reached only deep in a chain of references is not listed there; it shows in the debug trace (`-v`).
 
-Audits themselves do not yet change what loads: an audited payload is still asked about like any other.
+## Audited loading
+
+Under [`[plugins] auto-accept = "audit"`](./configuration.md#plugins) (the default), a plugin embedded in a dependency loads **without a prompt and without any config write** when a trusted registry has an `[[audit]]` entry whose `digest` equals the [payload digest](#payload-digest) of the crate's source.
+
+- It applies to dependency-embedded plugins. Each crate is checked against its own audits file; a crate reached through a `[[plugins]]` chained reference is followed as before, and is loaded by its own audit only when it is also a dependency.
+- The order, first match wins: `disable` (not loaded), a [revocation](#revocations) (not loaded), a standing grant (`use`, `auto-enable`), `auto-accept = "all"`, then an audit. Anything else is a candidate and is asked about.
+- Under `auto-accept = "none"` an audit never skips the prompt; standing grants still apply.
+- Nothing is recorded. The plugin loads while the audit and the payload match; if the crate's payload changes (a new release that edits a skill or the manifest), the audit no longer covers it and the plugin is a candidate again.
+- A payload [with no digest](#when-there-is-no-digest) cannot match an audit, so it stays a candidate.
+- A crate with no audits file is never hashed: the lookup reads `audits/<crate>.toml` first.
+- [`cargo agents status`](./cargo-agents-status.md) shows the plugin as `active`, with root `audited by registry <name>`. The `SessionStart` hint and the consent prompt leave audited plugins out. The interactive prompt says when a plugin it asks about is not audited, or when a registry's audit does not cover this release's payload.
+- Like revocations, the check is cache-only and never prompts or prints on the hook path.
 
 ## How Symposium reads it
 

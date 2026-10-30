@@ -549,3 +549,218 @@ async fn a_revoked_crate_leaves_hook_stdout_alone() {
     .await
     .unwrap();
 }
+
+// ── audited loading ──────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+enum Reg {
+    Company,
+    User,
+}
+
+fn audit_text(digest: &str) -> String {
+    format!("format = 1\ncrate = \"crate-d\"\n[[audit]]\ndigest = \"{digest}\"\n")
+}
+
+/// Audit crate-d's current payload in `registry`, init, and return the
+/// workspace's agent skills directory.
+async fn init_audited(ctx: &mut TestContext, which: Reg) -> PathBuf {
+    let registry = match which {
+        Reg::Company => ctx.tempdir.join("company-audits"),
+        Reg::User => ctx.sym.config_dir().join("plugins"),
+    };
+    ctx.symposium(&["init", "--add-agent", "claude"])
+        .await
+        .unwrap();
+    let digest = payload_digest(&crate_d(ctx)).unwrap().to_string();
+    write_audits(&registry, "crate_d.toml", &audit_text(&digest));
+    ctx.workspace_root.clone().unwrap().join(".claude/skills")
+}
+
+fn config_text(ctx: &TestContext) -> String {
+    std::fs::read_to_string(ctx.sym.config_dir().join("config.toml")).unwrap()
+}
+
+/// Under `audit` (the default) an audited dependency loads with no prompt and
+/// no config write, and `status` and the SessionStart hint agree.
+#[tokio::test]
+async fn an_audited_dependency_loads_without_a_config_write() {
+    with_fixture(TestMode::SimulationOnly, &["audits0"], async |mut ctx| {
+        assert_eq!(ctx.sym.config.plugins.auto_accept, AutoAccept::Audit);
+        let skills = init_audited(&mut ctx, Reg::Company).await;
+        let before = config_text(&ctx);
+        ctx.symposium(&["sync"]).await?;
+        assert_eq!(installed(&skills, "d-guidance").len(), 1);
+        assert_eq!(config_text(&ctx), before, "nothing is written");
+
+        let entries = status(&ctx).await;
+        let found = entry(&entries, "crate-d");
+        assert_eq!(found.state, StatusState::Active);
+        assert_eq!(found.root, "audited by registry `company`");
+
+        let deps = ctx.sym.workspace_deps(ctx.workspace_root.as_ref().unwrap());
+        assert!(
+            symposium::discovery::pending_candidates(&ctx.sym, &deps)
+                .await
+                .is_empty()
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+/// An audit from `~/.symposium/plugins/` counts like any registry's.
+#[tokio::test]
+async fn an_audit_from_the_user_plugins_directory_loads() {
+    with_fixture(TestMode::SimulationOnly, &["audits0"], async |mut ctx| {
+        let skills = init_audited(&mut ctx, Reg::User).await;
+        ctx.symposium(&["sync"]).await?;
+        assert_eq!(installed(&skills, "d-guidance").len(), 1);
+        assert_eq!(
+            entry(&status(&ctx).await, "crate-d").root,
+            "audited by registry `user-plugins`"
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+/// Under `none` an audit never skips the prompt: the crate is a candidate.
+#[tokio::test]
+async fn under_none_an_audited_dependency_is_still_a_candidate() {
+    with_fixture(TestMode::SimulationOnly, &["audits0"], async |mut ctx| {
+        ctx.sym.config.plugins.auto_accept = AutoAccept::None;
+        let skills = init_audited(&mut ctx, Reg::Company).await;
+        ctx.symposium(&["sync"]).await?;
+        assert!(installed(&skills, "d-guidance").is_empty());
+        assert_eq!(
+            entry(&status(&ctx).await, "crate-d").state,
+            StatusState::Candidate
+        );
+        let deps = ctx.sym.workspace_deps(ctx.workspace_root.as_ref().unwrap());
+        assert_eq!(
+            symposium::discovery::pending_candidates(&ctx.sym, &deps).await,
+            vec!["crate-d".to_string()]
+        );
+        // A standing grant still applies under `none`.
+        ctx.sym.config.plugins.auto_enable = vec!["crate-d".into()];
+        ctx.symposium(&["sync"]).await?;
+        assert_eq!(installed(&skills, "d-guidance").len(), 1);
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+/// A release whose payload differs from the audited one is a candidate again,
+/// and the audit is only reported as not covering it.
+#[tokio::test]
+async fn a_changed_payload_is_no_longer_covered_by_the_audit() {
+    with_fixture(TestMode::SimulationOnly, &["audits0"], async |mut ctx| {
+        let skills = init_audited(&mut ctx, Reg::Company).await;
+        ctx.symposium(&["sync"]).await?;
+        assert_eq!(installed(&skills, "d-guidance").len(), 1);
+
+        std::fs::write(
+            crate_d(&ctx).join("skills/d-guidance/resources/notes.md"),
+            "changed after the audit\n",
+        )?;
+        ctx.symposium(&["sync"]).await?;
+        assert!(installed(&skills, "d-guidance").is_empty(), "reaped");
+        assert_eq!(
+            entry(&status(&ctx).await, "crate-d").state,
+            StatusState::Candidate
+        );
+        let deps = ctx.sym.workspace_deps(ctx.workspace_root.as_ref().unwrap());
+        let found = symposium::discovery::discover_for(&ctx.sym, &deps).await;
+        assert_eq!(
+            found.candidates[0].audit,
+            symposium::audits::AuditLookup::PayloadDiffers
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+/// A payload with no digest (a `source.git` group) cannot match an audit.
+#[tokio::test]
+async fn an_ineligible_payload_stays_a_candidate() {
+    with_fixture(TestMode::SimulationOnly, &["audits0"], async |mut ctx| {
+        let skills = init_audited(&mut ctx, Reg::Company).await;
+        std::fs::write(
+            crate_d(&ctx).join("Symposium.toml"),
+            "[[skills]]\nsource.git = \"https://github.com/example/skills\"\n",
+        )?;
+        ctx.symposium(&["sync"]).await?;
+        assert!(installed(&skills, "d-guidance").is_empty());
+        assert_eq!(
+            entry(&status(&ctx).await, "crate-d").state,
+            StatusState::Candidate
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+/// A revocation and `disable` each beat an audit.
+#[tokio::test]
+async fn revoked_and_disabled_beat_an_audit() {
+    with_fixture(TestMode::SimulationOnly, &["audits0"], async |mut ctx| {
+        let registry = ctx.tempdir.join("company-audits");
+        let skills = init_audited(&mut ctx, Reg::Company).await;
+        let digest = payload_digest(&crate_d(&ctx)).unwrap().to_string();
+        write_audits(
+            &registry,
+            "crate_d.toml",
+            &format!(
+                "{}[[revoked]]\nversions = \"*\"\nreason = \"report\"\n",
+                audit_text(&digest)
+            ),
+        );
+        ctx.symposium(&["sync"]).await?;
+        assert!(installed(&skills, "d-guidance").is_empty());
+        assert_eq!(
+            entry(&status(&ctx).await, "crate-d").state,
+            StatusState::Revoked
+        );
+
+        write_audits(&registry, "crate_d.toml", &audit_text(&digest));
+        ctx.sym.config.plugins.disable = vec!["crate-d".into()];
+        ctx.symposium(&["sync"]).await?;
+        assert!(installed(&skills, "d-guidance").is_empty());
+        assert_eq!(
+            entry(&status(&ctx).await, "crate-d").state,
+            StatusState::Declined
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+/// `use` and `auto-enable` still load a crate no registry audited, or one
+/// audited for a different payload.
+#[tokio::test]
+async fn standing_grants_load_an_unaudited_crate() {
+    for (name, grant) in grants() {
+        with_fixture(TestMode::SimulationOnly, &["audits0"], async |mut ctx| {
+            let skills = init_audited(&mut ctx, Reg::Company).await;
+            let other = "sha256:".to_string() + &"a".repeat(64);
+            write_audits(
+                &ctx.tempdir.join("company-audits"),
+                "crate_d.toml",
+                &audit_text(&other),
+            );
+            grant(&mut ctx.sym);
+            ctx.symposium(&["sync"]).await?;
+            assert_eq!(installed(&skills, "d-guidance").len(), 1, "{name}");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+}

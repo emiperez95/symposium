@@ -59,6 +59,19 @@ pub struct AuditIndex {
     sources: Vec<AuditSource>,
 }
 
+/// What the registries' audits say about one crate's payload.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum AuditLookup {
+    /// A registry audited exactly this payload.
+    Audited(String),
+    /// A registry audited this crate, but not this payload: the audit does not
+    /// cover this release's content.
+    PayloadDiffers,
+    /// No registry audited this crate, or this payload cannot be digested.
+    #[default]
+    Unaudited,
+}
+
 /// A revocation that matched, and who issued it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Revocation {
@@ -115,6 +128,43 @@ impl AuditIndex {
         self.for_crate(crate_name)
             .audited_by(digest)
             .map(str::to_string)
+    }
+
+    /// Whether any trusted registry has an `audits/` directory at all. Cheap:
+    /// the hook path uses it to decide whether audited loading can matter.
+    pub fn any_audits_dir(&self) -> bool {
+        self.sources.iter().any(|s| s.dir.join(AUDITS_DIR).is_dir())
+    }
+
+    /// Does any registry audit (not merely revoke) `crate_name`? Reads only
+    /// that crate's file, so callers use it to avoid hashing a payload nobody
+    /// audited.
+    pub fn has_audits(&self, crate_name: &str) -> bool {
+        !self.for_crate(crate_name).audited.is_empty()
+    }
+
+    /// Whether the registries audited the payload at `root`, the content of
+    /// the cargo-sourced package `id`. The payload is hashed only when the
+    /// crate has an audits file with an `[[audit]]` entry; a package of
+    /// another package manager, or a payload with no digest, is `Unaudited`.
+    pub fn lookup(&self, id: &PackageId, root: &Path) -> AuditLookup {
+        if id.pm != CARGO_PM {
+            return AuditLookup::Unaudited;
+        }
+        let audits = self.for_crate(&id.name);
+        if audits.audited.is_empty() {
+            return AuditLookup::Unaudited;
+        }
+        match digest::payload_digest(root) {
+            Ok(d) => match audits.audited_by(&d) {
+                Some(registry) => AuditLookup::Audited(registry.to_string()),
+                None => AuditLookup::PayloadDiffers,
+            },
+            Err(why) => {
+                tracing::debug!(id = %id, %why, "no payload digest; an audit cannot match");
+                AuditLookup::Unaudited
+            }
+        }
     }
 
     /// Whether a registry revoked `id`, a cargo-sourced package whose content

@@ -9,7 +9,8 @@
 //!
 //! - **active** — enabled and its predicates hold for this workspace. The
 //!   root names the trust root: workspace membership, a configured registry,
-//!   `[plugins] auto-enable`, `[plugins] auto-accept`, or a `[plugins] use` entry.
+//!   `[plugins] auto-enable`, `[plugins] auto-accept`, a `[plugins] use` entry,
+//!   or a trusted registry's audit of exactly this payload.
 //! - **dormant** — loaded but waiting: a registry plugin that names no
 //!   dependency ([`requires_use`](crate::plugins::PluginManifest::requires_use)),
 //!   one whose predicates don't currently hold, or a dependency named by `use`
@@ -126,6 +127,7 @@ pub async fn workspace_status(
         .iter()
         .chain(&discovery.auto_enabled)
         .chain(&discovery.auto_accepted)
+        .chain(&discovery.audited)
         .chain(&discovery.candidates)
         .chain(&discovery.declined)
         .chain(&discovery.revoked)
@@ -148,6 +150,7 @@ pub async fn workspace_status(
                 .iter()
                 .chain(&discovery.auto_enabled)
                 .chain(&discovery.auto_accepted)
+                .chain(&discovery.audited)
                 .chain(&discovery.candidates)
                 .chain(&discovery.declined)
                 .chain(&discovery.revoked)
@@ -268,6 +271,10 @@ fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
         Enablement::Used => (StatusState::Active, "`[plugins] use`".to_string()),
         Enablement::AutoEnabled => (StatusState::Active, "`[plugins] auto-enable`".to_string()),
         Enablement::AutoAccepted => (StatusState::Active, "`[plugins] auto-accept`".to_string()),
+        Enablement::Audited { registry } => (
+            StatusState::Active,
+            format!("audited by registry `{registry}`"),
+        ),
         Enablement::Declined => (
             StatusState::Declined,
             "declined (`[plugins] disable`)".to_string(),

@@ -126,8 +126,8 @@ pub struct Config {
 pub enum AutoAccept {
     /// No audit may skip the prompt.
     None,
-    /// Audited plugins load without asking; anything else asks. No audit data
-    /// exists yet, so today this behaves exactly like `none`.
+    /// A plugin whose payload digest a trusted registry audited loads without
+    /// asking (and without writing config); anything else asks.
     #[default]
     Audit,
     /// Every dependency-embedded plugin is accepted without asking (the

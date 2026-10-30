@@ -39,8 +39,11 @@ agent context, so these stay off until you say otherwise. Three answers:
 - **Enable** — recorded in `[plugins] auto-enable`, and installed by this same sync.
 - **No — don't ask again** — recorded in `[plugins] disable`.
 
-Plugins already covered by `[plugins] auto-enable` or `use`, or by
-[`auto-accept = "all"`](./configuration.md#plugins), are not asked about.
+Plugins already covered by `[plugins] auto-enable` or `use`, by
+[`auto-accept = "all"`](./configuration.md#plugins), or, under the default
+`auto-accept = "audit"`, by a trusted registry's [audit](./audits.md#audited-loading)
+of exactly their payload, are not asked about. (An audited plugin is not recorded
+in your config: it loads while the audit holds.)
 
 Only explicit answers are recorded, so hitting Enter through the prompt never
 permanently declines anything. Escape leaves the remaining questions undecided.

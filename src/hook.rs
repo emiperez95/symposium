@@ -469,11 +469,20 @@ async fn run_auto_sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, session_start
 /// plugin in — since expansion evaluates edge and plugin predicates against the
 /// crate graph too. Registry plugins reached without any of these dispatch on a
 /// crate-free context (the fast path for `PreToolUse`).
-fn hook_dispatch_needs_deps(sym: &Symposium, registry_plugins: &[Plugin]) -> bool {
+fn hook_dispatch_needs_deps(
+    sym: &Symposium,
+    registry_plugins: &[Plugin],
+    deps: &Arc<WorkspaceDeps>,
+) -> bool {
     registry_plugins
         .iter()
         .any(|p| p.manifest.hooks_need_dep_resolution() || !p.manifest.chained.is_empty())
         || sym.config.plugins.has_enablement_entries()
+        // Under `auto-accept = "audit"` a dependency a registry audited loads
+        // with no config entry, so the graph is needed whenever some trusted
+        // registry carries audits at all (a directory check, no file reads).
+        || (sym.config.plugins.auto_accept == crate::config::AutoAccept::Audit
+            && sym.package_managers(deps).audit_index().any_audits_dir())
 }
 
 /// Refresh the source cache for every hook the workspace could fire this
@@ -493,7 +502,7 @@ async fn prewarm_hook_sources(sym: &Symposium, deps: &Arc<WorkspaceDeps>) {
     // Resolving the workspace runs cargo, so only do it when some hook's
     // gating references a concrete crate, or there is crate-plugin expansion to
     // perform (mirrors dispatch).
-    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins) {
+    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins, deps) {
         crate::pm::workspace_dep_ids(sym, deps).await
     } else {
         Vec::new()
@@ -735,7 +744,7 @@ pub async fn dispatch_plugin_hooks(
     // wildcard or env/shell/path predicate never needs the crate graph), or
     // when there is crate-plugin expansion to perform — that too evaluates
     // predicates against the crate graph.
-    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins) {
+    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins, deps) {
         crate::pm::workspace_dep_ids(sym, deps).await
     } else {
         Vec::new()
