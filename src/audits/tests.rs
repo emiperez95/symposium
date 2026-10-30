@@ -199,18 +199,26 @@ fn the_index_merges_registries_and_names_the_matching_one() {
     ]);
 
     assert_eq!(
-        index.audited_by("widget-lib", &digest(A)).as_deref(),
+        index
+            .for_crate("widget-lib")
+            .audited_by(&digest(A))
+            .as_deref(),
         Some("one")
     );
     assert_eq!(
-        index.audited_by("widget_lib", &digest(B)).as_deref(),
+        index
+            .for_crate("widget_lib")
+            .audited_by(&digest(B))
+            .as_deref(),
         Some("two")
     );
     assert_eq!(
-        index.audited_by("widget-lib", &digest(&format!("sha256:{}", "c".repeat(64)))),
+        index
+            .for_crate("widget-lib")
+            .audited_by(&digest(&format!("sha256:{}", "c".repeat(64)))),
         None
     );
-    assert_eq!(index.audited_by("other", &digest(A)), None);
+    assert_eq!(index.for_crate("other").audited_by(&digest(A)), None);
 
     let hit = index
         .for_crate("widget-lib")

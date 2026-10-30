@@ -10,8 +10,7 @@
 //!
 //! - **Audited digests** — "this payload was reviewed". An audit from *any*
 //!   registry counts, and the lookup remembers which registry it came from
-//!   ([`AuditIndex::audited_by`]), so a later "audited by registry X" can say
-//!   so. Nothing in this module makes an audited plugin load without a
+//!   ([`CrateAudits::audited_by`]), so "audited by registry X" can say so. Nothing in this module makes an audited plugin load without a
 //!   prompt: that decision is enablement's.
 //! - **Revocations** — "this release or payload must not load". One from *any*
 //!   registry applies ([`AuditIndex::revocation`]). A revocation names a
@@ -140,15 +139,6 @@ impl AuditIndex {
             }
         }
         out
-    }
-
-    /// Which registry audited `digest` for `crate_name`, if any. This is the
-    /// lookup enablement uses to say "audited by registry X"; the first
-    /// registry (in configuration order) that lists the digest wins.
-    pub fn audited_by(&self, crate_name: &str, digest: &Digest) -> Option<String> {
-        self.for_crate(crate_name)
-            .audited_by(digest)
-            .map(str::to_string)
     }
 
     /// Whether any trusted registry has an `audits/` directory at all. Cheap:
