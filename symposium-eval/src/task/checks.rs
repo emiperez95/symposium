@@ -1,11 +1,12 @@
 //! Hidden tests in `checks/`: one file per test, exactly one test per file.
 //!
-//! The rule must hold before any starter or solution compiles against a check, so it is
-//! proved on the source with `syn` rather than by listing tests at runtime. The accepted
-//! syntax is closed: anything that could add, remove, or hide a test is rejected rather
-//! than interpreted. That covers `cfg` and `cfg_attr` anywhere, attribute and item
-//! macros, out-of-line modules, and tests inside modules. Grading still confirms the
-//! count with libtest's `--list`.
+//! Test declarations are checked on the source with `syn`, since the starter may not
+//! yet compile against a check. File attributes and attributes on inspected items,
+//! including items in inline modules, cannot conditionally add, remove, or hide tests.
+//! The scanner rejects conditional attributes at those scopes, unsupported attributes
+//! and derives, item macro invocations, out-of-line modules, and nested tests.
+//! Function bodies are not inspected; conditional compilation inside test and helper
+//! bodies is permitted. Grading still confirms the count with libtest's `--list`.
 
 use std::fs;
 use std::io;
@@ -514,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn conditional_compilation_is_rejected_anywhere() {
+    fn conditional_compilation_on_files_and_items_is_rejected() {
         let cases = [
             ("#![cfg(windows)]\n#[test] fn works() {}", "cfg"),
             (
