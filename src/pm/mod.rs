@@ -191,15 +191,10 @@ pub struct PmInstance {
 }
 
 impl PmInstance {
-    /// This instance's active plugins, validated. A plugin that fails
-    /// validation is logged and dropped: best-effort, like the PM layer above.
-    pub async fn active_plugins(&self, deps: &[PackageId]) -> Vec<Plugin> {
-        into_plugins(self.active_plugins_rooted(deps).await)
-    }
-
-    /// [`active_plugins`](Self::active_plugins), each with the directory its
-    /// content was read from.
-    pub async fn active_plugins_rooted(&self, deps: &[PackageId]) -> Vec<LoadedPlugin> {
+    /// This instance's active plugins, validated, each with the directory its
+    /// content was read from. A plugin that fails validation is logged and
+    /// dropped: best-effort, like the PM layer above.
+    pub async fn active_plugins(&self, deps: &[PackageId]) -> Vec<LoadedPlugin> {
         self.validate_all(self.pm.active_plugins(deps).await)
     }
 
@@ -207,7 +202,11 @@ impl PmInstance {
         match self.pm.registry_plugins().await {
             Ok(listing) => {
                 let total = listing.plugins.len();
-                let plugins = into_plugins(self.validate_all(listing.plugins));
+                let plugins: Vec<Plugin> = self
+                    .validate_all(listing.plugins)
+                    .into_iter()
+                    .map(|l| l.plugin)
+                    .collect();
                 Some(RegistryListing {
                     complete: listing.complete && plugins.len() == total,
                     plugins,
@@ -224,18 +223,9 @@ impl PmInstance {
         }
     }
 
-    /// The plugin(s) an id maps to, validated.
-    pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<Plugin> {
-        into_plugins(self.load_plugin_rooted(id, update).await)
-    }
-
-    /// [`load_plugin`](Self::load_plugin), each with the directory its content
-    /// was read from.
-    pub async fn load_plugin_rooted(
-        &self,
-        id: &PackageId,
-        update: UpdateLevel,
-    ) -> Vec<LoadedPlugin> {
+    /// The plugin(s) an id maps to, validated, each with the directory its
+    /// content was read from.
+    pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<LoadedPlugin> {
         self.validate_all(self.pm.load_plugin(id, update).await)
     }
 
@@ -279,10 +269,6 @@ pub struct LoadedPlugin {
     /// The package's content directory: a crate's source tree, a registry
     /// entry's directory.
     pub root: PathBuf,
-}
-
-fn into_plugins(loaded: Vec<LoadedPlugin>) -> Vec<Plugin> {
-    loaded.into_iter().map(|l| l.plugin).collect()
 }
 
 #[derive(Debug)]
@@ -385,20 +371,10 @@ impl PmRegistry {
     /// Load the plugin(s) an id maps to, asking every instance. Any instance may
     /// contribute a plugin relevant to the id, so this can return several. Each
     /// instance's plugins are validated under its own [`PluginKind`].
-    pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<Plugin> {
-        into_plugins(self.load_plugin_rooted(id, update).await)
-    }
-
-    /// [`load_plugin`](Self::load_plugin), each plugin with the directory its
-    /// content was read from.
-    pub async fn load_plugin_rooted(
-        &self,
-        id: &PackageId,
-        update: UpdateLevel,
-    ) -> Vec<LoadedPlugin> {
+    pub async fn load_plugin(&self, id: &PackageId, update: UpdateLevel) -> Vec<LoadedPlugin> {
         let mut out = Vec::new();
         for inst in &self.instances {
-            out.extend(inst.load_plugin_rooted(id, update).await);
+            out.extend(inst.load_plugin(id, update).await);
         }
         out
     }
@@ -579,7 +555,12 @@ mod tests {
             kind: PluginKind::Registry,
             pm: Box::new(PathPm::new("reg", reg)),
         };
-        let plugins = registry.active_plugins(&[]).await;
+        let plugins: Vec<Plugin> = registry
+            .active_plugins(&[])
+            .await
+            .into_iter()
+            .map(|l| l.plugin)
+            .collect();
         assert_eq!(plugins.len(), 2);
         (PmRegistry::new(vec![cargo, registry]), plugins)
     }

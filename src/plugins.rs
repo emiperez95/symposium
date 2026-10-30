@@ -1197,7 +1197,7 @@ pub async fn active_plugins(
     // Fixed-point: resolve each id through the set, record any new plugin, and
     // enqueue its own chained references.
     while let Some(id) = worklist.pop() {
-        for loaded in pms.load_plugin_rooted(&id, update).await {
+        for loaded in pms.load_plugin(&id, update).await {
             let plugin = loaded.plugin;
             if visited.insert(pms.identity(&plugin.canonical))
                 && withheld(sym, pms, &audits, &plugin, Some(&loaded.root)).is_none()

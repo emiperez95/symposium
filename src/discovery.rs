@@ -156,7 +156,7 @@ pub async fn discover(
     // plugins embedded in dependencies, which run only with consent. Classify
     // each against the `[plugins]` config.
     for inst in pms.instances().filter(|i| !i.trusted) {
-        for loaded in inst.active_plugins_rooted(&dep_ids).await {
+        for loaded in inst.active_plugins(&dep_ids).await {
             let plugin = loaded.plugin;
             let name = plugin.canonical.name.clone();
             let description = Some(describe_plugin(&plugin.manifest));
