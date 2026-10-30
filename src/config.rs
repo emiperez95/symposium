@@ -553,6 +553,12 @@ impl Symposium {
         crate::pm::PmRegistry::new(instances)
     }
 
+    /// The audits of the trusted registries among `pms`, with payload digests
+    /// of immutable sources remembered under the cache directory.
+    pub fn audit_index(&self, pms: &crate::pm::PmRegistry) -> crate::audits::AuditIndex {
+        pms.audit_index().with_cache_dir(self.cache_dir())
+    }
+
     /// The package managers for a workspace-independent operation (registry
     /// listing, crates.io search): the cargo transport is built over a detached
     /// resolver that never runs `cargo metadata`.

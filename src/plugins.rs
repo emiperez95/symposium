@@ -1166,7 +1166,7 @@ pub async fn active_plugins(
     // Package ids still to resolve through the set.
     let mut worklist: Vec<crate::pm::PackageId> = Vec::new();
 
-    let audits = pms.audit_index();
+    let audits = sym.audit_index(pms);
 
     // Seed with the trust-root plugins (registry + workspace), gated. A
     // revocation has nothing to say about what the user put there, but

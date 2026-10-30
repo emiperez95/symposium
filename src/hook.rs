@@ -482,7 +482,7 @@ fn hook_dispatch_needs_deps(
         // with no config entry, so the graph is needed whenever some trusted
         // registry carries audits at all (a directory check, no file reads).
         || (sym.config.plugins.auto_accept == crate::config::AutoAccept::Audit
-            && sym.package_managers(deps).audit_index().any_audits_dir())
+            && sym.audit_index(&sym.package_managers(deps)).any_audits_dir())
 }
 
 /// Refresh the source cache for every hook the workspace could fire this

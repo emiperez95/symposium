@@ -158,7 +158,7 @@ pub async fn discover(
         return Discovery::default();
     };
     let pms = sym.package_managers(deps);
-    let audits = pms.audit_index();
+    let audits = sym.audit_index(&pms);
     let dep_ids = pms.list_deps().await.unwrap_or_default();
     let used: HashSet<PackageId> =
         resolve_used(sym, &pms, registry, &workspace_root, UpdateLevel::None)
@@ -230,7 +230,7 @@ pub async fn enabled_dependencies(
     let used = resolve_used(sym, pms, registry, workspace_root, update).await;
     let mut enabled = Vec::new();
     let mut known = HashSet::new();
-    let audits = pms.audit_index();
+    let audits = sym.audit_index(pms);
     for id in dep_ids.iter().filter(|id| id.pm == CARGO_PM) {
         let identity = pms.identity(id);
         let is_used = used.iter().any(|(_, used)| *used == identity);

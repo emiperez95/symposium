@@ -62,7 +62,7 @@ pub const MAX_PAYLOAD_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Prefix of the hashed input, separating this digest from any other use of
 /// SHA-256. The `v1` is the version of this scheme.
-const DOMAIN: &[u8] = b"symposium-payload-v1\0";
+pub(super) const DOMAIN: &[u8] = b"symposium-payload-v1\0";
 
 /// Entry name of the crate-root plugin manifest.
 const MANIFEST_ENTRY: &str = "Symposium.toml";

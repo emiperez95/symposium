@@ -592,6 +592,10 @@ async fn an_audited_dependency_loads_without_a_config_write() {
         ctx.symposium(&["sync"]).await?;
         assert_eq!(installed(&skills, "d-guidance").len(), 1);
         assert_eq!(config_text(&ctx), before, "nothing is written");
+        assert!(
+            !ctx.sym.cache_dir().join("audit-digests").exists(),
+            "a path dependency's digest is never cached"
+        );
 
         let entries = status(&ctx).await;
         let found = entry(&entries, "crate-d");

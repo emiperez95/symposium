@@ -169,7 +169,7 @@ pub async fn workspace_status(
     let used =
         crate::discovery::resolve_used(sym, &pms, &registry.plugins, &ws.root, UpdateLevel::None)
             .await;
-    let audits = pms.audit_index();
+    let audits = sym.audit_index(&pms);
     for id in enabled {
         if shown.contains(&pms.identity(&id)) {
             continue;

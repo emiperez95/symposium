@@ -21,7 +21,7 @@
 //!
 //! Looking up a crate reads only `audits/<normalized-crate>.toml` in each
 //! registry, so a crate nobody audited costs one failed `open` per registry.
-//! The payload digest is computed ([`digest`]) only when a file needs it.
+//! The payload digest is computed ([`digest`]) only when a file needs it, and remembered for immutable (crates.io) sources.
 //!
 //! **The client is lenient** where the maintaining tooling is strict: a
 //! malformed entry (bad digest string, an entry that names both or neither of
@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 use symposium_sdk::audits::{AUDITS_DIR, Digest, FORMAT, RawAudit, RawRevoked, RevokeReason};
 use symposium_sdk::pm::{CARGO_PM, PackageId};
 
+mod cache;
 pub mod digest;
 pub mod digest_command;
 
@@ -57,6 +58,8 @@ pub struct AuditSource {
 #[derive(Debug, Clone, Default)]
 pub struct AuditIndex {
     sources: Vec<AuditSource>,
+    /// Where payload digests of immutable sources are remembered, if anywhere.
+    cache_dir: Option<PathBuf>,
 }
 
 /// What the registries' audits say about one crate's payload.
@@ -95,7 +98,22 @@ impl std::fmt::Display for Revocation {
 
 impl AuditIndex {
     pub fn new(sources: Vec<AuditSource>) -> Self {
-        Self { sources }
+        Self {
+            sources,
+            cache_dir: None,
+        }
+    }
+
+    /// Remember the digests of immutable (crates.io) sources under
+    /// `<cache_dir>/audit-digests/`. Path, workspace and git sources are never
+    /// cached, and a cache failure falls back to hashing.
+    pub fn with_cache_dir(mut self, cache_dir: &Path) -> Self {
+        self.cache_dir = Some(cache_dir.to_path_buf());
+        self
+    }
+
+    fn digest_of(&self, id: &PackageId, root: &Path) -> Result<Digest, digest::Ineligible> {
+        cache::payload_digest_cached(self.cache_dir.as_deref(), id, root)
     }
 
     /// Everything the registries say about `crate_name`: reads
@@ -155,7 +173,7 @@ impl AuditIndex {
         if audits.audited.is_empty() {
             return AuditLookup::Unaudited;
         }
-        match digest::payload_digest(root) {
+        match self.digest_of(id, root) {
             Ok(d) => match audits.audited_by(&d) {
                 Some(registry) => AuditLookup::Audited(registry.to_string()),
                 None => AuditLookup::PayloadDiffers,
@@ -185,7 +203,7 @@ impl AuditIndex {
         let version = semver::Version::parse(&id.version).ok();
         let digest = audits
             .has_digest_revocation()
-            .then(|| digest::payload_digest(root))
+            .then(|| self.digest_of(id, root))
             .and_then(|result| match result {
                 Ok(d) => Some(d),
                 Err(why) => {
