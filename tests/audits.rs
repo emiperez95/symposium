@@ -614,6 +614,72 @@ async fn an_audited_dependency_loads_without_a_config_write() {
     .unwrap();
 }
 
+/// An audited dependency's hook runs through `cargo agents hook` with no
+/// `[plugins]` entry anywhere: the hook path resolves the crate graph because a
+/// trusted registry carries audits, and the crate loads on the audit alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_audited_dependencys_hook_runs_with_no_config_entry() {
+    use std::io::Write;
+    use symposium::hook_schema::{HookAgent, agent_event};
+    use symposium_testlib::HookStep;
+
+    with_fixture(TestMode::SimulationOnly, &["audits0"], async |mut ctx| {
+        ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+        let workspace = ctx.workspace_root.clone().unwrap();
+        let step = HookStep::PreToolUse {
+            tool_name: "Task".into(),
+            tool_input: serde_json::json!({}),
+        };
+        let payload = agent_event(HookAgent::Claude, step.event())
+            .unwrap()
+            .translate_input(&step.to_input_event(&workspace.display().to_string()))
+            .to_string()
+            .unwrap();
+        let run_hook = || {
+            let binary =
+                std::env::var("CARGO_BIN_EXE_cargo-agents").expect("must run via cargo test");
+            let mut child = std::process::Command::new(binary)
+                .args(["hook", "claude", "pre-tool-use"])
+                .env("SYMPOSIUM_HOME", ctx.sym.config_dir())
+                .current_dir(&workspace)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("spawn cargo-agents");
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(payload.as_bytes())
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+
+        // Not audited yet: the crate is a candidate and its hook stays off.
+        assert!(!run_hook().contains("audited-hook-output"));
+
+        let digest = payload_digest(&crate_d(&ctx)).unwrap().to_string();
+        write_audits(
+            &ctx.tempdir.join("company-audits"),
+            "crate_d.toml",
+            &audit_text(&digest),
+        );
+        assert!(!config_text(&ctx).contains("[plugins]"));
+        let stdout = run_hook();
+        assert!(stdout.contains("audited-hook-output"), "{stdout}");
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
 /// An audit from `~/.symposium/plugins/` counts like any registry's.
 #[tokio::test]
 async fn an_audit_from_the_user_plugins_directory_loads() {

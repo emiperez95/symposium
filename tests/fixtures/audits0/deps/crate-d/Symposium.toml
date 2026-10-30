@@ -1,0 +1,7 @@
+# A hook, so the hook path has something to dispatch once the crate loads.
+[[hooks]]
+name = "audited-hook"
+event = "PreToolUse"
+matcher = "Task"
+command = { script = "$TEST_DIR/deps/crate-d/scripts/audited-hook.sh" }
+format = "symposium"

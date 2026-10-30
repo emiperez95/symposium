@@ -1104,6 +1104,37 @@ mod tests {
 
     use super::*;
 
+    /// The audited-loading branch of `hook_dispatch_needs_deps`: it needs the
+    /// crate graph only under `auto-accept = "audit"` with some trusted
+    /// registry carrying an `audits/` directory.
+    #[test]
+    fn audited_loading_needs_deps_only_under_audit_with_an_audits_dir() {
+        let needs = |auto_accept: &str, audits_dir: bool| {
+            let tmp = tempfile::tempdir().unwrap();
+            let config_dir = tmp.path().join("config");
+            std::fs::create_dir_all(&config_dir).unwrap();
+            std::fs::write(
+                config_dir.join("config.toml"),
+                format!(
+                    "[plugins]\nauto-accept = \"{auto_accept}\"\n\n[[registry]]\nname = \"reg\"\npath = \"reg\"\n\n\
+                     [defaults]\nsymposium-recommendations = false\nuser-plugins = false\n"
+                ),
+            )
+            .unwrap();
+            let reg = config_dir.join("reg");
+            std::fs::create_dir_all(&reg).unwrap();
+            if audits_dir {
+                std::fs::create_dir_all(reg.join("audits")).unwrap();
+            }
+            let sym = Symposium::from_dir(&config_dir);
+            let deps = Arc::new(WorkspaceDeps::detached());
+            hook_dispatch_needs_deps(&sym, &[], &deps)
+        };
+        assert!(needs("audit", true));
+        assert!(!needs("none", true));
+        assert!(!needs("audit", false));
+    }
+
     #[test]
     fn env_safe_sanitizes_punctuation() {
         assert_eq!(env_safe("rtk"), "rtk");
