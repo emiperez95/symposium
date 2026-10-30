@@ -194,6 +194,12 @@ pub enum PluginCommand {
         plugin: String,
     },
 
+    /// Print the payload digest an audits file matches a crate on
+    Digest {
+        /// A crate's source directory, or a crate name
+        target: String,
+    },
+
     /// Validate a plugin source directory or a single TOML manifest
     Validate {
         /// Path to a directory or a single .toml file
@@ -334,6 +340,10 @@ pub async fn run(
         }
         // These commands can't easily be extracted since they do I/O
         // (stdin/stdout for hooks). The binary handles them directly.
+        Commands::Plugin {
+            command: PluginCommand::Digest { target },
+        } => crate::audits::digest_command::run(sym, cwd, &target).await,
+
         Commands::Hook { .. } | Commands::Plugin { .. } => {
             anyhow::bail!("command not supported in library dispatch (use binary)")
         }

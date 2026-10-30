@@ -154,6 +154,21 @@ pub enum ReportEvent {
         state: String,
     },
 
+    /// The result of `cargo agents plugin digest`.
+    PayloadDigest {
+        /// What was asked about: a directory or a crate name.
+        target: String,
+        /// The crate and version, when the target was a crate.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        krate: Option<String>,
+        /// The payload digest (`sha256:<hex>`), when the payload has one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        digest: Option<String>,
+        /// Why there is no digest, when there is none.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ineligible: Option<String>,
+    },
+
     /// A provider was listed with its plugins.
     ProviderListed {
         name: String,
@@ -329,6 +344,20 @@ impl ReportEvent {
                 };
                 format!("➖ removed the {name} enablement for {scope}")
             }
+            // A bare digest on success, so `$(cargo agents plugin digest ..)`
+            // is usable in scripts.
+            Self::PayloadDigest {
+                target,
+                digest,
+                ineligible,
+                ..
+            } => match (digest, ineligible) {
+                (Some(digest), _) => digest.clone(),
+                (None, why) => format!(
+                    "no payload digest for {target}: {}",
+                    why.as_deref().unwrap_or("unknown reason")
+                ),
+            },
             Self::PluginStatus {
                 name,
                 version,

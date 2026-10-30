@@ -36,6 +36,9 @@ use std::path::{Path, PathBuf};
 
 use symposium_sdk::audits::{AUDITS_DIR, Digest, FORMAT, RawAudit, RawRevoked, RevokeReason};
 
+pub mod digest;
+pub mod digest_command;
+
 /// A file larger than this is ignored: audits are small, and the file is read
 /// whole.
 const MAX_FILE_BYTES: u64 = 1024 * 1024;

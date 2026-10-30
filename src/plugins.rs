@@ -1612,6 +1612,22 @@ pub(crate) fn merge_crate_manifest(
     }
 }
 
+/// The validated manifest of a crate's plugin, from its manifest sources: what
+/// [`validate_plugin`] makes of [`merge_crate_manifest`]'s output under
+/// [`PluginKind::Package`], minus resolving paths against a root. For callers
+/// that need to know what a crate's manifest *says* (its skill groups, with
+/// the default `skills/` group appended) without a package manager.
+pub(crate) fn package_manifest(
+    metadata: Option<toml::Table>,
+    file: Option<&str>,
+    crate_name: &str,
+) -> Result<PluginManifest> {
+    validate_manifest(
+        merge_crate_manifest(metadata, file, crate_name),
+        ManifestOrigin::Crate { crate_name },
+    )
+}
+
 /// Convert a raw manifest into a validated `PluginManifest`.
 ///
 /// User-declared `[[installations]]` come first in the resulting list, in

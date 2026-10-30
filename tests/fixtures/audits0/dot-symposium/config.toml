@@ -1,0 +1,9 @@
+hook-scope = "project"
+
+[defaults]
+symposium-recommendations = false
+user-plugins = true
+
+[[registry]]
+name = "company"
+path = "$TEST_DIR/company-audits"
