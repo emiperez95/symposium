@@ -2530,6 +2530,21 @@ mod tests {
         assert!(contents.plugins.is_empty());
     }
 
+    /// The registry's `audits/` directory is never scanned for plugins, so
+    /// `plugin validate` does not report (or choke on) what is in it.
+    #[test]
+    fn scan_source_dir_skips_the_audits_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        for file in ["audits/stray/SKILL.md", "audits/Symposium.toml"] {
+            let path = tmp.path().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "not a valid manifest or skill").unwrap();
+        }
+        let contents = scan_source_dir(tmp.path(), "").unwrap();
+        assert!(contents.plugins.is_empty());
+        assert!(validate_source_dir(tmp.path()).unwrap().is_empty());
+    }
+
     #[test]
     fn scan_source_dir_missing() {
         let contents = scan_source_dir("/nonexistent/path/abc123", "").unwrap();

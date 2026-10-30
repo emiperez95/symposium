@@ -108,6 +108,10 @@ impl PackageManager for GitPm {
         Ok(true)
     }
 
+    fn content_dir(&self) -> Option<std::path::PathBuf> {
+        self.inner.content_dir()
+    }
+
     fn registry_source(&self) -> Option<RegistrySource> {
         Some(RegistrySource::Git {
             url: self.git_url.clone(),

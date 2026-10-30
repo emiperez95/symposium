@@ -133,6 +133,14 @@ pub trait PackageManager {
         Ok(false)
     }
 
+    /// The local directory a registry instance's content is read from, once it
+    /// is on disk: a path registry's directory, a git registry's cache. It is
+    /// where files that are not plugins live, such as [`audits`](crate::audits).
+    /// `None` for the cargo transport.
+    fn content_dir(&self) -> Option<PathBuf> {
+        None
+    }
+
     /// How a registry instance's content is sourced, for `plugin list`
     /// display. `None` for the cargo transport, which is not a configured
     /// registry.
@@ -282,6 +290,24 @@ impl PmRegistry {
             Err(_) => id.name.clone(),
         };
         PackageId::any_version(&id.pm, name)
+    }
+
+    /// The audits of the trusted registries: every trust-root instance that
+    /// has a content directory, in order. Cheap to build; files are read when a
+    /// crate is looked up.
+    pub fn audit_index(&self) -> crate::audits::AuditIndex {
+        crate::audits::AuditIndex::new(
+            self.instances
+                .iter()
+                .filter(|inst| inst.trusted)
+                .filter_map(|inst| {
+                    Some(crate::audits::AuditSource {
+                        registry: inst.name.clone(),
+                        dir: inst.pm.content_dir()?,
+                    })
+                })
+                .collect(),
+        )
     }
 
     /// The identity of the package a user-typed `name` refers to. A plugin in
@@ -578,6 +604,38 @@ mod tests {
                 .unwrap_err();
             assert_eq!(err.to_string(), format!("no package named `{name}`"));
         }
+    }
+
+    /// The audit index covers the trust-root instances with a directory, in
+    /// order, and not the cargo transport.
+    #[test]
+    fn audit_index_is_built_from_trusted_registries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (cargo, _) = crate::test_utils::FakeCargo::instance(&[], &[]);
+        let registry = |name: &str, trusted: bool| PmInstance {
+            name: name.into(),
+            trusted,
+            kind: PluginKind::Registry,
+            pm: Box::new(PathPm::new(name, tmp.path().join(name))),
+        };
+        let pms = PmRegistry::new(vec![
+            cargo,
+            registry("first", true),
+            registry("untrusted", false),
+            registry("second", true),
+        ]);
+        let index = pms.audit_index();
+        std::fs::create_dir_all(tmp.path().join("second/audits")).unwrap();
+        std::fs::write(
+            tmp.path().join("second/audits/widget_lib.toml"),
+            "format = 1\ncrate = \"widget-lib\"\n[[revoked]]\nversions = \"*\"\nreason = \"report\"\n",
+        )
+        .unwrap();
+        let hit = index
+            .for_crate("widget-lib")
+            .revocation(Some(&semver::Version::new(1, 0, 0)), None)
+            .unwrap();
+        assert_eq!(hit.registry, "second");
     }
 
     #[tokio::test]

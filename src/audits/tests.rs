@@ -1,0 +1,211 @@
+use super::*;
+
+const A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+fn digest(s: &str) -> Digest {
+    s.parse().unwrap()
+}
+
+fn parse(text: &str) -> (Option<CrateAudits>, Vec<String>) {
+    parse_file("reg", "widget-lib", text)
+}
+
+fn write_audits(registry: &Path, file: &str, text: &str) {
+    std::fs::create_dir_all(registry.join("audits")).unwrap();
+    std::fs::write(registry.join("audits").join(file), text).unwrap();
+}
+
+#[test]
+fn file_name_is_lowercase_underscored_and_confined() {
+    assert_eq!(audit_file_name("widget-lib").unwrap(), "widget_lib.toml");
+    assert_eq!(audit_file_name("Widget_Lib").unwrap(), "widget_lib.toml");
+    for bad in ["", "../x", "a/b", "a.b", "a b"] {
+        assert_eq!(audit_file_name(bad), None, "{bad}");
+    }
+}
+
+#[test]
+fn a_well_formed_file_yields_audits_and_revocations() {
+    let (audits, warnings) = parse(&format!(
+        r#"
+format = 1
+crate = "widget-lib"
+
+[[audit]]
+digest = "{A}"
+versions = ["1.4.2"]
+
+[[revoked]]
+versions = ">=1.3.0, <1.4.2"
+reason = "remote-exec"
+
+[[revoked]]
+digest = "{B}"
+reason = "exfiltration"
+"#
+    ));
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let audits = audits.unwrap();
+    assert_eq!(audits.audited_by(&digest(A)), Some("reg"));
+    assert_eq!(audits.audited_by(&digest(B)), None);
+    assert!(audits.has_digest_revocation());
+
+    let v = |s: &str| semver::Version::parse(s).unwrap();
+    let hit = audits.revocation(Some(&v("1.3.5")), None).unwrap();
+    assert_eq!(hit.reason, RevokeReason::RemoteExec);
+    assert_eq!(hit.registry, "reg");
+    assert!(audits.revocation(Some(&v("1.4.2")), None).is_none());
+    assert_eq!(
+        audits.revocation(None, Some(&digest(B))).unwrap().reason,
+        RevokeReason::Exfiltration
+    );
+    // A version that is not semver (None) never matches a requirement.
+    assert!(audits.revocation(None, None).is_none());
+}
+
+#[test]
+fn an_unknown_format_ignores_the_whole_file_with_a_warning() {
+    let (audits, warnings) = parse(&format!(
+        "format = 2\ncrate = \"widget-lib\"\n[[audit]]\ndigest = \"{A}\"\n\
+         [[revoked]]\nversions = \"*\"\nreason = \"report\"\n"
+    ));
+    assert!(audits.is_none());
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("unsupported format 2"), "{warnings:?}");
+
+    let (audits, warnings) = parse("crate = \"widget-lib\"\n");
+    assert!(audits.is_none());
+    assert!(warnings[0].contains("(missing)"), "{warnings:?}");
+}
+
+#[test]
+fn malformed_entries_are_dropped_and_the_rest_kept() {
+    let (audits, warnings) = parse(&format!(
+        r#"
+format = 1
+crate = "widget-lib"
+
+[[audit]]
+digest = "not-a-digest"
+
+[[audit]]
+digest = "{A}"
+
+[[revoked]]
+versions = "not a requirement"
+
+[[revoked]]
+versions = "<1.0.0"
+digest = "{B}"
+
+[[revoked]]
+reason = "report"
+
+[[revoked]]
+digest = "sha256:short"
+
+[[revoked]]
+versions = "<2.0.0"
+reason = "advisory"
+"#
+    ));
+    let audits = audits.unwrap();
+    assert_eq!(warnings.len(), 5, "{warnings:?}");
+    assert_eq!(audits.audited.len(), 1);
+    assert_eq!(audits.revoked.len(), 1);
+    assert_eq!(audits.revoked[0].reason, RevokeReason::Advisory);
+}
+
+#[test]
+fn a_file_for_another_crate_is_ignored() {
+    let (audits, warnings) = parse("format = 1\ncrate = \"other\"\n");
+    assert!(audits.is_none());
+    assert!(warnings[0].contains("`crate` is not"), "{warnings:?}");
+    // Spelling differences within one crate are fine.
+    let (audits, _) = parse("format = 1\ncrate = \"Widget_Lib\"\n");
+    assert!(audits.unwrap().is_empty());
+}
+
+#[test]
+fn invalid_toml_is_ignored() {
+    let (audits, warnings) = parse("format = [");
+    assert!(audits.is_none());
+    assert!(warnings[0].contains("not valid TOML"), "{warnings:?}");
+}
+
+#[test]
+fn an_unknown_reason_is_kept_as_unknown() {
+    let (audits, _) = parse(
+        "format = 1\ncrate = \"widget-lib\"\n[[revoked]]\nversions = \"*\"\nreason = \"newer\"\n",
+    );
+    let hit = audits
+        .unwrap()
+        .revocation(Some(&semver::Version::new(1, 0, 0)), None)
+        .unwrap();
+    assert_eq!(hit.reason, RevokeReason::Unknown);
+}
+
+/// The lookup reads `audits/<name>.toml` from each source, merges them, and
+/// reports which registry an audit came from.
+#[test]
+fn the_index_merges_registries_and_names_the_matching_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let one = tmp.path().join("one");
+    let two = tmp.path().join("two");
+    write_audits(
+        &one,
+        "widget_lib.toml",
+        &format!("format = 1\ncrate = \"widget-lib\"\n[[audit]]\ndigest = \"{A}\"\n"),
+    );
+    write_audits(
+        &two,
+        "widget_lib.toml",
+        &format!(
+            "format = 1\ncrate = \"widget-lib\"\n[[audit]]\ndigest = \"{B}\"\n\
+             [[revoked]]\nversions = \"<1.0.0\"\nreason = \"report\"\n"
+        ),
+    );
+    let index = AuditIndex::new(vec![
+        AuditSource {
+            registry: "one".into(),
+            dir: one,
+        },
+        AuditSource {
+            registry: "two".into(),
+            dir: two,
+        },
+    ]);
+
+    assert_eq!(
+        index.audited_by("widget-lib", &digest(A)).as_deref(),
+        Some("one")
+    );
+    assert_eq!(
+        index.audited_by("widget_lib", &digest(B)).as_deref(),
+        Some("two")
+    );
+    assert_eq!(
+        index.audited_by("widget-lib", &digest(&format!("sha256:{}", "c".repeat(64)))),
+        None
+    );
+    assert_eq!(index.audited_by("other", &digest(A)), None);
+
+    let hit = index
+        .for_crate("widget-lib")
+        .revocation(Some(&semver::Version::new(0, 9, 0)), None)
+        .unwrap();
+    assert_eq!(hit.registry, "two");
+}
+
+/// A missing registry directory or audits directory is simply no audits.
+#[test]
+fn missing_files_are_no_audits() {
+    let tmp = tempfile::tempdir().unwrap();
+    let index = AuditIndex::new(vec![AuditSource {
+        registry: "gone".into(),
+        dir: tmp.path().join("nope"),
+    }]);
+    assert!(index.for_crate("widget-lib").is_empty());
+    assert!(AuditIndex::default().for_crate("widget-lib").is_empty());
+}

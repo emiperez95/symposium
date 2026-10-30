@@ -18,6 +18,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+/// The root-level directory of a registry that holds audits files (see
+/// [`crate::audits`]). Enumeration skips it.
+pub use symposium_sdk::audits::AUDITS_DIR;
+
 /// Plugin manifest filename that marks a directory as a plugin entry.
 pub const MANIFEST_FILE: &str = "Symposium.toml";
 
@@ -98,6 +102,11 @@ fn walk_in(
         if !path.is_dir() {
             continue;
         }
+        // A registry's `audits/` directory holds audits files, never plugins,
+        // so a stray `SKILL.md` or `Symposium.toml` in it is not an entry.
+        if rel.as_os_str().is_empty() && entry.file_name() == AUDITS_DIR {
+            continue;
+        }
         let sub = rel.join(entry.file_name());
         if classify(&path).is_some() {
             entries.push(RegistryEntry { subpath: sub });
@@ -157,6 +166,26 @@ mod tests {
         let entries = enumerate(tmp.path()).unwrap();
         let subpaths: Vec<_> = entries.iter().map(|e| e.subpath.clone()).collect();
         assert_eq!(subpaths, vec![PathBuf::from("group/deep/skill")]);
+    }
+
+    /// The root-level `audits/` directory holds audits files, so nothing in it
+    /// is an entry, however much it looks like one. Only the root's `audits/`
+    /// is reserved.
+    #[test]
+    fn flat_layout_skips_the_root_audits_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        touch(&tmp.path().join("audits/stray/SKILL.md"));
+        touch(&tmp.path().join("audits/Symposium.toml"));
+        touch(&tmp.path().join("audits/widget_lib.toml"));
+        touch(&tmp.path().join("real/SKILL.md"));
+        touch(&tmp.path().join("group/audits/nested/SKILL.md"));
+
+        let entries = enumerate(tmp.path()).unwrap();
+        let subpaths: Vec<_> = entries.iter().map(|e| e.subpath.clone()).collect();
+        assert_eq!(
+            subpaths,
+            vec![PathBuf::from("group/audits/nested"), PathBuf::from("real")]
+        );
     }
 
     #[test]
