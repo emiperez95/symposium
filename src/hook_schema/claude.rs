@@ -251,6 +251,36 @@ mod tests {
             Some(serde_json::json!({"command": "safe-cmd"}))
         );
     }
+
+    /// A reload request reaches Claude even with no context to carry it.
+    #[test]
+    fn session_start_reload_skills_without_context() {
+        let event = symposium::OutputEvent::SessionStart(
+            symposium::SessionStartOutput::default().with_reload_skills(true),
+        );
+        let output = ClaudeSessionStartOutput::from_symposium(&event);
+        assert_eq!(
+            output.to_hook_output(),
+            serde_json::json!({
+                "hookSpecificOutput": {"hookEventName": "SessionStart", "reloadSkills": true}
+            })
+        );
+        assert!(output.to_symposium().reload_skills());
+    }
+
+    /// Claude honors only a literal `true`.
+    #[test]
+    fn session_start_reload_skills_false_is_no_request() {
+        let output = ClaudeSessionStartOutput::parse_output(
+            br#"{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":false}}"#,
+        )
+        .unwrap();
+        assert!(!output.to_symposium().reload_skills());
+        let none = ClaudeSessionStartOutput::from_symposium(&symposium::OutputEvent::empty_for(
+            crate::hook_schema::HookEvent::SessionStart,
+        ));
+        assert_eq!(none.to_hook_output(), serde_json::json!({}));
+    }
 }
 
 // ── PostToolUse ───────────────────────────────────────────────────────
@@ -505,6 +535,11 @@ pub struct ClaudeSessionStartHookOutput {
     pub hook_event_name: String,
     #[serde(rename = "additionalContext", skip_serializing_if = "Option::is_none")]
     pub additional_context: Option<String>,
+    /// Claude Code discovers skills before `SessionStart` hooks finish and
+    /// rescans only when a hook answers a literal `true` here (ORed across
+    /// hooks), so skills installed by the hook need it to be seen this session.
+    #[serde(rename = "reloadSkills", skip_serializing_if = "Option::is_none")]
+    pub reload_skills: Option<bool>,
     #[serde(flatten)]
     pub rest: serde_json::Map<String, serde_json::Value>,
 }
@@ -557,17 +592,27 @@ impl AgentHookOutput for ClaudeSessionStartOutput {
         Ok(serde_json::from_slice(output)?)
     }
     fn from_symposium(event: &symposium::OutputEvent) -> Self {
-        match claude_hook_output_from_symposium("SessionStart", event) {
-            Some(v) => serde_json::from_value(v).unwrap_or_default(),
-            None => Self::default(),
+        let additional_context = event.additional_context().map(String::from);
+        let reload_skills = event.reload_skills().then_some(true);
+        if additional_context.is_none() && reload_skills.is_none() {
+            return Self::default();
+        }
+        Self {
+            hook_specific_output: Some(ClaudeSessionStartHookOutput {
+                hook_event_name: "SessionStart".into(),
+                additional_context,
+                reload_skills,
+                rest: Default::default(),
+            }),
+            ..Default::default()
         }
     }
     fn to_symposium(&self) -> symposium::OutputEvent {
-        symposium::OutputEvent::SessionStart(symposium::SessionStartOutput::new(
-            self.hook_specific_output
-                .as_ref()
-                .and_then(|h| h.additional_context.clone()),
-        ))
+        let specific = self.hook_specific_output.as_ref();
+        symposium::OutputEvent::SessionStart(
+            symposium::SessionStartOutput::new(specific.and_then(|h| h.additional_context.clone()))
+                .with_reload_skills(specific.and_then(|h| h.reload_skills) == Some(true)),
+        )
     }
     fn to_hook_output(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap()

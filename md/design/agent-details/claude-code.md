@@ -175,7 +175,7 @@ Symposium's `SessionStart` hook (auto-sync and context hints) answers in this sh
 
 Claude Code discovers skills **before** `SessionStart` hooks finish, so a skill a hook installs is not in the session's skill list. Its watcher covers only skill directories that existed at startup: a `.claude/skills/` the hook creates is never watched, and an existing one is picked up only a few seconds later.
 
-`reloadSkills: true` makes Claude rescan its skill directories once all `SessionStart` hooks complete. It is undocumented (read from the 2.1.300 and 2.1.305 binaries, verified against 2.1.308); only a literal `true` counts, and Claude ORs it across hooks. Symposium sets it after a successful auto-sync (see [`hook`](../hook-flow.md)).
+`reloadSkills: true` makes Claude rescan its skill directories once all `SessionStart` hooks complete. It is undocumented (read from the 2.1.300 and 2.1.305 binaries, verified against 2.1.308); only a literal `true` counts, and Claude ORs it across hooks. Symposium sets it after a successful auto-sync, and symposium-format plugin hooks can request it too (see [`hook`](../hook-flow.md)).
 
 ## Exit Codes
 

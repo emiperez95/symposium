@@ -278,8 +278,7 @@ pub async fn execute_hook(
         }
 
         // Builtin dispatch → symposium output → host agent output as Value
-        let builtin_sym_output =
-            dispatch_builtin(sym, &sym_input, &deps, auto_sync.dependencies_changed()).await;
+        let builtin_sym_output = dispatch_builtin(sym, &sym_input, &deps, auto_sync).await;
         let builtin_agent_output = handler.translate_output(&builtin_sym_output);
         let prior_output = builtin_agent_output.to_hook_output();
 
@@ -291,17 +290,12 @@ pub async fn execute_hook(
             &sym_input,
             payload.as_ref(),
             prior_output,
-            builtin_sym_output.additional_context().map(String::from),
+            &builtin_sym_output,
             &deps,
         )
         .await
         {
-            Ok(mut final_output) => {
-                if agent == HookAgent::Claude && session_start && auto_sync.synced() {
-                    request_claude_skill_reload(&mut final_output);
-                }
-                handler.respond(&final_output)
-            }
+            Ok(final_output) => handler.respond(&final_output),
             Err(stderr) => blocked_response(handler.as_ref(), event, &stderr),
         };
         tracing::trace!(
@@ -475,12 +469,12 @@ async fn run_auto_sync(
     }
 }
 
-/// What [`run_auto_sync`] did on this hook call. Two different signals are
-/// read from it: whether the dependencies changed (a notice that new plugins
-/// may be available) and whether a sync succeeded (on `SessionStart`, a request
-/// that Claude Code rescan its skill directories).
+/// What [`run_auto_sync`] did on this hook call. The builtin handlers read two
+/// different signals from it: whether the dependencies changed (a notice that
+/// new plugins may be available) and whether a sync succeeded (on
+/// `SessionStart`, a request that the agent rescan its skill directories).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AutoSync {
+pub enum AutoSync {
     /// Disabled, skipped by the `Cargo.lock` freshness gate, or failed. `sync`
     /// fails only before it installs anything (outside a Rust workspace), so
     /// this always means nothing changed on disk.
@@ -499,25 +493,6 @@ impl AutoSync {
     fn dependencies_changed(self) -> bool {
         self == AutoSync::SyncedAfterDependencyChange
     }
-}
-
-/// Ask Claude Code to rescan its skill directories once `SessionStart` hooks
-/// finish. Claude discovers skills before they do, so the skills this
-/// session's sync just installed would otherwise stay invisible for the
-/// session. Set on the final output, after every plugin hook has been merged
-/// in, so that no plugin answering `false` cancels it (Claude ORs the field
-/// across hooks). It is requested after every successful sync, since `sync`
-/// does not report whether skills changed; a failed sync installed nothing.
-fn request_claude_skill_reload(output: &mut serde_json::Value) {
-    if !output.is_object() {
-        *output = serde_json::json!({});
-    }
-    let specific = &mut output["hookSpecificOutput"];
-    if !specific.is_object() {
-        *specific = serde_json::json!({});
-    }
-    specific["hookEventName"] = "SessionStart".into();
-    specific["reloadSkills"] = true.into();
 }
 
 /// Whether the hook pipeline must resolve the workspace crate graph before
@@ -609,8 +584,9 @@ pub async fn dispatch_builtin(
     sym: &Symposium,
     input: &symposium::InputEvent,
     deps: &Arc<WorkspaceDeps>,
-    notify_about_possible_new_plugins: bool,
+    auto_sync: AutoSync,
 ) -> symposium::OutputEvent {
+    let notify_about_possible_new_plugins = auto_sync.dependencies_changed();
     match input {
         symposium::InputEvent::PreToolUse(_) => {
             symposium::OutputEvent::empty_for(HookEvent::PreToolUse)
@@ -622,7 +598,7 @@ pub async fn dispatch_builtin(
             handle_user_prompt_submit(sym, prompt, notify_about_possible_new_plugins).await
         }
         symposium::InputEvent::SessionStart(session) => {
-            handle_session_start(sym, session, deps).await
+            handle_session_start(sym, session, deps, auto_sync).await
         }
         _ => symposium::OutputEvent::empty_for(HookEvent::PreToolUse),
     }
@@ -631,10 +607,17 @@ pub async fn dispatch_builtin(
 /// Handle SessionStart: orient the agent toward crate-aware tooling and, when due, nudge the
 /// user to update. The two fragments are computed independently -- the discovery hint is never gated
 /// behind the update-check throttle -- then joined into a single context block.
+///
+/// After a successful auto-sync it also asks the agent to rescan its skill directories: Claude Code
+/// discovers skills before `SessionStart` hooks finish, so the skills this sync just installed would
+/// otherwise stay invisible for the session. It asks unconditionally rather than only when skills
+/// changed, since `sync` does not report what it changed. A failed sync installed nothing, and with
+/// global hooks it fails at every session start outside a Rust workspace, so it requests nothing.
 async fn handle_session_start(
     sym: &Symposium,
     _payload: &SessionStartInput,
     deps: &Arc<WorkspaceDeps>,
+    auto_sync: AutoSync,
 ) -> OutputEvent {
     let fragments = [
         discovery_hint(sym, deps).await,
@@ -645,11 +628,10 @@ async fn handle_session_start(
     .flatten()
     .collect::<Vec<String>>();
 
-    if fragments.is_empty() {
-        OutputEvent::empty_for(HookEvent::SessionStart)
-    } else {
-        OutputEvent::with_context(HookEvent::SessionStart, fragments.join("\n\n"))
-    }
+    let context = (!fragments.is_empty()).then(|| fragments.join("\n\n"));
+    OutputEvent::SessionStart(
+        symposium::SessionStartOutput::new(context).with_reload_skills(auto_sync.synced()),
+    )
 }
 
 /// Suggest `cargo agents --help` when the active workspace exposes crate-aware plugin subcommands.
@@ -768,8 +750,9 @@ pub enum PluginHookOutput {
 /// Accumulates output as `serde_json::Value` in the host agent's wire format.
 /// When a plugin's format matches the host agent, input/output pass through directly.
 /// When formats differ, conversion goes through symposium canonical types.
-/// `prior_context` is the context already in `prior_output`; every hook's
-/// context is added to it (see [`JoinedContext`]).
+/// `prior` is the canonical output `prior_output` was translated from: every
+/// hook's context is added to its context (see [`JoinedContext`]), and its
+/// skill-reload request survives every hook (see [`SkillReload`]).
 ///
 /// Returns `Ok(json)` on success, `Err(stderr)` on exit code 2.
 #[allow(clippy::too_many_arguments)]
@@ -780,7 +763,7 @@ pub async fn dispatch_plugin_hooks(
     sym_input: &symposium::InputEvent,
     original_input: &dyn AgentHookInput,
     prior_output: serde_json::Value,
-    prior_context: Option<String>,
+    prior: &symposium::OutputEvent,
     deps: &Arc<WorkspaceDeps>,
 ) -> Result<serde_json::Value, Vec<u8>> {
     let workspace = deps.load().cloned();
@@ -815,7 +798,8 @@ pub async fn dispatch_plugin_hooks(
     let hooks = dispatched_hooks_for_payload(&plugins, sym_input, host_agent, &mut ctx);
 
     let mut output = prior_output;
-    let mut context = JoinedContext::new(event, prior_context);
+    let mut context = JoinedContext::new(event, prior.additional_context().map(String::from));
+    let mut reload = SkillReload::new(event, prior);
 
     for hook in hooks {
         tracing::info!(
@@ -924,6 +908,7 @@ pub async fn dispatch_plugin_hooks(
                             return Ok(output);
                         }
                         context.add(hook_output.as_ref(), &mut output, host_h.as_ref());
+                        reload.add(hook_output.as_ref(), &mut output, host_h.as_ref());
                     }
                     Some(code) => {
                         tracing::warn!(
@@ -992,6 +977,48 @@ impl JoinedContext {
         if let Some(text) = &self.text {
             let joined = OutputEvent::with_context(self.event, text.clone());
             merge(output, handler.translate_output(&joined).to_hook_output());
+        }
+    }
+}
+
+/// Whether some source of one `SessionStart` invocation (the builtin output or
+/// any plugin hook) asked the agent to rescan its skill directories. Claude
+/// Code ORs the request across hooks, so once made it is written back after
+/// every later hook, whose output [`merge`] would otherwise let cancel it.
+/// Inert on every other event, whatever a hook prints.
+struct SkillReload {
+    event: HookEvent,
+    requested: bool,
+}
+
+impl SkillReload {
+    fn new(event: HookEvent, prior: &symposium::OutputEvent) -> Self {
+        Self {
+            event,
+            requested: prior.reload_skills(),
+        }
+    }
+
+    fn add(
+        &mut self,
+        hook_output: Option<&symposium::OutputEvent>,
+        output: &mut serde_json::Value,
+        handler: &dyn crate::hook_schema::ErasedAgentHookEvent,
+    ) {
+        if self.event != HookEvent::SessionStart {
+            return;
+        }
+        self.requested |= hook_output.is_some_and(symposium::OutputEvent::reload_skills);
+        if !self.requested {
+            return;
+        }
+        let request = handler.translate_output(&OutputEvent::SessionStart(
+            symposium::SessionStartOutput::default().with_reload_skills(true),
+        ));
+        // An agent whose output cannot carry the request translates it to
+        // nothing useful, and merging that could clear fields it does carry.
+        if request.to_symposium().reload_skills() {
+            merge(output, request.to_hook_output());
         }
     }
 }
@@ -1259,7 +1286,7 @@ mod tests {
             None,
             None,
         ));
-        let output = dispatch_builtin(&sym, &input, &deps, false).await;
+        let output = dispatch_builtin(&sym, &input, &deps, AutoSync::NotRun).await;
         assert!(output.additional_context().is_none());
     }
 
@@ -1275,7 +1302,7 @@ mod tests {
             Some("test-session".to_string()),
             Some("/tmp".to_string()),
         ));
-        let output = dispatch_builtin(&sym, &input, &deps, false).await;
+        let output = dispatch_builtin(&sym, &input, &deps, AutoSync::NotRun).await;
         assert!(output.additional_context().is_none());
     }
 
@@ -1289,7 +1316,7 @@ mod tests {
             Some("test-session".to_string()),
             Some("/tmp".to_string()),
         ));
-        let output = dispatch_builtin(&sym, &input, &deps, false).await;
+        let output = dispatch_builtin(&sym, &input, &deps, AutoSync::NotRun).await;
         assert!(output.additional_context().is_none());
     }
 

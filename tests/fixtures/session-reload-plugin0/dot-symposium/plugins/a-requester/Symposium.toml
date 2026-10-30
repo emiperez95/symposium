@@ -1,0 +1,9 @@
+name = "a-requester"
+depends-on = ["*"]
+
+# Runs first and asks for a skill reload in the symposium format.
+[[hooks]]
+name = "session"
+event = "SessionStart"
+format = "symposium"
+command = { script = "$TEST_DIR/dot-symposium/plugins/a-requester/scripts/session.sh" }

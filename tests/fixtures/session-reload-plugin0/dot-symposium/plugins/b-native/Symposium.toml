@@ -1,0 +1,10 @@
+name = "b-native"
+depends-on = ["*"]
+
+# Runs after `a-requester` and answers `reloadSkills: false` in Claude's own
+# format, which must not cancel the earlier request.
+[[hooks]]
+name = "session"
+event = "SessionStart"
+format = "claude"
+command = { script = "$TEST_DIR/dot-symposium/plugins/b-native/scripts/session.sh" }

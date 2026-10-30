@@ -209,6 +209,7 @@ Tool input is the agent's own: write `updatedInput` in the shape that agent's to
 | Field | Type | Description |
 |-------|------|-------------|
 | `additionalContext` | string or null | Text injected into the agent's context at session start. |
+| `reloadSkills` | boolean (default `false`) | Ask the agent to rescan its skill directories once `SessionStart` hooks finish, so skills installed during the hook are visible in the same session. Only Claude Code honors it; other agents ignore it. Symposium already requests it after its own auto-sync. |
 
 ### `Stop` output
 

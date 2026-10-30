@@ -2,9 +2,11 @@
 //! that symposium's `SessionStart` auto-sync installs stays invisible to the
 //! session unless the hook answers `hookSpecificOutput.reloadSkills: true`.
 //!
-//! `native` is a Claude-format plugin hook that answers `reloadSkills: false`;
-//! `portable` is a symposium-format one that says nothing about reloading.
-//! Neither may cancel symposium's request.
+//! In `session-reload0`, `native` is a Claude-format plugin hook that answers
+//! `reloadSkills: false` and `portable` is a symposium-format one that says
+//! nothing about reloading. Neither may cancel symposium's request. In
+//! `session-reload-plugin0`, a symposium-format plugin asks for the reload
+//! itself and a later Claude-format one answers `false`.
 
 use serde_json::Value;
 use symposium::config::AgentEntry;
@@ -12,6 +14,7 @@ use symposium::hook_schema::{HookAgent, agent_event};
 use symposium_testlib::{HookStep, TestContext, TestMode, with_fixture};
 
 const FIXTURES: &[&str] = &["plugins0", "workspace0", "session-reload0"];
+const PLUGIN_FIXTURES: &[&str] = &["plugins0", "workspace0", "session-reload-plugin0"];
 /// No `Cargo.toml` anywhere: the session starts outside a Rust workspace.
 const OUTSIDE_FIXTURES: &[&str] = &["plugins0", "session-reload0"];
 
@@ -101,6 +104,31 @@ async fn claude_session_start_skips_reload_outside_a_rust_workspace() {
             let output: Value = serde_json::from_str(&stdout).unwrap();
             assert_ne!(
                 output["hookSpecificOutput"]["reloadSkills"], true,
+                "{stdout}"
+            );
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// A plugin can ask for the reload itself, and a later hook answering `false`
+/// does not cancel it, with no request from symposium's own auto-sync.
+#[tokio::test(flavor = "multi_thread")]
+async fn plugin_requested_reload_reaches_claude() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        PLUGIN_FIXTURES,
+        async |mut ctx| {
+            ctx.sym.config.auto_sync = false;
+            let (specific, stdout) = claude_specific(&ctx).await;
+            assert_eq!(specific["reloadSkills"], true, "{stdout}");
+            assert!(
+                specific["additionalContext"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("requester plugin context"),
                 "{stdout}"
             );
             Ok(())

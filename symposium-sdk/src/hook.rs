@@ -340,6 +340,12 @@ impl Output {
             Output::Stop(o) => o.additional_context.as_deref(),
         }
     }
+
+    /// Whether this output asks the agent to rescan its skill directories.
+    /// Only `SessionStart` carries the request.
+    pub fn reload_skills(&self) -> bool {
+        matches!(self, Output::SessionStart(o) if o.reload_skills)
+    }
 }
 
 /// Output for a `PreToolUse` event.
@@ -478,17 +484,37 @@ pub struct SessionStartOutput {
         skip_serializing_if = "Option::is_none"
     )]
     pub additional_context: Option<String>,
+    /// Ask the agent to rescan its skill directories once `SessionStart`
+    /// hooks finish, so skills installed during the hook are visible in the
+    /// same session. Only agents with such a rescan honor it (Claude Code).
+    #[serde(
+        rename = "reloadSkills",
+        default,
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub reload_skills: bool,
 }
 
 impl SessionStartOutput {
-    /// Create an output with all fields specified.
+    /// Create an output that injects `additional_context` and requests no
+    /// skill reload; see [`Self::with_reload_skills`].
     pub fn new(additional_context: Option<String>) -> Self {
-        Self { additional_context }
+        Self {
+            additional_context,
+            reload_skills: false,
+        }
     }
 
     /// Create an output that injects additional context.
     pub fn context(text: impl Into<String>) -> Self {
         Self::new(Some(text.into()))
+    }
+
+    /// Set whether the agent should rescan its skill directories after
+    /// `SessionStart` hooks finish.
+    pub fn with_reload_skills(mut self, reload_skills: bool) -> Self {
+        self.reload_skills = reload_skills;
+        self
     }
 }
 
@@ -641,7 +667,27 @@ fn is_empty_output(output: &Output) -> bool {
         Output::PreToolUse(o) => o.additional_context.is_none() && o.updated_input.is_none(),
         Output::PostToolUse(o) => o.additional_context.is_none(),
         Output::UserPromptSubmit(o) => o.additional_context.is_none(),
-        Output::SessionStart(o) => o.additional_context.is_none(),
+        Output::SessionStart(o) => o.additional_context.is_none() && !o.reload_skills,
         Output::Stop(o) => o.additional_context.is_none(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_start_reload_skills_serde() {
+        let plain = Output::SessionStart(SessionStartOutput::context("hi"));
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap(),
+            serde_json::json!({"SessionStart": {"additionalContext": "hi"}})
+        );
+
+        let reload: Output =
+            serde_json::from_str(r#"{"SessionStart":{"reloadSkills":true}}"#).unwrap();
+        assert!(reload.reload_skills());
+        assert!(!is_empty_output(&reload));
+        assert!(!plain.reload_skills());
     }
 }
