@@ -1101,6 +1101,21 @@ mod tests {
     }
 
     #[test]
+    fn has_enablement_entries_counts_auto_accept_all_alone() {
+        for (mode, expected) in [
+            (AutoAccept::None, false),
+            (AutoAccept::Audit, false),
+            (AutoAccept::All, true),
+        ] {
+            let plugins = PluginsConfig {
+                auto_accept: mode,
+                ..PluginsConfig::default()
+            };
+            assert_eq!(plugins.has_enablement_entries(), expected, "{mode:?}");
+        }
+    }
+
+    #[test]
     fn parse_auto_accept_values_and_default_is_omitted() {
         assert_eq!(parse_config("").plugins.auto_accept, AutoAccept::Audit);
         for (value, expected) in [
