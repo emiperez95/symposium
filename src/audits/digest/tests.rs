@@ -277,7 +277,91 @@ fn an_unusable_manifest_or_root_is_ineligible() {
 #[cfg(unix)]
 mod symlinks {
     use super::*;
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    /// Permission tests mean nothing as root, which reads everything.
+    fn running_as_root(tmp: &Path) -> bool {
+        let probe = tmp.join("probe");
+        std::fs::create_dir(&probe).unwrap();
+        std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let readable = std::fs::read_dir(&probe).is_ok();
+        std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o700)).unwrap();
+        readable
+    }
+
+    #[test]
+    fn a_dangling_group_directory_is_ineligible_not_missing() {
+        let tmp = tmp_fixture();
+        symlink("nowhere", tmp.path().join("extra-link")).unwrap();
+        write(
+            tmp.path(),
+            "Symposium.toml",
+            b"name = \"golden\"\n[[skills]]\nsource.path = \"extra-link\"\n",
+        );
+        assert_eq!(
+            payload_digest(tmp.path()).unwrap_err(),
+            Ineligible::BrokenLink("extra-link".into())
+        );
+    }
+
+    #[test]
+    fn a_dangling_manifest_link_is_ineligible_not_absent() {
+        let tmp = tmp_fixture();
+        std::fs::remove_file(tmp.path().join("Symposium.toml")).unwrap();
+        symlink("nowhere", tmp.path().join("Symposium.toml")).unwrap();
+        assert_eq!(
+            payload_digest(tmp.path()).unwrap_err(),
+            Ineligible::BrokenLink("Symposium.toml".into())
+        );
+    }
+
+    #[test]
+    fn an_unreadable_manifest_is_ineligible() {
+        let tmp = tmp_fixture();
+        if running_as_root(tmp.path()) {
+            return;
+        }
+        for file in ["Symposium.toml", "Cargo.toml"] {
+            let path = tmp.path().join(file);
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let err = payload_digest(tmp.path()).unwrap_err();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(
+                matches!(err, Ineligible::Unreadable(_) | Ineligible::Manifest(_)),
+                "{file}: {err:?}"
+            );
+        }
+        assert!(payload_digest(tmp.path()).is_ok());
+    }
+
+    #[test]
+    fn an_unreadable_skill_directory_is_ineligible() {
+        let tmp = tmp_fixture();
+        if running_as_root(tmp.path()) {
+            return;
+        }
+        // Unlistable group directory, and an unlistable directory inside one.
+        for dir in ["skills", "skills/two/scripts"] {
+            let path = tmp.path().join(dir);
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let err = payload_digest(tmp.path()).unwrap_err();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(matches!(err, Ineligible::Unreadable(_)), "{dir}: {err:?}");
+        }
+        assert_eq!(digest_of(tmp.path()), GOLDEN);
+    }
+
+    #[test]
+    fn a_broken_link_beside_the_skills_is_ineligible() {
+        // Discovery ignores it, but it could be repointed at a directory of
+        // skills the digest never saw.
+        let tmp = tmp_fixture();
+        symlink("nowhere", tmp.path().join("skills/maybe-skills")).unwrap();
+        assert!(matches!(
+            payload_digest(tmp.path()).unwrap_err(),
+            Ineligible::BrokenLink(_)
+        ));
+    }
 
     #[test]
     fn a_broken_symlink_is_ineligible() {
@@ -295,7 +379,7 @@ mod symlinks {
         symlink("..", tmp.path().join("skills/two/back")).unwrap();
         assert_eq!(
             payload_digest(tmp.path()).unwrap_err(),
-            Ineligible::LinkLoop("skills/two/back/two".into())
+            Ineligible::LinkLoop("skills/two/back".into())
         );
     }
 

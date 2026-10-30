@@ -40,7 +40,9 @@
 //! can change under the same crate release), a skill path that leaves the
 //! crate, a broken symlink or a directory loop in a skill directory, an entry
 //! that is neither file nor directory, or more than [`MAX_PAYLOAD_BYTES`] of
-//! content.
+//! content. Any I/O error other than a plain "not there" (permissions, a
+//! dangling link where a manifest or group directory should be) is likewise
+//! ineligible: it is never read as absence.
 //!
 //! Directory traversal follows symlinks and refuses loops through
 //! [`crate::dir_walk`], like every other source-tree walk.
@@ -136,7 +138,7 @@ fn payload_entries(root: &Path) -> Result<BTreeMap<String, Vec<u8>>, Ineligible>
 
     // 1. The manifest file, raw.
     let manifest_path = root.join(crate::pm::layout::MANIFEST_FILE);
-    let manifest_text = if manifest_path.is_file() {
+    let manifest_text = if stat_file(&manifest_path, MANIFEST_ENTRY)?.is_some() {
         let bytes = payload.read(&manifest_path)?;
         let text = String::from_utf8(bytes.clone())
             .map_err(|_| Ineligible::Manifest("Symposium.toml is not UTF-8".into()))?;
@@ -148,7 +150,7 @@ fn payload_entries(root: &Path) -> Result<BTreeMap<String, Vec<u8>>, Ineligible>
 
     // 2. The metadata table, canonicalized.
     let cargo_toml = root.join("Cargo.toml");
-    let metadata = if cargo_toml.is_file() {
+    let metadata = if stat_file(&cargo_toml, "Cargo.toml")?.is_some() {
         crate::crate_metadata::symposium_metadata(&cargo_toml)
             .map_err(|e| Ineligible::Manifest(format!("{e:#}")))?
     } else {
@@ -172,23 +174,99 @@ fn payload_entries(root: &Path) -> Result<BTreeMap<String, Vec<u8>>, Ineligible>
             PluginSource::Git(url) => return Err(Ineligible::GitSkillSource(url.clone())),
             PluginSource::Path(rel) => rel,
         };
-        // A group directory that does not exist contributes nothing.
-        let Ok(group_dir) = root.join(rel).canonicalize() else {
-            continue;
+        // A group directory that does not exist contributes nothing; one that
+        // exists but cannot be resolved (a dangling link, an I/O error) does
+        // not get to pass as missing.
+        let joined = root.join(rel);
+        let group_dir = match joined.canonicalize() {
+            Ok(dir) => dir,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                match std::fs::symlink_metadata(&joined) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                    Ok(_) => return Err(Ineligible::BrokenLink(rel.display().to_string())),
+                    Err(e) => {
+                        return Err(Ineligible::Unreadable(format!("{}: {e}", joined.display())));
+                    }
+                }
+            }
+            Err(e) => return Err(Ineligible::Unreadable(format!("{}: {e}", joined.display()))),
         };
         if !group_dir.starts_with(&canonical_root) {
             return Err(Ineligible::EscapesCrate(rel.display().to_string()));
         }
-        let mut skill_files = Vec::new();
-        crate::skills::find_skill_files_recursive(&group_dir, &mut skill_files);
-        for skill_md in skill_files {
-            let Some(skill_dir) = skill_md.parent() else {
-                continue;
-            };
-            payload.add_tree(&canonical_root, skill_dir)?;
+        if !group_dir.is_dir() {
+            continue;
+        }
+        let mut skill_dirs = Vec::new();
+        let mut ancestors = Ancestors::rooted_at(&group_dir);
+        find_skill_dirs(&canonical_root, &group_dir, &mut ancestors, &mut skill_dirs)?;
+        for skill_dir in skill_dirs {
+            payload.add_tree(&canonical_root, &skill_dir)?;
         }
     }
     Ok(payload.entries)
+}
+
+/// Stat a manifest file at the crate root: `None` when it is truly absent,
+/// an error when it exists but is not a readable regular file or when the
+/// answer is anything but "not there" (a dangling link is not absence).
+fn stat_file(path: &Path, name: &str) -> Result<Option<std::fs::Metadata>, Ineligible> {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_file() => Ok(Some(meta)),
+        Ok(_) => Err(Ineligible::Unsupported(name.to_string())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            match std::fs::symlink_metadata(path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Ok(_) => Err(Ineligible::BrokenLink(name.to_string())),
+                Err(e) => Err(Ineligible::Unreadable(format!("{name}: {e}"))),
+            }
+        }
+        Err(e) => Err(Ineligible::Unreadable(format!("{name}: {e}"))),
+    }
+}
+
+/// The skill directories under `dir` (those holding a `SKILL.md`): the same
+/// discovery as `skills::find_skill_files_recursive`, except that it reports
+/// what that walk swallows. A directory that cannot be listed, a link that
+/// points nowhere or back into the walk, would each hide skill content that
+/// the digest must cover, so none of them may pass as "no skills here".
+fn find_skill_dirs(
+    root: &Path,
+    dir: &Path,
+    ancestors: &mut Ancestors,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), Ineligible> {
+    let unreadable = |e: std::io::Error| Ineligible::Unreadable(format!("{}: {e}", dir.display()));
+    let shown = |p: &Path| p.strip_prefix(root).unwrap_or(p).display().to_string();
+    // An installed copy (carries symposium's marker) is never a source.
+    if dir
+        .join(crate::sync::MARKER_FILE)
+        .try_exists()
+        .map_err(unreadable)?
+    {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir).map_err(unreadable)? {
+        let entry = entry.map_err(unreadable)?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(unreadable)?;
+        match resolved_kind(&path, file_type) {
+            Err(_) => return Err(Ineligible::BrokenLink(shown(&path))),
+            Ok(Some(EntryKind::Dir)) => {
+                if !ancestors.enter(&path) {
+                    return Err(Ineligible::LinkLoop(shown(&path)));
+                }
+                let result = find_skill_dirs(root, &path, ancestors, out);
+                ancestors.leave();
+                result?;
+            }
+            Ok(Some(EntryKind::File)) if entry.file_name() == "SKILL.md" => {
+                out.push(dir.to_path_buf());
+            }
+            Ok(_) => {}
+        }
+    }
+    Ok(())
 }
 
 /// Entries gathered so far, with the running content size.
