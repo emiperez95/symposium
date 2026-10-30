@@ -4,12 +4,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.first().map(|s| s.as_str()) {
+    let mut args = std::env::args().skip(1);
+    match args.next().as_deref() {
+        Some("agent-eval") => symposium_eval::run(args),
         Some("md-orphan-check") => md_orphan_check(),
         Some(cmd) => bail!("unknown xtask command: {cmd}"),
         None => bail!(
-            "usage: cargo xtask <command>\n\ncommands:\n  md-orphan-check    Check for .md files not referenced in SUMMARY.md"
+            "usage: cargo xtask <command>\n\ncommands:\n  agent-eval         Evaluate agent tasks with and without Symposium\n  md-orphan-check    Check for .md files not referenced in SUMMARY.md"
         ),
     }
 }

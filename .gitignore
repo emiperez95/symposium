@@ -53,3 +53,7 @@ dist/
 WIP.md
 retcon-spec.toml
 test-agents.toml
+
+# Retained agent evaluation batches (cargo xtask agent-eval)
+/results/
+/research/*
