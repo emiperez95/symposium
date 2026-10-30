@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::task::{FixtureName, NameError, PluginName, TaskName};
+use crate::task::{CheckName, FixtureName, NameError, PluginName, TaskName};
 
 #[derive(Debug, Clone)]
 pub(crate) struct Evals {
@@ -59,6 +59,20 @@ impl Evals {
 
     pub(crate) fn task_dir(&self, name: &TaskName) -> PathBuf {
         self.tasks_dir().join(name.as_str())
+    }
+
+    pub(crate) fn starter_dir(&self, name: &TaskName) -> PathBuf {
+        self.task_dir(name).join("starter")
+    }
+
+    pub(crate) fn check_file(&self, name: &TaskName, check: &CheckName) -> PathBuf {
+        self.task_dir(name)
+            .join("checks")
+            .join(format!("{check}.rs"))
+    }
+
+    pub(crate) fn solution_dir(&self, name: &TaskName) -> PathBuf {
+        self.task_dir(name).join("solution")
     }
 
     pub(crate) fn plugin_dir(&self, name: &PluginName) -> PathBuf {
