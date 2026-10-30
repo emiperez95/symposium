@@ -79,14 +79,13 @@ async fn lookup_names_the_registry_whose_audit_matched() {
         let deps = ctx.sym.workspace_deps(ctx.workspace_root.as_ref().unwrap());
         let index = ctx.sym.package_managers(&deps).audit_index();
         assert_eq!(
-            index.for_crate("crate-d").audited_by(&digest).as_deref(),
+            index.for_crate("crate-d").audited_by(&digest),
             Some("company")
         );
         assert_eq!(
             index
                 .for_crate("crate_d")
-                .audited_by(&other.parse().unwrap())
-                .as_deref(),
+                .audited_by(&other.parse().unwrap()),
             Some("user-plugins")
         );
         let unknown = "sha256:".to_string() + &"1".repeat(64);

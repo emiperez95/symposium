@@ -199,17 +199,11 @@ fn the_index_merges_registries_and_names_the_matching_one() {
     ]);
 
     assert_eq!(
-        index
-            .for_crate("widget-lib")
-            .audited_by(&digest(A))
-            .as_deref(),
+        index.for_crate("widget-lib").audited_by(&digest(A)),
         Some("one")
     );
     assert_eq!(
-        index
-            .for_crate("widget_lib")
-            .audited_by(&digest(B))
-            .as_deref(),
+        index.for_crate("widget_lib").audited_by(&digest(B)),
         Some("two")
     );
     assert_eq!(
