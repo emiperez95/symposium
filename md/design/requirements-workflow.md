@@ -55,4 +55,4 @@ Upstream Habeas also requires every Rust function in the repository to cite a re
 - `habeas status` and `habeas info` still print the uncited-function findings for every file. Ignore them outside the allowlist.
 - Habeas's agent skills (offered by `cargo agents sync` once the `habeas` dev-dependency's plugin is enabled) assume the full rule. In this repo, only cite every function in a file you are adding to `FUNCTION_RULE_FILES`.
 
-The filter in `tests/habeas.rs` matches Habeas's error messages, which is why `habeas` is pinned to an exact version. Check the filter still works when upgrading: with an empty allowlist the test must pass, and a deliberately uncited function in an allowlisted file must fail it.
+The filter in `tests/habeas.rs` matches Habeas's error messages, which is why `habeas` is pinned to an exact version. Two checks guard it across upgrades: the `habeas` test fails if no error matches the filter at all, and `function_rule_file_parses_habeas_errors` pins the exact error shapes (including Windows `\` paths). When upgrading, update those sample errors from the new version's source.
