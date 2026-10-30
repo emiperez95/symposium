@@ -158,13 +158,6 @@ impl AuditIndex {
         self.sources.iter().any(|s| s.dir.join(AUDITS_DIR).is_dir())
     }
 
-    /// Does any registry audit (not merely revoke) `crate_name`? Reads only
-    /// that crate's file, so callers use it to avoid hashing a payload nobody
-    /// audited.
-    pub fn has_audits(&self, crate_name: &str) -> bool {
-        !self.for_crate(crate_name).audited.is_empty()
-    }
-
     /// Whether the registries audited the payload at `root`, the content of
     /// the cargo-sourced package `id`. The payload is hashed only when the
     /// crate has an audits file with an `[[audit]]` entry. A package of
@@ -175,8 +168,15 @@ impl AuditIndex {
         if id.pm != CARGO_PM {
             return AuditLookup::Unaudited;
         }
-        let audits = self.for_crate(&id.name);
-        if audits.audited.is_empty() {
+        self.lookup_in(&self.for_crate(&id.name), id, root)
+    }
+
+    /// [`lookup`](Self::lookup) against `audits`, which must be
+    /// `self.for_crate(&id.name)`: for a caller that already read the crate's
+    /// files (to decide whether a lookup is worth a fetch) and should not
+    /// read and parse them again.
+    pub fn lookup_in(&self, audits: &CrateAudits, id: &PackageId, root: &Path) -> AuditLookup {
+        if id.pm != CARGO_PM || audits.audited.is_empty() {
             return AuditLookup::Unaudited;
         }
         match self.digest_of(id, root) {
@@ -246,6 +246,11 @@ impl CrateAudits {
     fn merge(&mut self, other: CrateAudits) {
         self.audited.extend(other.audited);
         self.revoked.extend(other.revoked);
+    }
+
+    /// Does any registry audit (not merely revoke) the crate?
+    pub fn has_audits(&self) -> bool {
+        !self.audited.is_empty()
     }
 
     /// No audits and no revocations.

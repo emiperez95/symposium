@@ -312,7 +312,7 @@ fn lookup_distinguishes_audited_differing_and_unaudited() {
         &format!("format = 1\ncrate = \"widget-lib\"\n[[audit]]\ndigest = \"{payload}\"\n"),
     );
     assert!(index.any_audits_dir());
-    assert!(index.has_audits("widget_lib"));
+    assert!(index.for_crate("widget_lib").has_audits());
     assert_eq!(
         index.lookup(&id, &crate_dir),
         AuditLookup::Audited("reg".into())

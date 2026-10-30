@@ -270,7 +270,11 @@ async fn is_audited_dependency(
     audits: &AuditIndex,
     id: &PackageId,
 ) -> bool {
-    if sym.config.plugins.auto_accept != AutoAccept::Audit || !audits.has_audits(&id.name) {
+    if sym.config.plugins.auto_accept != AutoAccept::Audit {
+        return false;
+    }
+    let crate_audits = audits.for_crate(&id.name);
+    if !crate_audits.has_audits() {
         return false;
     }
     // Fetched by name, as loading will: the workspace pin (or path override)
@@ -280,7 +284,7 @@ async fn is_audited_dependency(
         return false;
     };
     matches!(
-        audits.lookup(&fetched.id, &fetched.root),
+        audits.lookup_in(&crate_audits, &fetched.id, &fetched.root),
         AuditLookup::Audited(_)
     )
 }
