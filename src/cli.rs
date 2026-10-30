@@ -338,12 +338,14 @@ pub async fn run(
                 code => bail!("subcommand exited with status: {code}"),
             }
         }
-        // These commands can't easily be extracted since they do I/O
-        // (stdin/stdout for hooks). The binary handles them directly.
+        // `plugin digest` is library code (it only reports), so the test
+        // harness exercises the same path as the binary.
         Commands::Plugin {
             command: PluginCommand::Digest { target },
         } => crate::audits::digest_command::run(sym, cwd, &target).await,
 
+        // These commands can't easily be extracted since they do I/O
+        // (stdin/stdout for hooks). The binary handles them directly.
         Commands::Hook { .. } | Commands::Plugin { .. } => {
             anyhow::bail!("command not supported in library dispatch (use binary)")
         }
