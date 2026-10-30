@@ -154,30 +154,6 @@
       ]
     },
     {
-      "file": "src/init.rs",
-      "line_end": 83,
-      "line_start": 83,
-      "text": [
-        "    let should_prompt = !cli_driven && interactive(out);"
-      ]
-    },
-    {
-      "file": "src/bin/cargo-agents.rs",
-      "line_end": 120,
-      "line_start": 112,
-      "text": [
-        "    // {impl}`design.requirements.hooks.no_prompt`",
-        "    // {impl}`design.requirements.hooks.stdout_protocol`",
-        "    // Hook commands are quiet by default (they're invoked by the agent, not the user).",
-        "    // JSON mode also suppresses human output (only JSON goes to stdout).",
-        "    let out = if cli.quiet || is_hook || cli.json {",
-        "        Output::quiet()",
-        "    } else {",
-        "        Output::normal()",
-        "    };"
-      ]
-    },
-    {
       "matches": [
         "design.requirements.hooks.pending_consent"
       ],
@@ -187,8 +163,28 @@
         "A workspace depends on a crate that ships a plugin the user has not enabled or declined. When an agent starts a session, the `SessionStart` hook names that crate in the agent's context instead of asking, and for every agent that takes JSON its stdout parses as JSON. {cite}`design.requirements.hooks.no_prompt` {cite}`design.requirements.hooks.stdout_protocol`",
         ":::"
       ]
+    },
+    {
+      "rust_file": "src/bin/cargo-agents.rs",
+      "rust_item": "fn[command_output]",
+      "text": [
+        "/// The `Output` for this command's human-facing messages.",
+        "///",
+        "/// Hook commands are quiet (they're invoked by the agent, not the user), so",
+        "/// nothing they print reaches the agent's stdout and nothing can prompt.",
+        "/// JSON mode also suppresses human output (only JSON goes to stdout).",
+        "// {impl}`design.requirements.hooks.no_prompt`",
+        "// {impl}`design.requirements.hooks.stdout_protocol`",
+        "fn command_output(cli: &Cli, is_hook: bool) -> Output {",
+        "    if cli.quiet || is_hook || cli.json {",
+        "        Output::quiet()",
+        "    } else {",
+        "        Output::normal()",
+        "    }",
+        "}"
+      ]
     }
   ],
-  "rationale": "Every prompt in Symposium is a `dialoguer` call, and each one is behind `Output::is_interactive`: `prompt_for_consent` returns before discovery when the output is not interactive, and every `init` prompt (agents, hook scope, auto-update, telemetry) is reached only through `should_prompt`, which requires `interactive(out)`. `is_interactive` is false for a quiet or capturing output and otherwise requires both stdin and stdout to be terminals, which is the second sentence of the requirement. The binary builds a quiet `Output` for every `hook` command, so nothing on the hook path can prompt. The only other stdin read, in `hook.rs`, reads the agent's hook payload rather than asking the user anything. `consent_prompt_never_fires_non_interactively` asserts that quiet and capturing outputs are not interactive, calls `prompt_for_consent` with a pending candidate and a quiet output, runs `sync` through the capturing harness, and checks that no decision was recorded and the candidate is still pending; it passes.",
+  "rationale": "Every prompt in Symposium is a `dialoguer` call, and each one is behind `Output::is_interactive`: `prompt_for_consent` returns before discovery when the output is not interactive, and every `init` prompt (agents, hook scope, auto-update, telemetry) is reached only through `should_prompt`, which requires `interactive(out)`. `is_interactive` is false for a quiet or capturing output and otherwise requires both stdin and stdout to be terminals, which is the second sentence of the requirement. `command_output` returns a quiet `Output` for every `hook` command, so nothing on the hook path can prompt. The only other stdin read, in `hook::run`, reads the agent's hook payload rather than asking the user anything. `consent_prompt_never_fires_non_interactively` asserts that quiet and capturing outputs are not interactive, calls `prompt_for_consent` with a pending candidate and a quiet output, runs `sync` through the capturing harness, and checks that no decision was recorded and the candidate is still pending; it passes.",
   "requirement": "A `cargo agents` process started by an agent hook MUST NOT read from stdin to ask the user a question. Symposium MUST prompt only when its output is neither quiet nor capturing and both stdin and stdout are terminals."
 }

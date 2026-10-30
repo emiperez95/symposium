@@ -69,11 +69,7 @@ async fn main() -> ExitCode {
         (report::ReportMode::Normal, tracing::Level::INFO)
     };
     let (report_layer, report_handle) = report::ReportLayer::new(mode, level);
-    // A hook's stdout is the agent's protocol: any report line ahead of the
-    // JSON makes the agent discard the whole output. The events still reach
-    // the log file; `-v` prints them to stderr when debugging a hook by hand.
-    // {impl}`design.requirements.hooks.stdout_protocol`
-    let report_layer = (!is_hook || cli.verbose).then_some(report_layer);
+    let report_layer = prints_reports(is_hook, cli.verbose).then_some(report_layer);
     sym.init_logging(report_layer);
 
     // Log the command being invoked
@@ -109,15 +105,7 @@ async fn main() -> ExitCode {
     // Stamp state.toml with the running binary version (silently updates on mismatch).
     state::ensure_current(sym.config_dir());
 
-    // {impl}`design.requirements.hooks.no_prompt`
-    // {impl}`design.requirements.hooks.stdout_protocol`
-    // Hook commands are quiet by default (they're invoked by the agent, not the user).
-    // JSON mode also suppresses human output (only JSON goes to stdout).
-    let out = if cli.quiet || is_hook || cli.json {
-        Output::quiet()
-    } else {
-        Output::normal()
-    };
+    let out = command_output(&cli, is_hook);
 
     // Ensure git-based plugin sources are up to date (non-blocking on failure).
     // SessionStart runs once per session, so we force a real freshness check
@@ -190,6 +178,31 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+    }
+}
+
+/// Whether the report layer prints events for this command.
+///
+/// A hook's stdout is the agent's protocol: any report line ahead of the
+/// JSON makes the agent discard the whole output. The events still reach
+/// the log file; `-v` prints them to stderr when debugging a hook by hand.
+// {impl}`design.requirements.hooks.stdout_protocol`
+fn prints_reports(is_hook: bool, verbose: bool) -> bool {
+    !is_hook || verbose
+}
+
+/// The `Output` for this command's human-facing messages.
+///
+/// Hook commands are quiet (they're invoked by the agent, not the user), so
+/// nothing they print reaches the agent's stdout and nothing can prompt.
+/// JSON mode also suppresses human output (only JSON goes to stdout).
+// {impl}`design.requirements.hooks.no_prompt`
+// {impl}`design.requirements.hooks.stdout_protocol`
+fn command_output(cli: &Cli, is_hook: bool) -> Output {
+    if cli.quiet || is_hook || cli.json {
+        Output::quiet()
+    } else {
+        Output::normal()
     }
 }
 
