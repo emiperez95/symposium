@@ -99,7 +99,7 @@
         ":::",
         "",
         ":::{req} stdout_protocol",
-        "A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST go to stderr instead.",
+        "A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST NOT reach stdout; Symposium MAY drop them, log them, or write them to stderr.",
         ":::"
       ]
     }
