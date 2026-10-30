@@ -61,6 +61,7 @@ getrandom = "0.4.2"
 [dev-dependencies]
 assert_matches = "1.5"
 expect-test = "1.5.1"
+habeas = "=0.2.0"
 indoc = "2.0.7"
 symposium-testlib = { path = "symposium-testlib" }
 
