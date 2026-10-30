@@ -9,7 +9,7 @@ A `cargo agents` process started by an agent hook MUST NOT read from stdin to as
 A hook that blocked on a prompt would hang the agent's session. A bare terminal check is not enough: `cargo test` inherits the developer's terminal, so the library test harness would block too.
 
 :::{req} stdout_protocol
-A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST go to stderr instead.
+A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST NOT reach stdout; Symposium MAY drop them, log them, or write them to stderr.
 :::
 
 Most agents discard the whole response when a single line ahead of the JSON fails to parse, so one stray progress message silently drops every plugin's context.

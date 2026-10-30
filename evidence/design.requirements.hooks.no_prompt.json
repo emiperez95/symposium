@@ -154,17 +154,6 @@
       ]
     },
     {
-      "matches": [
-        "design.requirements.hooks.pending_consent"
-      ],
-      "requirements": "design.requirements.hooks.pending_consent",
-      "text": [
-        ":::{example} pending_consent",
-        "A workspace depends on a crate that ships a plugin the user has not enabled or declined. When an agent starts a session, the `SessionStart` hook names that crate in the agent's context instead of asking, and for every agent that takes JSON its stdout parses as JSON. {cite}`design.requirements.hooks.no_prompt` {cite}`design.requirements.hooks.stdout_protocol`",
-        ":::"
-      ]
-    },
-    {
       "file": "src/init.rs",
       "line_end": 83,
       "line_start": 83,
@@ -186,6 +175,17 @@
         "    } else {",
         "        Output::normal()",
         "    };"
+      ]
+    },
+    {
+      "matches": [
+        "design.requirements.hooks.pending_consent"
+      ],
+      "requirements": "design.requirements.hooks.pending_consent",
+      "text": [
+        ":::{example} pending_consent",
+        "A workspace depends on a crate that ships a plugin the user has not enabled or declined. When an agent starts a session, the `SessionStart` hook names that crate in the agent's context instead of asking, and for every agent that takes JSON its stdout parses as JSON. {cite}`design.requirements.hooks.no_prompt` {cite}`design.requirements.hooks.stdout_protocol`",
+        ":::"
       ]
     }
   ],

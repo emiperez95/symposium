@@ -166,17 +166,6 @@
       ]
     },
     {
-      "matches": [
-        "design.requirements.hooks.pending_consent"
-      ],
-      "requirements": "design.requirements.hooks.pending_consent",
-      "text": [
-        ":::{example} pending_consent",
-        "A workspace depends on a crate that ships a plugin the user has not enabled or declined. When an agent starts a session, the `SessionStart` hook names that crate in the agent's context instead of asking, and for every agent that takes JSON its stdout parses as JSON. {cite}`design.requirements.hooks.no_prompt` {cite}`design.requirements.hooks.stdout_protocol`",
-        ":::"
-      ]
-    },
-    {
       "file": "src/bin/cargo-agents.rs",
       "line_end": 76,
       "line_start": 75,
@@ -200,8 +189,19 @@
         "        Output::normal()",
         "    };"
       ]
+    },
+    {
+      "matches": [
+        "design.requirements.hooks.pending_consent"
+      ],
+      "requirements": "design.requirements.hooks.pending_consent",
+      "text": [
+        ":::{example} pending_consent",
+        "A workspace depends on a crate that ships a plugin the user has not enabled or declined. When an agent starts a session, the `SessionStart` hook names that crate in the agent's context instead of asking, and for every agent that takes JSON its stdout parses as JSON. {cite}`design.requirements.hooks.no_prompt` {cite}`design.requirements.hooks.stdout_protocol`",
+        ":::"
+      ]
     }
   ],
-  "rationale": "On a `hook` command the binary installs no report layer unless `-v` is given, and verbose mode writes to stderr, so report events never reach stdout. The `Output` used for the hook is quiet, and `sync`, which the hook runs as auto-sync, builds its own quiet `Output`, so its progress messages are dropped. Plugin install commands run with their stdout redirected to stderr in `run_install_commands`. The hook entry point writes `response.stdout` (the converted agent response) to stdout and `response.stderr` to stderr. The three `hook_stdout` tests run the real `cargo agents hook` binary: a syncing `SessionStart` for each agent whose stdout must parse as JSON (Kiro excepted, which takes plain text and is checked for the progress text), a plugin with a noisy install command whose stdout must equal the exact expected JSON while its noise appears on stderr, and a rejected-skill warning that must not appear on stdout. All pass.",
-  "requirement": "A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST go to stderr instead."
+  "rationale": "Nothing but the response reaches stdout on the hook path. Report events: on a `hook` command the binary installs no report layer unless `-v` is given, and verbose mode writes to stderr, so they are logged (and with `-v` written to stderr) but never printed to stdout. Progress messages: the hook's `Output` is quiet, and `sync`, which the hook runs as auto-sync, builds its own quiet `Output`, so they are dropped, which the requirement allows. Plugin install commands run with their stdout redirected to stderr in `run_install_commands`. The hook entry point writes `response.stdout` (the converted agent response) to stdout and `response.stderr` to stderr. The three `hook_stdout` tests run the real `cargo agents hook` binary: a syncing `SessionStart` for each agent whose stdout must parse as JSON (Kiro excepted, which takes plain text and is checked for the progress text), a plugin with a noisy install command whose stdout must equal the exact expected JSON while its noise appears on stderr, and a rejected-skill warning that must not appear on stdout. All pass.",
+  "requirement": "A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST NOT reach stdout; Symposium MAY drop them, log them, or write them to stderr."
 }
