@@ -10,7 +10,7 @@ mod error;
 mod hidden;
 mod import;
 mod limits;
-mod process;
+pub(crate) mod process;
 #[cfg(test)]
 mod repository_tasks;
 mod solution;
@@ -21,7 +21,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 pub(crate) use error::{GradeError, ImportError, ListingProblem, ProcessError};
-pub(crate) use import::OutsideEdit;
+pub(crate) use import::{OutsideEdit, copy_exact, copy_tree};
 pub(crate) use solution::check_solution;
 
 use crate::evals::Evals;

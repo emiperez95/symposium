@@ -64,7 +64,7 @@ The executables a trial runs are **staged** once per batch: the client into `too
 
 Claude Code (`~/.claude`), Codex (`~/.codex`), and Symposium (`~/.symposium`) keep their configuration and state under the home directory, so pointing `HOME` (and `USERPROFILE` on Windows) at `<run>/home` gives each trial fresh state.
 
-The client starts with a cleared environment holding only `HOME`, `PATH`, `TMPDIR`, `CARGO_HOME`, `EVAL_EVIDENCE_DIR`, `SYMPOSIUM_HOOK_TRACE`, and the model API key. `PATH` is, in order:
+The client starts with a cleared environment holding only `HOME`, `PATH`, `TMPDIR`, `CARGO_HOME`, `EVAL_EVIDENCE_DIR`, `SYMPOSIUM_HOOK_TRACE`, and the model API key's variable, which inside the sandbox holds a sentinel rather than the key (see below). `PATH` is, in order:
 
 1. `<run>/bin`;
 2. the active toolchain's own `bin/` directory (the directory of `rustup which cargo`), which holds only Rust tools;
@@ -92,7 +92,7 @@ path = "<run>/registry"
 
 Before launch, the runner checks that the skill directory is empty and that the client's machine-wide managed-settings locations are empty. For a baseline, it also checks that `cargo-agents` resolves nowhere on `PATH` and that there is no `~/.symposium` and no Symposium entry in the client's hook or MCP configuration. A failed check is a setup failure.
 
-The starter has no git history, so one trial cannot read another's work through it. Each trial starts a new conversation. The API key is passed to the client process only and never retained. The runner refuses clients older than a pinned minimum version, since hook and transcript formats change between versions.
+The starter has no git history, so one trial cannot read another's work through it. Each trial starts a new conversation. The real API key never enters the sandbox: `srt` masks it (`credentials.envVars` with `mode: "mask"`), so the client and every tool the agent starts see a sentinel, and `srt`'s proxy, outside the sandbox, substitutes the key only into requests to the model API host over TLS it terminates and re-encrypts to a verified upstream. The key is never retained. The runner refuses clients older than a pinned minimum version, since hook and transcript formats change between versions.
 
 ## Isolation
 

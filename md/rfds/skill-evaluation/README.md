@@ -323,7 +323,7 @@ Pin an `srt` version. Build the trial directories, tool staging, the cleared env
 
 Add a no-model smoke test under the exact generated policy. It launches the real clients and `cargo-agents` with `--version`, builds and tests a project, and fails to read the developer's home (including `cargo-agents` by absolute path), another trial, and `evals/`; in a baseline trial, it also fails to run the staged `cargo-agents`. This is the first thing to build: it decides whether the runner can launch at all.
 
-- [ ] Trial setup, `srt` boundary, and smoke test.
+- [x] Trial setup, `srt` boundary, and smoke test.
 
 ### Step 3: Reproduce and fix the reload bug
 
