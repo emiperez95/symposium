@@ -72,6 +72,7 @@ async fn main() -> ExitCode {
     // A hook's stdout is the agent's protocol: any report line ahead of the
     // JSON makes the agent discard the whole output. The events still reach
     // the log file; `-v` prints them to stderr when debugging a hook by hand.
+    // {impl}`design.requirements.hooks.stdout_protocol`
     let report_layer = (!is_hook || cli.verbose).then_some(report_layer);
     sym.init_logging(report_layer);
 
@@ -108,6 +109,8 @@ async fn main() -> ExitCode {
     // Stamp state.toml with the running binary version (silently updates on mismatch).
     state::ensure_current(sym.config_dir());
 
+    // {impl}`design.requirements.hooks.no_prompt`
+    // {impl}`design.requirements.hooks.stdout_protocol`
     // Hook commands are quiet by default (they're invoked by the agent, not the user).
     // JSON mode also suppresses human output (only JSON goes to stdout).
     let out = if cli.quiet || is_hook || cli.json {

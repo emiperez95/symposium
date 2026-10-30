@@ -25,7 +25,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           curl -sSL https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-          cargo binstall --no-confirm mdbook mdbook-mermaid
+          # Keep habeas at the version pinned in Cargo.toml.
+          cargo binstall --no-confirm mdbook mdbook-mermaid habeas@0.2.0
 
       - name: Build book
         run: mdbook build
