@@ -2,15 +2,6 @@
   "determination": true,
   "inputs": [
     {
-      "file": "src/sync.rs",
-      "line_end": 373,
-      "line_start": 372,
-      "text": [
-        "    // {impl}`design.requirements.hooks.stdout_protocol`",
-        "    let out = &Output::quiet();"
-      ]
-    },
-    {
       "rust_file": "src/installation.rs",
       "rust_item": "fn[run_install_commands]",
       "text": [
@@ -34,24 +25,6 @@
         "    }",
         "    Ok(())",
         "}"
-      ]
-    },
-    {
-      "file": "src/hook.rs",
-      "line_end": 362,
-      "line_start": 352,
-      "text": [
-        "    match execute_hook(sym, agent, event, &input).await {",
-        "        Ok(response) => {",
-        "            write_hook_trace(agent, event, &input, &response);",
-        "            // {impl}`design.requirements.hooks.stdout_protocol`",
-        "            if !response.stdout.is_empty() {",
-        "                std::io::stdout().write_all(&response.stdout).unwrap();",
-        "            }",
-        "            if !response.stderr.is_empty() {",
-        "                std::io::stderr().write_all(&response.stderr).unwrap();",
-        "            }",
-        "            ExitCode::from(response.exit_code)"
       ]
     },
     {
@@ -166,31 +139,6 @@
       ]
     },
     {
-      "file": "src/bin/cargo-agents.rs",
-      "line_end": 76,
-      "line_start": 75,
-      "text": [
-        "    // {impl}`design.requirements.hooks.stdout_protocol`",
-        "    let report_layer = (!is_hook || cli.verbose).then_some(report_layer);"
-      ]
-    },
-    {
-      "file": "src/bin/cargo-agents.rs",
-      "line_end": 120,
-      "line_start": 112,
-      "text": [
-        "    // {impl}`design.requirements.hooks.no_prompt`",
-        "    // {impl}`design.requirements.hooks.stdout_protocol`",
-        "    // Hook commands are quiet by default (they're invoked by the agent, not the user).",
-        "    // JSON mode also suppresses human output (only JSON goes to stdout).",
-        "    let out = if cli.quiet || is_hook || cli.json {",
-        "        Output::quiet()",
-        "    } else {",
-        "        Output::normal()",
-        "    };"
-      ]
-    },
-    {
       "matches": [
         "design.requirements.hooks.pending_consent"
       ],
@@ -200,8 +148,78 @@
         "A workspace depends on a crate that ships a plugin the user has not enabled or declined. When an agent starts a session, the `SessionStart` hook names that crate in the agent's context instead of asking, and for every agent that takes JSON its stdout parses as JSON. {cite}`design.requirements.hooks.no_prompt` {cite}`design.requirements.hooks.stdout_protocol`",
         ":::"
       ]
+    },
+    {
+      "rust_file": "src/bin/cargo-agents.rs",
+      "rust_item": "fn[command_output]",
+      "text": [
+        "/// The `Output` for this command's human-facing messages.",
+        "///",
+        "/// Hook commands are quiet (they're invoked by the agent, not the user), so",
+        "/// nothing they print reaches the agent's stdout and nothing can prompt.",
+        "/// JSON mode also suppresses human output (only JSON goes to stdout).",
+        "// {impl}`design.requirements.hooks.no_prompt`",
+        "// {impl}`design.requirements.hooks.stdout_protocol`",
+        "fn command_output(cli: &Cli, is_hook: bool) -> Output {",
+        "    if cli.quiet || is_hook || cli.json {",
+        "        Output::quiet()",
+        "    } else {",
+        "        Output::normal()",
+        "    }",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "src/bin/cargo-agents.rs",
+      "rust_item": "fn[prints_reports]",
+      "text": [
+        "/// Whether the report layer prints events for this command.",
+        "///",
+        "/// A hook's stdout is the agent's protocol: any report line ahead of the",
+        "/// JSON makes the agent discard the whole output. The events still reach",
+        "/// the log file; `-v` prints them to stderr when debugging a hook by hand.",
+        "// {impl}`design.requirements.hooks.stdout_protocol`",
+        "fn prints_reports(is_hook: bool, verbose: bool) -> bool {",
+        "    !is_hook || verbose",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "fn[run]",
+      "text": [
+        "/// CLI entry point: read payload from stdin, dispatch, print output.",
+        "pub async fn run(sym: &Symposium, agent: HookAgent, event: HookEvent) -> ExitCode {",
+        "    tracing::debug!(\"Running hook listener for agent {agent:?} and event {event:?}\");",
+        "",
+        "    let mut input = String::new();",
+        "    if let Err(e) = std::io::stdin().read_to_string(&mut input) {",
+        "        tracing::warn!(?event, error = %e, \"failed to read hook stdin\");",
+        "        return ExitCode::SUCCESS;",
+        "    }",
+        "    tracing::trace!(?input, \"hook stdin\");",
+        "",
+        "    match execute_hook(sym, agent, event, &input).await {",
+        "        Ok(response) => {",
+        "            write_hook_trace(agent, event, &input, &response);",
+        "            // {impl}`design.requirements.hooks.stdout_protocol`",
+        "            if !response.stdout.is_empty() {",
+        "                std::io::stdout().write_all(&response.stdout).unwrap();",
+        "            }",
+        "            if !response.stderr.is_empty() {",
+        "                std::io::stderr().write_all(&response.stderr).unwrap();",
+        "            }",
+        "            ExitCode::from(response.exit_code)",
+        "        }",
+        "        Err(e) => {",
+        "            tracing::warn!(?event, error = %e, \"hook failed\");",
+        "            ExitCode::FAILURE",
+        "        }",
+        "    }",
+        "}"
+      ]
     }
   ],
-  "rationale": "Nothing but the response reaches stdout on the hook path. Report events: on a `hook` command the binary installs no report layer unless `-v` is given, and verbose mode writes to stderr, so they are logged (and with `-v` written to stderr) but never printed to stdout. Progress messages: the hook's `Output` is quiet, and `sync`, which the hook runs as auto-sync, builds its own quiet `Output`, so they are dropped, which the requirement allows. Plugin install commands run with their stdout redirected to stderr in `run_install_commands`. The hook entry point writes `response.stdout` (the converted agent response) to stdout and `response.stderr` to stderr. The three `hook_stdout` tests run the real `cargo agents hook` binary: a syncing `SessionStart` for each agent whose stdout must parse as JSON (Kiro excepted, which takes plain text and is checked for the progress text), a plugin with a noisy install command whose stdout must equal the exact expected JSON while its noise appears on stderr, and a rejected-skill warning that must not appear on stdout. All pass.",
+  "rationale": "Nothing but the response reaches stdout on the hook path. Report events: `prints_reports` keeps the report layer off for a `hook` command unless `-v` is given, and verbose mode writes to stderr, so they are logged (and with `-v` written to stderr) but never printed to stdout. Progress messages: `command_output` returns a quiet `Output` for every `hook` command, so they are dropped, which the requirement allows; auto-sync's own progress is covered end to end by `sync_progress_stays_off_hook_stdout` below. Plugin install commands run with their stdout redirected to stderr in `run_install_commands`. `hook::run` writes `response.stdout` (the converted agent response) to stdout and `response.stderr` to stderr, and returns before writing anything when stdin cannot be read. The three `hook_stdout` tests run the real `cargo agents hook` binary: a syncing `SessionStart` for each agent whose stdout must parse as JSON (Kiro excepted, which takes plain text and is checked for the progress text), a plugin with a noisy install command whose stdout must equal the exact expected JSON while its noise appears on stderr, and a rejected-skill warning that must not appear on stdout. All pass.",
   "requirement": "A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST NOT reach stdout; Symposium MAY drop them, log them, or write them to stderr."
 }

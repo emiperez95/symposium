@@ -12,7 +12,7 @@ Install the CLI once. The book build needs it too, since `book.toml` runs `habea
 cargo install --locked habeas@0.2.0
 ```
 
-Keep the CLI at the version `Cargo.toml` pins.
+Keep the CLI at the version `Cargo.toml` pins. Don't re-run `habeas setup`: this repo has replaced the `tests/habeas.rs` and trimmed the `md/habeas.css` it generates, so setup refuses to continue. Habeas's `SessionStart` hook only checks `book.toml`, which is already configured.
 
 ## Names and references
 
@@ -44,7 +44,7 @@ The first `add-input` creates the evidence file with `determination: false`. Eve
 Inputs store the exact lines they quote, so editing quoted code makes `cargo test` fail with a diff until the evidence is refreshed:
 
 - `--rust-item` inputs follow the item when it moves, and go stale only when its text changes. Prefer them.
-- `--file-range` inputs are pinned to line numbers, so inserting a line above one makes it stale. Use them only where no Rust item fits, such as a few lines inside `main`.
+- `--file-range` inputs are pinned to line numbers, so inserting a line anywhere above one makes it stale, even in unrelated code. Avoid them. When the lines you need sit inside a large function, move them into a small named helper and quote that, as `command_output` and `prints_reports` in `src/bin/cargo-agents.rs` do. Quoting a large function instead makes every edit to it stale the evidence.
 
 To refresh, re-run `add-input` (dropping the stale input from the JSON first if its range moved), reread the requirement against the new code, and set `determination` back to `true` only if it still holds. `habeas status 'design.*'` lists what needs attention; `habeas info <name>` prints one definition with its evidence.
 
