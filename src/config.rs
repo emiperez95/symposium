@@ -115,6 +115,32 @@ pub struct Config {
     pub registries: Vec<RegistryConfig>,
 }
 
+/// What `[plugins] auto-accept` lets through without asking.
+///
+/// Governs only dependency-embedded plugins that nothing has decided yet
+/// (what would otherwise be a consent candidate). `auto-enable` and `use`
+/// entries stay standing grants under every mode, `disable` always wins, and
+/// a dormant registry plugin still needs `use`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoAccept {
+    /// No audit may skip the prompt.
+    None,
+    /// Audited plugins load without asking; anything else asks. No audit data
+    /// exists yet, so today this behaves exactly like `none`.
+    #[default]
+    Audit,
+    /// Every dependency-embedded plugin is accepted without asking (the
+    /// effect of `auto-enable = ["*"]`, without writing it).
+    All,
+}
+
+impl AutoAccept {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// The `[plugins]` section: enablement, the consent axis.
 ///
 /// Activation predicates answer *when* a plugin applies; enablement answers
@@ -143,11 +169,27 @@ pub struct PluginsConfig {
     /// discoveries (so they are not offered again).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub disable: Vec<String>,
+
+    /// What is accepted without asking; see [`AutoAccept`]. The TOML key
+    /// lives only in this `rename`.
+    #[serde(
+        default,
+        rename = "auto-accept",
+        skip_serializing_if = "AutoAccept::is_default"
+    )]
+    pub auto_accept: AutoAccept,
 }
 
 impl PluginsConfig {
     fn is_default(&self) -> bool {
         *self == Self::default()
+    }
+
+    /// Is the package `id` accepted without asking by a standing grant: an
+    /// `auto-enable` entry, or `auto-accept = "all"`? Does not consider
+    /// `use` or `disable`.
+    pub fn is_accepted_without_asking(&self, pms: &PmRegistry, id: &PackageId) -> bool {
+        self.auto_accept == AutoAccept::All || self.is_auto_enabled(pms, id)
     }
 
     /// Names enabled by `use` entries that apply while working in
@@ -183,12 +225,12 @@ impl PluginsConfig {
     }
 
     /// Whether any enablement entry could pull in a crate plugin. With neither
-    /// `auto-enable` nor `use` naming anything,
+    /// `auto-enable` nor `use` naming anything (and no `auto-accept = "all"`),
     /// [`enabled_dependencies`](crate::discovery::enabled_dependencies) is empty
     /// regardless of the dependency graph — so a caller can skip resolving the
     /// workspace crates on that basis.
     pub fn has_enablement_entries(&self) -> bool {
-        !self.auto_enable.is_empty() || !self.used.is_empty()
+        !self.auto_enable.is_empty() || !self.used.is_empty() || self.auto_accept == AutoAccept::All
     }
 }
 
@@ -1056,6 +1098,54 @@ mod tests {
             !serialized.contains("[plugins]"),
             "default enablement config should not be written: {serialized}"
         );
+    }
+
+    #[test]
+    fn has_enablement_entries_counts_auto_accept_all_alone() {
+        for (mode, expected) in [
+            (AutoAccept::None, false),
+            (AutoAccept::Audit, false),
+            (AutoAccept::All, true),
+        ] {
+            let plugins = PluginsConfig {
+                auto_accept: mode,
+                ..PluginsConfig::default()
+            };
+            assert_eq!(plugins.has_enablement_entries(), expected, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn parse_auto_accept_values_and_default_is_omitted() {
+        assert_eq!(parse_config("").plugins.auto_accept, AutoAccept::Audit);
+        for (value, expected) in [
+            ("none", AutoAccept::None),
+            ("audit", AutoAccept::Audit),
+            ("all", AutoAccept::All),
+        ] {
+            let config = parse_config(&format!("[plugins]\nauto-accept = \"{value}\"\n"));
+            assert_eq!(config.plugins.auto_accept, expected);
+            let serialized = toml::to_string_pretty(&config).unwrap();
+            let reparsed = parse_config(&serialized);
+            assert_eq!(reparsed.plugins.auto_accept, expected);
+            // Only the default is omitted from the written file.
+            assert_eq!(
+                serialized.contains("auto-accept"),
+                expected != AutoAccept::Audit,
+                "{serialized}"
+            );
+        }
+        let serialized =
+            toml::to_string_pretty(&parse_config("[plugins]\nauto-accept = \"audit\"\n")).unwrap();
+        assert!(!serialized.contains("[plugins]"), "{serialized}");
+    }
+
+    #[test]
+    fn invalid_auto_accept_value_errors_with_the_choices() {
+        let err = toml::from_str::<RawConfig>("[plugins]\nauto-accept = \"sometimes\"\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("sometimes") && err.contains("audit"), "{err}");
     }
 
     #[test]
