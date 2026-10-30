@@ -180,3 +180,120 @@ grep -q 'CONNECT tunnel failed, response 403' "$TMPDIR/denied"
         [serde_json::json!({"url": "/allowed", "key": canary})]
     );
 }
+
+#[test]
+#[ignore = "needs node, srt, and bubblewrap installed"]
+fn project_symlinks_cannot_reach_denied_files_or_modify_fixtures() {
+    use super::test_support::checkout;
+
+    let real = RealSrt::new(api_key());
+    let trial = real.trial(1, Configuration::Baseline);
+    let other = real.trial(2, Configuration::Baseline);
+    let hidden = checkout().join("evals/tasks/store-durability/solution/src/lib.rs");
+    let other_file = other.project().join("private-marker");
+    fs::write(&other_file, "other trial").unwrap();
+    let fixture = trial.fixtures().join("fixture-store/src/lib.rs");
+    assert!(hidden.is_file());
+    let before = fs::read(&fixture).unwrap();
+    let script = r#"
+set -eu
+ln -s "$1" hidden-link
+ln -s "$2" other-link
+ln -s "$3" fixture-link
+if cat hidden-link >/dev/null 2>&1; then echo 'read hidden solution' >&2; exit 1; fi
+if cat other-link >/dev/null 2>&1; then echo 'read other trial' >&2; exit 1; fi
+# Check the link actually resolves before testing that writes are denied.
+cat fixture-link >/dev/null
+if (printf corrupted > fixture-link) 2>/dev/null; then echo 'wrote fixture' >&2; exit 1; fi
+"#;
+    let finished = real.run(
+        &trial,
+        script,
+        &[hidden.into(), other_file.into(), fixture.clone().into()],
+        DEADLINE,
+    );
+    assert!(finished.succeeded(), "{}", finished.stderr.tail());
+    assert_eq!(fs::read(fixture).unwrap(), before);
+}
+
+#[test]
+#[ignore = "needs node, srt, bubblewrap, setsid, and flock installed"]
+fn failed_setup_stops_descendants_and_cannot_reuse_the_trial() {
+    check_failed_setup(false);
+}
+
+#[test]
+#[ignore = "needs node, srt, bubblewrap, setsid, and flock installed"]
+fn timed_out_setup_stops_descendants_and_cannot_reuse_the_trial() {
+    check_failed_setup(true);
+}
+
+fn check_failed_setup(timeout: bool) {
+    use super::RunError;
+    use super::client::Client;
+    use super::stage::{Audience, Tool};
+    use super::test_support::{executable, store_durability};
+
+    let mut real = RealSrt::new(api_key());
+    let source = TempDir::new().unwrap();
+    let fake = source.path().join("cargo-agents");
+    let mut script = String::from(
+        r#"#!/bin/sh
+set -eu
+setsid sh -c '
+    exec 9> "$TMPDIR/child.lock"
+    flock -x 9
+    printf ready > "$TMPDIR/child-ready"
+    sleep 60
+' &
+while [ ! -f "$TMPDIR/child-ready" ]; do sleep 0.02; done
+"#,
+    );
+    script.push_str(if timeout { "sleep 60\n" } else { "exit 23\n" });
+    executable(&fake, &script);
+    real.stage("cargo-agents", &Tool::Executable(fake), Audience::Symposium);
+    let trial = real.trial(1, Configuration::Symposium);
+    let result = real.try_set_up_symposium(&trial, Client::ClaudeCode, Duration::from_secs(5));
+    assert!(
+        trial.tmp().join("child-ready").is_file(),
+        "setup never reached its child: {result:?}"
+    );
+    if timeout {
+        assert!(
+            matches!(result, Err(RunError::ToolTimeout { .. })),
+            "{result:?}"
+        );
+    } else {
+        assert!(
+            matches!(result, Err(RunError::ToolFailed { status, .. }) if status.code() == Some(23)),
+            "{result:?}"
+        );
+    }
+    // The detached shell and its sleep inherit this lock. Acquiring it on the host
+    // proves they released it, without waiting for a delayed marker to appear.
+    let unlocked = Command::new("flock")
+        .args(["--nonblock", "--exclusive"])
+        .arg(trial.tmp().join("child.lock"))
+        .arg("true")
+        .status()
+        .unwrap();
+    assert!(
+        unlocked.success(),
+        "a setup descendant still holds the lock"
+    );
+    assert!(
+        trial.symposium_config().is_file(),
+        "failed setup evidence was removed"
+    );
+    let (evals, task) = store_durability();
+    let retry = real
+        .batch()
+        .create_trial(1, Configuration::Symposium, &evals, &task);
+    assert!(
+        matches!(retry, Err(RunError::Create { source, .. }) if source.kind() == std::io::ErrorKind::AlreadyExists)
+    );
+    assert!(
+        trial.tmp().join("child-ready").is_file(),
+        "retry altered the failed trial"
+    );
+}
