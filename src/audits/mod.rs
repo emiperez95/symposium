@@ -216,11 +216,17 @@ impl CrateAudits {
     }
 }
 
+/// A crate name in its comparison form: lowercase, `-` as `_` (what cargo
+/// treats as the same name, and what an audits file name uses).
+fn normalize(name: &str) -> String {
+    name.to_ascii_lowercase().replace('-', "_")
+}
+
 /// The file name for `crate_name`'s audits: lowercase, `-` as `_`, `.toml`.
 /// `None` for a name that is not a plain crate name, so a name can never reach
 /// outside the `audits/` directory.
 pub fn audit_file_name(crate_name: &str) -> Option<String> {
-    let normalized = crate_name.to_ascii_lowercase().replace('-', "_");
+    let normalized = normalize(crate_name);
     let plain = !normalized.is_empty()
         && normalized
             .bytes()
@@ -268,7 +274,6 @@ fn parse_file(registry: &str, crate_name: &str, text: &str) -> (Option<CrateAudi
             return (None, warnings);
         }
     }
-    let normalize = |name: &str| name.to_ascii_lowercase().replace('-', "_");
     match table.get("crate").and_then(toml::Value::as_str) {
         Some(name) if normalize(name) == normalize(crate_name) => {}
         _ => {
