@@ -22,7 +22,7 @@
 
 use std::path::Path;
 
-use crate::pm::{PmRegistry, WorkspaceDeps};
+use crate::pm::WorkspaceDeps;
 use anyhow::Result;
 use std::sync::Arc;
 use symposium_install::UpdateLevel;
@@ -118,10 +118,11 @@ pub async fn workspace_status(
         .active
         .iter()
         .chain(&discovery.auto_enabled)
+        .chain(&discovery.auto_accepted)
         .chain(&discovery.candidates)
         .chain(&discovery.declined)
     {
-        entries.push(entry_for(sym, &pms, found));
+        entries.push(entry_for(found));
     }
 
     // Crates enabled by `use` that are *not* dependency-embedded offers — e.g.
@@ -138,6 +139,7 @@ pub async fn workspace_status(
                 .active
                 .iter()
                 .chain(&discovery.auto_enabled)
+                .chain(&discovery.auto_accepted)
                 .chain(&discovery.candidates)
                 .chain(&discovery.declined)
                 .map(|d| pms.identity(&d.id)),
@@ -236,18 +238,11 @@ pub async fn workspace_status(
 }
 
 /// Render one discovered dependency plugin as a status line.
-fn entry_for(sym: &Symposium, pms: &PmRegistry, found: &DiscoveredPlugin) -> StatusEntry {
+fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
     let (state, root) = match found.enablement {
         Enablement::Used => (StatusState::Active, "`[plugins] use`".to_string()),
-        Enablement::AutoEnabled => {
-            // An explicit `auto-enable` entry is the more specific reason.
-            let key = if sym.config.plugins.is_auto_enabled(pms, &found.id) {
-                "auto-enable"
-            } else {
-                "auto-accept"
-            };
-            (StatusState::Active, format!("`[plugins] {key}`"))
-        }
+        Enablement::AutoEnabled => (StatusState::Active, "`[plugins] auto-enable`".to_string()),
+        Enablement::AutoAccepted => (StatusState::Active, "`[plugins] auto-accept`".to_string()),
         Enablement::Declined => (
             StatusState::Declined,
             "declined (`[plugins] disable`)".to_string(),

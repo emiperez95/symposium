@@ -41,7 +41,7 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 use symposium_install::UpdateLevel;
 
-use crate::config::Symposium;
+use crate::config::{AutoAccept, Symposium};
 use crate::output::Output;
 use crate::plugins::Plugin;
 use crate::pm::{CARGO_PM, CargoPm, PackageId, PmRegistry};
@@ -52,8 +52,11 @@ use crate::report::ReportEvent;
 pub enum Enablement {
     /// Enabled by a `[plugins] use` entry naming it.
     Used,
-    /// Enabled ahead of time by `[plugins] auto-enable`.
+    /// Enabled ahead of time by an explicit `[plugins] auto-enable` entry.
     AutoEnabled,
+    /// Accepted without asking because `[plugins] auto-accept = "all"`, with
+    /// no `auto-enable` entry naming it.
+    AutoAccepted,
     /// Declined: `[plugins] disable` names it.
     Declined,
     /// Nobody has decided yet — this is what a consent prompt would ask about.
@@ -63,7 +66,7 @@ pub enum Enablement {
 impl Enablement {
     /// Does this decision let the plugin run?
     pub fn is_enabled(self) -> bool {
-        matches!(self, Self::Used | Self::AutoEnabled)
+        matches!(self, Self::Used | Self::AutoEnabled | Self::AutoAccepted)
     }
 }
 
@@ -96,8 +99,10 @@ impl DiscoveredPlugin {
 pub struct Discovery {
     /// Already enabled: named by a `use` entry, or offered by a registry.
     pub active: Vec<DiscoveredPlugin>,
-    /// Enabled by `[plugins] auto-enable`.
+    /// Enabled by an explicit `[plugins] auto-enable` entry.
     pub auto_enabled: Vec<DiscoveredPlugin>,
+    /// Accepted without asking by `[plugins] auto-accept = "all"`.
+    pub auto_accepted: Vec<DiscoveredPlugin>,
     /// Awaiting consent — newly discovered and not yet decided.
     pub candidates: Vec<DiscoveredPlugin>,
     /// Declined previously, recorded in `[plugins] disable`.
@@ -107,7 +112,10 @@ pub struct Discovery {
 impl Discovery {
     /// Every offer that may run, whatever enabled it.
     pub fn enabled(&self) -> impl Iterator<Item = &DiscoveredPlugin> {
-        self.active.iter().chain(&self.auto_enabled)
+        self.active
+            .iter()
+            .chain(&self.auto_enabled)
+            .chain(&self.auto_accepted)
     }
 }
 
@@ -154,6 +162,7 @@ pub async fn discover(
             match enablement {
                 Enablement::Used => discovery.active.push(discovered),
                 Enablement::AutoEnabled => discovery.auto_enabled.push(discovered),
+                Enablement::AutoAccepted => discovery.auto_accepted.push(discovered),
                 Enablement::Declined => discovery.declined.push(discovered),
                 Enablement::Candidate => discovery.candidates.push(discovered),
             }
@@ -165,14 +174,14 @@ pub async fn discover(
 /// The packages whose plugins the user has enabled, to load at sync time.
 /// Two sources:
 ///
-/// 1. workspace **dependencies** covered by `[plugins] auto-enable` or an
-///    applicable `use` entry, and
+/// 1. workspace **dependencies** covered by `[plugins] auto-enable`,
+///    `auto-accept = "all"`, or an applicable `use` entry, and
 /// 2. packages named by a `use` entry that are **not** dependencies:
 ///    `cargo agents use <crate>` pulls a plugin in from crates.io whether or
 ///    not the workspace depends on it.
 ///
-/// `auto-enable` intentionally contributes only (1): it is consent for what a
-/// dependency you already have carries, not a way to add crates. Declined
+/// `auto-enable` and `auto-accept` intentionally contribute only (1): they are
+/// consent for what a dependency you already have carries, not a way to add crates. Declined
 /// packages are pruned. A `use` name is resolved through the package managers
 /// ([`PmRegistry::identify`]) at `update`: one that names a plugin in
 /// `registry` is left out, since that plugin is loaded already and
@@ -395,8 +404,8 @@ fn count_phrase(n: usize, singular: &str, plural: &str) -> Option<String> {
 }
 
 /// Classify one offer against the `[plugins]` config. An explicit decision —
-/// `use`, then `disable` — outranks the standing `auto-enable`, so a name the
-/// user declined stays declined.
+/// `disable`, then `use` — outranks the standing grants (`auto-enable`, then
+/// `auto-accept = "all"`), so a name the user declined stays declined.
 fn decide(
     sym: &Symposium,
     pms: &PmRegistry,
@@ -413,13 +422,15 @@ fn decide(
         Enablement::Declined
     } else if used.contains(&pms.identity(id)) {
         Enablement::Used
-    } else if plugins.is_accepted_without_asking(pms, id) {
-        // Covers `auto-enable` and `auto-accept = "all"`.
+    } else if plugins.is_auto_enabled(pms, id) {
+        // An explicit entry is the more specific reason, so it wins over `all`.
         Enablement::AutoEnabled
+    } else if plugins.auto_accept == AutoAccept::All {
+        Enablement::AutoAccepted
     } else {
         // AUDIT SEAM: under `auto-accept = "audit"`, a later change looks
         // the offer up in the trusted registries' audits here and returns
-        // `AutoEnabled` for an audited one. No audit data exists yet, so
+        // `AutoAccepted` for an audited one. No audit data exists yet, so
         // `audit` and `none` both fall through to `Candidate`.
         Enablement::Candidate
     }
@@ -545,15 +556,15 @@ mod tests {
             );
             let found = discover(&sym, &ws, &[]).await;
             assert_eq!(found.candidates.len(), 1, "{mode}");
-            assert!(found.auto_enabled.is_empty(), "{mode}");
+            assert!(found.auto_accepted.is_empty(), "{mode}");
         }
         let sym = sym_with(tmp.path(), "[plugins]\nauto-accept = \"all\"\n");
         let found = discover(&sym, &ws, &[]).await;
         assert!(found.candidates.is_empty());
-        assert_eq!(found.auto_enabled.len(), 1);
-        assert_eq!(found.auto_enabled[0].enablement, Enablement::AutoEnabled);
-        // Standing: nothing was written, and sync loads the crate.
-        assert!(sym.config.plugins.auto_enable.is_empty());
+        assert!(found.auto_enabled.is_empty());
+        assert_eq!(found.auto_accepted.len(), 1);
+        assert_eq!(found.auto_accepted[0].enablement, Enablement::AutoAccepted);
+        // Sync loads the crate.
         let deps = [PackageId::new(CARGO_PM, "widget-lib", "1.0.0")];
         assert_eq!(
             enabled_names(&sym, &deps, tmp.path()).await,
