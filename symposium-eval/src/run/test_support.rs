@@ -160,6 +160,44 @@ impl RealSrt {
         trial
     }
 
+    /// Runs a command against a local test API, trusting only its additional test CA.
+    pub(crate) fn run_with_test_api(
+        &self,
+        trial: &Trial,
+        script: &str,
+        port: u16,
+        certificate: &std::path::Path,
+    ) -> crate::grade::process::Finished {
+        use crate::grade::process::{Backend, Invocation};
+        let policy =
+            super::Policy::for_trial(trial, &self.machine, "localhost", &self.api_key).unwrap();
+        trial.write_policy(&policy).unwrap();
+        let mut env = trial.environment(&self.machine, &self.api_key).unwrap();
+        // Trust the fixture's CA in the outer proxy, without disabling TLS verification.
+        env.push(("NODE_EXTRA_CA_CERTS".into(), certificate.into()));
+        let invocation = Invocation {
+            program: "sh".into(),
+            args: vec![
+                "-c".into(),
+                script.into(),
+                "sh".into(),
+                port.to_string().into(),
+            ],
+            dir: trial.project(),
+            env,
+            log_name: "local-api".to_owned(),
+        };
+        self.srt
+            .for_trial(trial)
+            .unwrap()
+            .run(
+                &invocation,
+                std::time::Duration::from_secs(60),
+                &trial.evidence(),
+            )
+            .unwrap()
+    }
+
     /// Runs `script` with `sh -c` in `trial`'s project, under its policy, with `args` as
     /// its positional parameters. They pass through `srt`, which handles them as text, so
     /// a path that is not UTF-8 cannot be one.

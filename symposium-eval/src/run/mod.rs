@@ -20,6 +20,8 @@
 //! [`Batch`] keeps its root both as given and canonical, and a [`Trial`] carries its
 //! batch, so the two cannot be paired wrongly.
 
+#[cfg(all(test, target_os = "linux"))]
+mod adversarial;
 pub(crate) mod client;
 mod env;
 mod error;
