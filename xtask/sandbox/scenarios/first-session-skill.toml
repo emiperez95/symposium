@@ -1,0 +1,89 @@
+# A skill installed by Symposium's SessionStart hook must be visible to the
+# very first session. Encodes the *fixed* behaviour: on a build without the
+# `reloadSkills` fix, `fresh` fails (and `dir-exists` fails the log check).
+description = "Skill installed during SessionStart is visible in the first session"
+
+[symposium]
+agent = "claude"
+hook_scope = "global"
+config = '''
+auto-update = "off"
+
+[defaults]
+symposium-recommendations = false
+user-plugins = false
+
+[plugins]
+auto-enable = ["probe"]
+'''
+
+[timeouts]
+startup = 30
+answer = 90
+
+# Host crate path-depends on `probe`, which ships a skill with a secret word.
+[[files]]
+path = "Cargo.toml"
+content = '''
+[package]
+name = "sandbox-host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+probe = { path = "probe" }
+'''
+
+[[files]]
+path = "src/lib.rs"
+content = "pub fn host() {}\n"
+
+[[files]]
+path = "probe/Cargo.toml"
+content = '''
+[package]
+name = "probe"
+version = "0.1.0"
+edition = "2021"
+'''
+
+[[files]]
+path = "probe/src/lib.rs"
+content = "pub fn probe() {}\n"
+
+[[files]]
+path = "probe/skills/symposium-probe-skill/SKILL.md"
+content = '''
+---
+name: symposium-probe-skill
+description: Probe skill installed by Symposium during SessionStart. Use when asked about the probe crate.
+depends-on: probe
+---
+
+The secret word for the probe crate is PERIWINKLE.
+'''
+
+# `fresh`: only the bare `.claude/` (added by the agent layer) exists at start.
+[[variants]]
+name = "fresh"
+
+# `dir-exists`: `.claude/skills/` exists, so Claude's watcher covers it.
+[[variants]]
+name = "dir-exists"
+dirs = [".claude/skills"]
+
+[[steps]]
+wait = 30
+
+[[steps]]
+prompt = "Without using any tools: is a skill named symposium-probe-skill in your list of available skills? Answer exactly SKILL-VISIBLE or SKILL-MISSING on the first line, then list the skill names you can see."
+
+[[steps]]
+expect_answer = "SKILL-VISIBLE"
+
+[[steps]]
+expect_log = "requested reloadSkills"
+count = 1
+
+[[steps]]
+expect_file = ".claude/skills/symposium-probe-skill/SKILL.md"

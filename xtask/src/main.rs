@@ -3,13 +3,16 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod sandbox;
+
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(|s| s.as_str()) {
         Some("md-orphan-check") => md_orphan_check(),
+        Some("sandbox") => sandbox::main(&project_root(), &args[1..]),
         Some(cmd) => bail!("unknown xtask command: {cmd}"),
         None => bail!(
-            "usage: cargo xtask <command>\n\ncommands:\n  md-orphan-check    Check for .md files not referenced in SUMMARY.md"
+            "usage: cargo xtask <command>\n\ncommands:\n  md-orphan-check    Check for .md files not referenced in SUMMARY.md\n  sandbox            Run real agent CLIs against Symposium in an srt sandbox (see xtask/sandbox/README.md)"
         ),
     }
 }
