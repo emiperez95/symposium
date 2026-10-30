@@ -70,7 +70,11 @@ pub enum AuditLookup {
     /// A registry audited this crate, but not this payload: the audit does not
     /// cover this release's content.
     PayloadDiffers,
-    /// No registry audited this crate, or this payload cannot be digested.
+    /// A registry has `[[audit]]` entries for this crate, but this plugin's
+    /// payload cannot be checked against them: it is not eligible for a digest
+    /// (it fetches skills from outside the crate, or is too large).
+    Ineligible,
+    /// No registry audited this crate (or the package is not cargo-sourced).
     #[default]
     Unaudited,
 }
@@ -163,8 +167,10 @@ impl AuditIndex {
 
     /// Whether the registries audited the payload at `root`, the content of
     /// the cargo-sourced package `id`. The payload is hashed only when the
-    /// crate has an audits file with an `[[audit]]` entry; a package of
-    /// another package manager, or a payload with no digest, is `Unaudited`.
+    /// crate has an audits file with an `[[audit]]` entry. A package of
+    /// another package manager, or a crate with no `[[audit]]` entry, is
+    /// `Unaudited`; a crate with entries whose payload cannot be digested is
+    /// `Ineligible`.
     pub fn lookup(&self, id: &PackageId, root: &Path) -> AuditLookup {
         if id.pm != CARGO_PM {
             return AuditLookup::Unaudited;
@@ -180,7 +186,7 @@ impl AuditIndex {
             },
             Err(why) => {
                 tracing::debug!(id = %id, %why, "no payload digest; an audit cannot match");
-                AuditLookup::Unaudited
+                AuditLookup::Ineligible
             }
         }
     }

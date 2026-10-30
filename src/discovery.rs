@@ -450,6 +450,9 @@ fn consent_question(candidate: &DiscoveredPlugin) -> String {
         AuditLookup::Unaudited => {
             "NOT AUDITED: no trusted registry has audited this plugin.".to_string()
         }
+        AuditLookup::Ineligible => format!(
+            "NOT AUDITED: a registry has audited `{name}`, but this plugin's payload cannot be checked against an audit (it fetches skills from outside the crate, or is too large)."
+        ),
         AuditLookup::PayloadDiffers => format!(
             "NOT AUDITED: a registry has audited `{name}`, but that audit does not cover this release's payload."
         ),
@@ -962,6 +965,10 @@ mod tests {
         let q = consent_question(&candidate_with(AuditLookup::Unaudited));
         assert!(q.starts_with("NOT AUDITED: no trusted registry"), "{q}");
         assert!(q.contains("Dependency `widget-lib` provides 1 skill group. Enable it?"));
+
+        let q = consent_question(&candidate_with(AuditLookup::Ineligible));
+        assert!(q.starts_with("NOT AUDITED: a registry has audited"), "{q}");
+        assert!(q.contains("cannot be checked against an audit"), "{q}");
 
         let q = consent_question(&candidate_with(AuditLookup::PayloadDiffers));
         assert!(q.starts_with("NOT AUDITED"), "{q}");

@@ -48,7 +48,9 @@ in your config: it loads while the audit holds.)
 Each question starts with the plugin's audit status. A plugin no trusted registry
 has audited is marked `NOT AUDITED`; one whose crate a registry audited, but for a
 different payload, is marked the same way and says the audit does not cover this
-release's payload. Under `auto-accept = "none"`, an audited plugin is still asked
+release's payload. A plugin whose crate a registry audited, but whose payload
+cannot be checked against an audit at all (it fetches skills from outside the
+crate, or is too large), is marked `NOT AUDITED` and says so. Under `auto-accept = "none"`, an audited plugin is still asked
 about, and the question says which registry audited it.
 
 Only explicit answers are recorded, so hitting Enter through the prompt never

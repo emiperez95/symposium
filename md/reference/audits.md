@@ -127,7 +127,7 @@ Under [`[plugins] auto-accept = "audit"`](./configuration.md#plugins) (the defau
 - Nothing is recorded. The plugin loads while the audit and the payload match; if the crate's payload changes (a new release that edits a skill or the manifest), the audit no longer covers it and the plugin is a candidate again.
 - A payload [with no digest](#when-there-is-no-digest) cannot match an audit, so it stays a candidate.
 - A crate with no audits file is never hashed: the lookup reads `audits/<crate>.toml` first. The digest of a crate from the crates.io registry is remembered in Symposium's cache directory (`audit-digests/`), since that source cannot change for a given version. A path dependency, workspace member or git checkout is always hashed again, so editing it takes effect at once.
-- [`cargo agents status`](./cargo-agents-status.md) shows the plugin as `active`, with root `audited by registry <name>`. The `SessionStart` hint and the consent prompt leave audited plugins out. The interactive prompt says when a plugin it asks about is not audited, or when a registry's audit does not cover this release's payload.
+- [`cargo agents status`](./cargo-agents-status.md) shows the plugin as `active`, with root `audited by registry <name>`. The `SessionStart` hint and the consent prompt leave audited plugins out. The interactive prompt says when a plugin it asks about is not audited, when a registry's audit does not cover this release's payload, or when a registry audited the crate but this plugin's payload cannot be checked against an audit (an ineligible payload).
 - Like revocations, the check is cache-only and never prompts or prints on the hook path.
 
 ## How Symposium reads it
