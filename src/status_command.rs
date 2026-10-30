@@ -122,16 +122,7 @@ pub async fn workspace_status(
     // Dependency-embedded plugins, with the decision the config made about
     // each. This is the same view the consent prompt works from.
     let discovery = crate::discovery::discover(sym, deps, &registry.plugins).await;
-    for found in discovery
-        .active
-        .iter()
-        .chain(&discovery.auto_enabled)
-        .chain(&discovery.auto_accepted)
-        .chain(&discovery.audited)
-        .chain(&discovery.candidates)
-        .chain(&discovery.declined)
-        .chain(&discovery.revoked)
-    {
+    for found in discovery.all() {
         entries.push(entry_for(found));
     }
 
@@ -144,18 +135,7 @@ pub async fn workspace_status(
         .plugins
         .iter()
         .map(|p| pms.identity(&p.canonical))
-        .chain(
-            discovery
-                .active
-                .iter()
-                .chain(&discovery.auto_enabled)
-                .chain(&discovery.auto_accepted)
-                .chain(&discovery.audited)
-                .chain(&discovery.candidates)
-                .chain(&discovery.declined)
-                .chain(&discovery.revoked)
-                .map(|d| pms.identity(&d.id)),
-        )
+        .chain(discovery.all().map(|d| pms.identity(&d.id)))
         .collect();
     let enabled = crate::discovery::enabled_dependencies(
         sym,

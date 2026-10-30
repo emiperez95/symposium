@@ -141,6 +141,15 @@ impl Discovery {
             .chain(&self.auto_accepted)
             .chain(&self.audited)
     }
+
+    /// Every offer in every bucket: those that may run (see
+    /// [`enabled`](Self::enabled)), then candidates, declined and revoked.
+    pub fn all(&self) -> impl Iterator<Item = &DiscoveredPlugin> {
+        self.enabled()
+            .chain(&self.candidates)
+            .chain(&self.declined)
+            .chain(&self.revoked)
+    }
 }
 
 /// Discover the plugins offered for this workspace's dependencies.
