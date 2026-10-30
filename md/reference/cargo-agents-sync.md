@@ -45,6 +45,12 @@ Plugins already covered by `[plugins] auto-enable` or `use`, by
 of exactly their payload, are not asked about. (An audited plugin is not recorded
 in your config: it loads while the audit holds.)
 
+Each question starts with the plugin's audit status. A plugin no trusted registry
+has audited is marked `NOT AUDITED`; one whose crate a registry audited, but for a
+different payload, is marked the same way and says the audit does not cover this
+release's payload. Under `auto-accept = "none"`, an audited plugin is still asked
+about, and the question says which registry audited it.
+
 Only explicit answers are recorded, so hitting Enter through the prompt never
 permanently declines anything. Escape leaves the remaining questions undecided.
 

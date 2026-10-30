@@ -417,16 +417,12 @@ pub async fn prompt_for_consent(
     let mut declined = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for candidate in candidates {
-        let name = candidate.id.name;
+        let name = candidate.id.name.clone();
         if !seen.insert(name.clone()) {
             continue;
         }
-        let what = candidate
-            .description
-            .as_deref()
-            .unwrap_or("agent extensions");
         let answer = dialoguer::Select::new()
-            .with_prompt(format!("Dependency `{name}` provides {what}. Enable it?"))
+            .with_prompt(consent_question(&candidate))
             .items(["Ask me later", "Enable", "No — don't ask again"])
             .default(0)
             .interact_opt()
@@ -439,6 +435,29 @@ pub async fn prompt_for_consent(
         }
     }
     apply_consent(sym, &approved, &declined)
+}
+
+/// The question the consent prompt asks about one candidate. It leads with the
+/// audit status, since "no registry has audited this" is what the user is
+/// being asked to take on trust.
+fn consent_question(candidate: &DiscoveredPlugin) -> String {
+    let name = candidate.name();
+    let what = candidate
+        .description
+        .as_deref()
+        .unwrap_or("agent extensions");
+    let status = match &candidate.audit {
+        AuditLookup::Unaudited => {
+            "NOT AUDITED: no trusted registry has audited this plugin.".to_string()
+        }
+        AuditLookup::PayloadDiffers => format!(
+            "NOT AUDITED: a registry has audited `{name}`, but that audit does not cover this release's payload."
+        ),
+        AuditLookup::Audited(registry) => format!(
+            "Audited by registry `{registry}`, but `[plugins] auto-accept` is `none`, so it asks anyway."
+        ),
+    };
+    format!("{status}\nDependency `{name}` provides {what}. Enable it?")
 }
 
 /// A short human summary of what a discovered plugin contributes, for the
@@ -925,5 +944,31 @@ mod tests {
 
         assert!(used("my-plugin").await);
         assert!(!used("my_plugin").await);
+    }
+
+    fn candidate_with(audit: AuditLookup) -> DiscoveredPlugin {
+        DiscoveredPlugin {
+            registry: CARGO_PM.into(),
+            id: CargoPm::id_for("widget-lib", Some("1.0.0")),
+            recommends: "widget-lib".into(),
+            description: Some("1 skill group".into()),
+            enablement: Enablement::Candidate,
+            audit,
+        }
+    }
+
+    #[test]
+    fn the_prompt_says_prominently_when_a_plugin_is_not_audited() {
+        let q = consent_question(&candidate_with(AuditLookup::Unaudited));
+        assert!(q.starts_with("NOT AUDITED: no trusted registry"), "{q}");
+        assert!(q.contains("Dependency `widget-lib` provides 1 skill group. Enable it?"));
+
+        let q = consent_question(&candidate_with(AuditLookup::PayloadDiffers));
+        assert!(q.starts_with("NOT AUDITED"), "{q}");
+        assert!(q.contains("does not cover this release's payload"), "{q}");
+
+        let q = consent_question(&candidate_with(AuditLookup::Audited("reg".into())));
+        assert!(!q.contains("NOT AUDITED"), "{q}");
+        assert!(q.contains("`reg`") && q.contains("auto-accept"), "{q}");
     }
 }
