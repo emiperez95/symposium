@@ -126,8 +126,8 @@ pub struct Config {
 pub enum AutoAccept {
     /// No audit may skip the prompt.
     None,
-    /// Audited plugins load without asking; anything else asks. No audit data
-    /// exists yet, so today this behaves exactly like `none`.
+    /// A plugin whose payload digest a trusted registry audited loads without
+    /// asking (and without writing config); anything else asks.
     #[default]
     Audit,
     /// Every dependency-embedded plugin is accepted without asking (the
@@ -224,11 +224,15 @@ impl PluginsConfig {
             .any(|entry| name_matches(pms, entry, id))
     }
 
-    /// Whether any enablement entry could pull in a crate plugin. With neither
-    /// `auto-enable` nor `use` naming anything (and no `auto-accept = "all"`),
-    /// [`enabled_dependencies`](crate::discovery::enabled_dependencies) is empty
-    /// regardless of the dependency graph — so a caller can skip resolving the
-    /// workspace crates on that basis.
+    /// Whether any *config entry* could pull in a crate plugin: `auto-enable`,
+    /// `use`, or `auto-accept = "all"`. This is only the config half. Under the
+    /// default `auto-accept = "audit"`,
+    /// [`enabled_dependencies`](crate::discovery::enabled_dependencies) also
+    /// seeds dependencies a trusted registry audited, with no config entry at
+    /// all, so `false` here does not mean it is empty for the dependency
+    /// graph. A caller deciding whether it can skip resolving the workspace
+    /// crates must use `hook_dispatch_needs_deps` (in `hook.rs`), which adds
+    /// the audits condition.
     pub fn has_enablement_entries(&self) -> bool {
         !self.auto_enable.is_empty() || !self.used.is_empty() || self.auto_accept == AutoAccept::All
     }
@@ -551,6 +555,12 @@ impl Symposium {
         // One registry instance per configured registry — trust roots.
         instances.extend(self.registry_instances());
         crate::pm::PmRegistry::new(instances)
+    }
+
+    /// The audits of the trusted registries among `pms`, with payload digests
+    /// of immutable sources remembered under the cache directory.
+    pub fn audit_index(&self, pms: &crate::pm::PmRegistry) -> crate::audits::AuditIndex {
+        pms.audit_index().with_cache_dir(self.cache_dir())
     }
 
     /// The package managers for a workspace-independent operation (registry

@@ -41,7 +41,7 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 use symposium_install::UpdateLevel;
 
-use crate::audits::Revocation;
+use crate::audits::{AuditIndex, AuditLookup, Revocation};
 use crate::config::{AutoAccept, Symposium};
 use crate::output::Output;
 use crate::plugins::Plugin;
@@ -60,6 +60,11 @@ pub enum Enablement {
     AutoAccepted,
     /// Declined: `[plugins] disable` names it.
     Declined,
+    /// Accepted without asking because a trusted registry audited exactly this
+    /// payload (`auto-accept = "audit"`). Standing like `auto-enable` for the
+    /// purpose of loading, but never recorded in config: it holds only while
+    /// the audit and the payload match.
+    Audited { registry: String },
     /// A trusted registry's audits revoke this release or payload. Outranks
     /// `use`, `auto-enable` and `auto-accept`; only `disable` outranks it.
     Revoked(Revocation),
@@ -70,7 +75,10 @@ pub enum Enablement {
 impl Enablement {
     /// Does this decision let the plugin run?
     pub fn is_enabled(&self) -> bool {
-        matches!(self, Self::Used | Self::AutoEnabled | Self::AutoAccepted)
+        matches!(
+            self,
+            Self::Used | Self::AutoEnabled | Self::AutoAccepted | Self::Audited { .. }
+        )
     }
 }
 
@@ -89,6 +97,11 @@ pub struct DiscoveredPlugin {
     pub description: Option<String>,
     /// How the `[plugins]` config decided this offer.
     pub enablement: Enablement,
+    /// What the registries' audits say about this payload. `None` means no
+    /// lookup was made: it is computed only for an offer that reached the audit
+    /// step (not disabled, revoked or already enabled), which is every
+    /// [`Enablement::Candidate`] and [`Enablement::Audited`] offer.
+    pub audit: Option<AuditLookup>,
 }
 
 impl DiscoveredPlugin {
@@ -107,6 +120,9 @@ pub struct Discovery {
     pub auto_enabled: Vec<DiscoveredPlugin>,
     /// Accepted without asking by `[plugins] auto-accept = "all"`.
     pub auto_accepted: Vec<DiscoveredPlugin>,
+    /// Accepted without asking because a registry audited the payload
+    /// (`auto-accept = "audit"`). Nothing is written to config for these.
+    pub audited: Vec<DiscoveredPlugin>,
     /// Awaiting consent — newly discovered and not yet decided.
     pub candidates: Vec<DiscoveredPlugin>,
     /// Declined previously, recorded in `[plugins] disable`.
@@ -123,6 +139,16 @@ impl Discovery {
             .iter()
             .chain(&self.auto_enabled)
             .chain(&self.auto_accepted)
+            .chain(&self.audited)
+    }
+
+    /// Every offer in every bucket: those that may run (see
+    /// [`enabled`](Self::enabled)), then candidates, declined and revoked.
+    pub fn all(&self) -> impl Iterator<Item = &DiscoveredPlugin> {
+        self.enabled()
+            .chain(&self.candidates)
+            .chain(&self.declined)
+            .chain(&self.revoked)
     }
 }
 
@@ -142,7 +168,7 @@ pub async fn discover(
         return Discovery::default();
     };
     let pms = sym.package_managers(deps);
-    let audits = pms.audit_index();
+    let audits = sym.audit_index(&pms);
     let dep_ids = pms.list_deps().await.unwrap_or_default();
     let used: HashSet<PackageId> =
         resolve_used(sym, &pms, registry, &workspace_root, UpdateLevel::None)
@@ -161,18 +187,23 @@ pub async fn discover(
             let name = plugin.canonical.name.clone();
             let description = Some(describe_plugin(&plugin.manifest));
             let revocation = audits.revocation(&plugin.canonical, &loaded.root);
-            let enablement = decide(sym, &pms, &used, &plugin.canonical, revocation);
+            let (enablement, audit) =
+                decide(sym, &pms, &used, &plugin.canonical, revocation, || {
+                    audits.lookup(&plugin.canonical, &loaded.root)
+                });
             let discovered = DiscoveredPlugin {
                 registry: inst.name.clone(),
                 id: plugin.canonical,
                 recommends: name,
                 description,
                 enablement,
+                audit,
             };
             match discovered.enablement {
                 Enablement::Used => discovery.active.push(discovered),
                 Enablement::AutoEnabled => discovery.auto_enabled.push(discovered),
                 Enablement::AutoAccepted => discovery.auto_accepted.push(discovered),
+                Enablement::Audited { .. } => discovery.audited.push(discovered),
                 Enablement::Declined => discovery.declined.push(discovered),
                 Enablement::Revoked(_) => discovery.revoked.push(discovered),
                 Enablement::Candidate => discovery.candidates.push(discovered),
@@ -183,13 +214,17 @@ pub async fn discover(
 }
 
 /// The packages whose plugins the user has enabled, to load at sync time.
-/// Two sources:
+/// Three sources:
 ///
 /// 1. workspace **dependencies** covered by `[plugins] auto-enable`,
-///    `auto-accept = "all"`, or an applicable `use` entry, and
+///    `auto-accept = "all"`, or an applicable `use` entry;
 /// 2. packages named by a `use` entry that are **not** dependencies:
 ///    `cargo agents use <crate>` pulls a plugin in from crates.io whether or
-///    not the workspace depends on it.
+///    not the workspace depends on it, and
+/// 3. under `auto-accept = "audit"`, workspace dependencies whose payload a
+///    trusted registry audited, with no config entry at all. This fetches
+///    the dependency cache-only (the source already on disk) and hashes its
+///    payload, but only for a crate with `[[audit]]` entries.
 ///
 /// `auto-enable` and `auto-accept` intentionally contribute only (1): they are
 /// consent for what a dependency you already have carries, not a way to add crates. Declined
@@ -209,11 +244,17 @@ pub async fn enabled_dependencies(
     let used = resolve_used(sym, pms, registry, workspace_root, update).await;
     let mut enabled = Vec::new();
     let mut known = HashSet::new();
+    let audits = sym.audit_index(pms);
     for id in dep_ids.iter().filter(|id| id.pm == CARGO_PM) {
         let identity = pms.identity(id);
         let is_used = used.iter().any(|(_, used)| *used == identity);
         known.insert(identity);
-        if !plugins.is_disabled(pms, id) && (plugins.is_accepted_without_asking(pms, id) || is_used)
+        if plugins.is_disabled(pms, id) {
+            continue;
+        }
+        if plugins.is_accepted_without_asking(pms, id)
+            || is_used
+            || is_audited_dependency(sym, pms, &audits, id).await
         {
             enabled.push(PackageId::any_version(&id.pm, &id.name));
         }
@@ -230,6 +271,36 @@ pub async fn enabled_dependencies(
     }
 
     enabled
+}
+
+/// Under `auto-accept = "audit"`, does a trusted registry audit exactly the
+/// payload of the dependency `id`? Cache-only: the source is the one already on
+/// disk. Looked up by name first, so a crate nobody audited is neither fetched
+/// nor hashed. A revoked payload is not excluded here; activation withholds it
+/// (see `plugins::withheld`) exactly as it does for any other grant.
+async fn is_audited_dependency(
+    sym: &Symposium,
+    pms: &PmRegistry,
+    audits: &AuditIndex,
+    id: &PackageId,
+) -> bool {
+    if sym.config.plugins.auto_accept != AutoAccept::Audit {
+        return false;
+    }
+    let crate_audits = audits.for_crate(&id.name);
+    if !crate_audits.has_audits() {
+        return false;
+    }
+    // Fetched by name, as loading will: the workspace pin (or path override)
+    // picks the release.
+    let any = PackageId::any_version(&id.pm, &id.name);
+    let Ok(fetched) = pms.fetch(&any, UpdateLevel::None).await else {
+        return false;
+    };
+    matches!(
+        audits.lookup_in(&crate_audits, &fetched.id, &fetched.root),
+        AuditLookup::Audited(_)
+    )
 }
 
 pub(crate) async fn resolve_used<'a>(
@@ -364,16 +435,12 @@ pub async fn prompt_for_consent(
     let mut declined = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for candidate in candidates {
-        let name = candidate.id.name;
+        let name = candidate.id.name.clone();
         if !seen.insert(name.clone()) {
             continue;
         }
-        let what = candidate
-            .description
-            .as_deref()
-            .unwrap_or("agent extensions");
         let answer = dialoguer::Select::new()
-            .with_prompt(format!("Dependency `{name}` provides {what}. Enable it?"))
+            .with_prompt(consent_question(&candidate))
             .items(["Ask me later", "Enable", "No — don't ask again"])
             .default(0)
             .interact_opt()
@@ -386,6 +453,33 @@ pub async fn prompt_for_consent(
         }
     }
     apply_consent(sym, &approved, &declined)
+}
+
+/// The question the consent prompt asks about one candidate. It leads with the
+/// audit status, since "no registry has audited this" is what the user is
+/// being asked to take on trust.
+fn consent_question(candidate: &DiscoveredPlugin) -> String {
+    let name = candidate.name();
+    let what = candidate
+        .description
+        .as_deref()
+        .unwrap_or("agent extensions");
+    let status = match &candidate.audit {
+        None => "Audit status unknown.".to_string(),
+        Some(AuditLookup::Unaudited) => {
+            "NOT AUDITED: no trusted registry has audited this plugin.".to_string()
+        }
+        Some(AuditLookup::Ineligible) => format!(
+            "NOT AUDITED: a registry has audited `{name}`, but this plugin's payload cannot be checked against an audit (it fetches skills from outside the crate, or is too large)."
+        ),
+        Some(AuditLookup::PayloadDiffers) => format!(
+            "NOT AUDITED: a registry has audited `{name}`, but that audit does not cover this release's payload."
+        ),
+        Some(AuditLookup::Audited(registry)) => format!(
+            "Audited by registry `{registry}`, but `[plugins] auto-accept` is `none`, so it asks anyway."
+        ),
+    };
+    format!("{status}\nDependency `{name}` provides {what}. Enable it?")
 }
 
 /// A short human summary of what a discovered plugin contributes, for the
@@ -415,11 +509,27 @@ fn count_phrase(n: usize, singular: &str, plural: &str) -> Option<String> {
 }
 
 /// Classify one offer against the `[plugins]` config and the registries'
-/// revocations (`revocation`, as [`AuditIndex::revocation`] answered for it).
-/// `disable` is the last word and `revoked` comes next: both outrank `use`,
-/// which outranks the standing grants (`auto-enable`, then
-/// `auto-accept = "all"`), so a name the user declined stays declined and a
-/// revoked release stays out whatever consented to it.
+/// revocations (`revocation`, as [`AuditIndex::revocation`] answered for it),
+/// and, for one nobody has decided, their audits (`lookup`, run only then, so
+/// a payload is hashed only when the answer can matter). Returns the decision
+/// and what the audit lookup found (`None` when the offer was
+/// decided before the lookup would run).
+///
+/// First match wins, in this order:
+///
+/// 1. `disable` names it: `Declined`;
+/// 2. the registries revoke it: `Revoked`;
+/// 3. a `use` entry names it: `Used`;
+/// 4. an `auto-enable` entry names it: `AutoEnabled`;
+/// 5. `auto-accept = "all"` alone: `AutoAccepted`;
+/// 6. only when none of those apply, the audit `lookup` under
+///    `auto-accept = "audit"`: `Audited`;
+/// 7. otherwise `Candidate`.
+///
+/// So a name the user declined stays declined, a revoked release stays out
+/// whatever consented to it, and under `all` an audited plugin is
+/// `AutoAccepted`, not `Audited`. Under `auto-accept = "none"` an audit never
+/// skips the prompt.
 ///
 /// [`AuditIndex::revocation`]: crate::audits::AuditIndex::revocation
 fn decide(
@@ -428,14 +538,15 @@ fn decide(
     used: &HashSet<PackageId>,
     id: &PackageId,
     revocation: Option<Revocation>,
-) -> Enablement {
+    lookup: impl FnOnce() -> AuditLookup,
+) -> (Enablement, Option<AuditLookup>) {
     let plugins = &sym.config.plugins;
     // `disable` is tested first because it is the last word: every other
     // entry says a plugin *may* run, and this is the only one that says it
     // may not. Activation agrees (see `record_active`), so classifying a
     // disabled plugin as `Used` here would report it active while it stays
     // off.
-    if plugins.is_disabled(pms, id) {
+    let enablement = if plugins.is_disabled(pms, id) {
         Enablement::Declined
     } else if let Some(revocation) = revocation {
         Enablement::Revoked(revocation)
@@ -447,12 +558,18 @@ fn decide(
     } else if plugins.auto_accept == AutoAccept::All {
         Enablement::AutoAccepted
     } else {
-        // AUDIT SEAM: under `auto-accept = "audit"`, a later change looks
-        // the offer up in the trusted registries' audits here and returns
-        // `AutoAccepted` for an audited one. No audit data exists yet, so
-        // `audit` and `none` both fall through to `Candidate`.
-        Enablement::Candidate
-    }
+        let audit = lookup();
+        return match (&audit, plugins.auto_accept) {
+            (AuditLookup::Audited(registry), AutoAccept::Audit) => (
+                Enablement::Audited {
+                    registry: registry.clone(),
+                },
+                Some(audit),
+            ),
+            _ => (Enablement::Candidate, Some(audit)),
+        };
+    };
+    (enablement, None)
 }
 
 #[cfg(test)]
@@ -554,7 +671,10 @@ mod tests {
             }
             let pms = sym.detached_managers();
             let used: HashSet<PackageId> = used.then(|| pms.identity(&id)).into_iter().collect();
-            decide(&sym, &pms, &used, &id, Some(revocation()))
+            decide(&sym, &pms, &used, &id, Some(revocation()), || {
+                panic!("a decided offer is not looked up")
+            })
+            .0
         };
         let revoked = Enablement::Revoked(revocation());
         assert_eq!(classify("", false, false), revoked);
@@ -605,7 +725,7 @@ mod tests {
     async fn auto_accept_modes_decide_candidates() {
         let tmp = tempfile::tempdir().unwrap();
         let ws = workspace(tmp.path());
-        // `audit` has no audit data yet, so it asks like `none`.
+        // No registry audits anything here, so `audit` asks like `none`.
         for mode in ["none", "audit"] {
             let sym = sym_with(
                 tmp.path(),
@@ -847,5 +967,39 @@ mod tests {
 
         assert!(used("my-plugin").await);
         assert!(!used("my_plugin").await);
+    }
+
+    fn candidate_with(audit: AuditLookup) -> DiscoveredPlugin {
+        DiscoveredPlugin {
+            registry: CARGO_PM.into(),
+            id: CargoPm::id_for("widget-lib", Some("1.0.0")),
+            recommends: "widget-lib".into(),
+            description: Some("1 skill group".into()),
+            enablement: Enablement::Candidate,
+            audit: Some(audit),
+        }
+    }
+
+    #[test]
+    fn the_prompt_says_prominently_when_a_plugin_is_not_audited() {
+        let q = consent_question(&candidate_with(AuditLookup::Unaudited));
+        assert!(q.starts_with("NOT AUDITED: no trusted registry"), "{q}");
+        assert!(q.contains("Dependency `widget-lib` provides 1 skill group. Enable it?"));
+
+        let q = consent_question(&candidate_with(AuditLookup::Ineligible));
+        assert!(q.starts_with("NOT AUDITED: a registry has audited"), "{q}");
+        assert!(q.contains("cannot be checked against an audit"), "{q}");
+
+        let q = consent_question(&candidate_with(AuditLookup::PayloadDiffers));
+        assert!(q.starts_with("NOT AUDITED"), "{q}");
+        assert!(q.contains("does not cover this release's payload"), "{q}");
+
+        let mut unlooked = candidate_with(AuditLookup::Unaudited);
+        unlooked.audit = None;
+        assert!(consent_question(&unlooked).starts_with("Audit status unknown."));
+
+        let q = consent_question(&candidate_with(AuditLookup::Audited("reg".into())));
+        assert!(!q.contains("NOT AUDITED"), "{q}");
+        assert!(q.contains("`reg`") && q.contains("auto-accept"), "{q}");
     }
 }

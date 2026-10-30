@@ -39,8 +39,19 @@ agent context, so these stay off until you say otherwise. Three answers:
 - **Enable** — recorded in `[plugins] auto-enable`, and installed by this same sync.
 - **No — don't ask again** — recorded in `[plugins] disable`.
 
-Plugins already covered by `[plugins] auto-enable` or `use`, or by
-[`auto-accept = "all"`](./configuration.md#plugins), are not asked about.
+Plugins already covered by `[plugins] auto-enable` or `use`, by
+[`auto-accept = "all"`](./configuration.md#plugins), or, under the default
+`auto-accept = "audit"`, by a trusted registry's [audit](./audits.md#audited-loading)
+of exactly their payload, are not asked about. (An audited plugin is not recorded
+in your config: it loads while the audit holds.)
+
+Each question starts with the plugin's audit status. A plugin no trusted registry
+has audited is marked `NOT AUDITED`; one whose crate a registry audited, but for a
+different payload, is marked the same way and says the audit does not cover this
+release's payload. A plugin whose crate a registry audited, but whose payload
+cannot be checked against an audit at all (it fetches skills from outside the
+crate, or is too large), is marked `NOT AUDITED` and says so. Under `auto-accept = "none"`, an audited plugin is still asked
+about, and the question says which registry audited it.
 
 Only explicit answers are recorded, so hitting Enter through the prompt never
 permanently declines anything. Escape leaves the remaining questions undecided.

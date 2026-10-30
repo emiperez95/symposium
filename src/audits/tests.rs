@@ -199,18 +199,20 @@ fn the_index_merges_registries_and_names_the_matching_one() {
     ]);
 
     assert_eq!(
-        index.audited_by("widget-lib", &digest(A)).as_deref(),
+        index.for_crate("widget-lib").audited_by(&digest(A)),
         Some("one")
     );
     assert_eq!(
-        index.audited_by("widget_lib", &digest(B)).as_deref(),
+        index.for_crate("widget_lib").audited_by(&digest(B)),
         Some("two")
     );
     assert_eq!(
-        index.audited_by("widget-lib", &digest(&format!("sha256:{}", "c".repeat(64)))),
+        index
+            .for_crate("widget-lib")
+            .audited_by(&digest(&format!("sha256:{}", "c".repeat(64)))),
         None
     );
-    assert_eq!(index.audited_by("other", &digest(A)), None);
+    assert_eq!(index.for_crate("other").audited_by(&digest(A)), None);
 
     let hit = index
         .for_crate("widget-lib")
@@ -287,4 +289,72 @@ fn revocation_matches_a_cargo_package_by_version_or_payload() {
     // A crate nobody audited costs nothing and matches nothing.
     let unaudited = PackageId::new(CARGO_PM, "gadget", "1.0.0");
     assert!(index.revocation(&unaudited, &krate).is_none());
+}
+
+#[test]
+fn lookup_distinguishes_audited_differing_and_unaudited() {
+    let tmp = tempfile::tempdir().unwrap();
+    let crate_dir = tmp.path().join("src-widget");
+    std::fs::create_dir_all(crate_dir.join("skills/s")).unwrap();
+    std::fs::write(crate_dir.join("skills/s/SKILL.md"), "hello").unwrap();
+    let payload = digest::payload_digest(&crate_dir).unwrap();
+
+    let registry = tmp.path().join("reg");
+    let index = AuditIndex::new(vec![AuditSource {
+        registry: "reg".into(),
+        dir: registry.clone(),
+    }]);
+    let id = PackageId::new(CARGO_PM, "widget-lib", "1.0.0");
+    assert!(!index.any_audits_dir());
+    assert_eq!(index.lookup(&id, &crate_dir), AuditLookup::Unaudited);
+
+    write_audits(
+        &registry,
+        "widget_lib.toml",
+        &format!("format = 1\ncrate = \"widget-lib\"\n[[audit]]\ndigest = \"{payload}\"\n"),
+    );
+    assert!(index.any_audits_dir());
+    assert!(index.for_crate("widget_lib").has_audits());
+    assert_eq!(
+        index.lookup(&id, &crate_dir),
+        AuditLookup::Audited("reg".into())
+    );
+    // Another package manager's package is never audited.
+    let other = PackageId::new("reg", "widget-lib", "1.0.0");
+    assert_eq!(index.lookup(&other, &crate_dir), AuditLookup::Unaudited);
+
+    std::fs::write(crate_dir.join("skills/s/SKILL.md"), "changed").unwrap();
+    assert_eq!(index.lookup(&id, &crate_dir), AuditLookup::PayloadDiffers);
+}
+
+#[test]
+fn a_crate_with_audits_but_an_ineligible_payload_is_ineligible_not_unaudited() {
+    let tmp = tempfile::tempdir().unwrap();
+    let crate_dir = tmp.path().join("src-widget");
+    std::fs::create_dir_all(crate_dir.join("skills/s")).unwrap();
+    std::fs::write(crate_dir.join("skills/s/SKILL.md"), "hello").unwrap();
+
+    let registry = tmp.path().join("reg");
+    let index = AuditIndex::new(vec![AuditSource {
+        registry: "reg".into(),
+        dir: registry.clone(),
+    }]);
+    write_audits(
+        &registry,
+        "widget_lib.toml",
+        &format!(
+            "format = 1\ncrate = \"widget-lib\"\n[[audit]]\ndigest = \"{}\"\n",
+            digest(A)
+        ),
+    );
+    std::fs::write(
+        crate_dir.join("Symposium.toml"),
+        "[[skills]]\nsource.git = \"https://github.com/example/skills\"\n",
+    )
+    .unwrap();
+    let id = PackageId::new(CARGO_PM, "widget-lib", "1.0.0");
+    assert_eq!(index.lookup(&id, &crate_dir), AuditLookup::Ineligible);
+    // The same payload under a crate nobody audited is simply unaudited.
+    let other = PackageId::new(CARGO_PM, "other-lib", "1.0.0");
+    assert_eq!(index.lookup(&other, &crate_dir), AuditLookup::Unaudited);
 }

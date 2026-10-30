@@ -10,8 +10,7 @@
 //!
 //! - **Audited digests** — "this payload was reviewed". An audit from *any*
 //!   registry counts, and the lookup remembers which registry it came from
-//!   ([`AuditIndex::audited_by`]), so a later "audited by registry X" can say
-//!   so. Nothing in this module makes an audited plugin load without a
+//!   ([`CrateAudits::audited_by`]), so "audited by registry X" can say so. Nothing in this module makes an audited plugin load without a
 //!   prompt: that decision is enablement's.
 //! - **Revocations** — "this release or payload must not load". One from *any*
 //!   registry applies ([`AuditIndex::revocation`]). A revocation names a
@@ -21,7 +20,7 @@
 //!
 //! Looking up a crate reads only `audits/<normalized-crate>.toml` in each
 //! registry, so a crate nobody audited costs one failed `open` per registry.
-//! The payload digest is computed ([`digest`]) only when a file needs it.
+//! The payload digest is computed ([`digest`]) only when a file needs it, and remembered for immutable (crates.io) sources.
 //!
 //! **The client is lenient** where the maintaining tooling is strict: a
 //! malformed entry (bad digest string, an entry that names both or neither of
@@ -37,6 +36,7 @@ use std::path::{Path, PathBuf};
 use symposium_sdk::audits::{AUDITS_DIR, Digest, FORMAT, RawAudit, RawRevoked, RevokeReason};
 use symposium_sdk::pm::{CARGO_PM, PackageId};
 
+mod cache;
 pub mod digest;
 pub mod digest_command;
 
@@ -57,6 +57,24 @@ pub struct AuditSource {
 #[derive(Debug, Clone, Default)]
 pub struct AuditIndex {
     sources: Vec<AuditSource>,
+    /// Where payload digests of immutable sources are remembered, if anywhere.
+    cache_dir: Option<PathBuf>,
+}
+
+/// What the registries' audits say about one crate's payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuditLookup {
+    /// A registry audited exactly this payload.
+    Audited(String),
+    /// A registry audited this crate, but not this payload: the audit does not
+    /// cover this release's content.
+    PayloadDiffers,
+    /// A registry has `[[audit]]` entries for this crate, but this plugin's
+    /// payload cannot be checked against them: it is not eligible for a digest
+    /// (it fetches skills from outside the crate, or is too large).
+    Ineligible,
+    /// No registry audited this crate (or the package is not cargo-sourced).
+    Unaudited,
 }
 
 /// A revocation that matched, and who issued it.
@@ -82,7 +100,22 @@ impl std::fmt::Display for Revocation {
 
 impl AuditIndex {
     pub fn new(sources: Vec<AuditSource>) -> Self {
-        Self { sources }
+        Self {
+            sources,
+            cache_dir: None,
+        }
+    }
+
+    /// Remember the digests of immutable (crates.io) sources under
+    /// `<cache_dir>/audit-digests/`. Path, workspace and git sources are never
+    /// cached, and a cache failure falls back to hashing.
+    pub fn with_cache_dir(mut self, cache_dir: &Path) -> Self {
+        self.cache_dir = Some(cache_dir.to_path_buf());
+        self
+    }
+
+    fn digest_of(&self, id: &PackageId, root: &Path) -> Result<Digest, digest::Ineligible> {
+        cache::payload_digest_cached(self.cache_dir.as_deref(), id, root)
     }
 
     /// Everything the registries say about `crate_name`: reads
@@ -108,13 +141,43 @@ impl AuditIndex {
         out
     }
 
-    /// Which registry audited `digest` for `crate_name`, if any. This is the
-    /// lookup enablement uses to say "audited by registry X"; the first
-    /// registry (in configuration order) that lists the digest wins.
-    pub fn audited_by(&self, crate_name: &str, digest: &Digest) -> Option<String> {
-        self.for_crate(crate_name)
-            .audited_by(digest)
-            .map(str::to_string)
+    /// Whether any trusted registry has an `audits/` directory at all. Cheap:
+    /// the hook path uses it to decide whether audited loading can matter.
+    pub fn any_audits_dir(&self) -> bool {
+        self.sources.iter().any(|s| s.dir.join(AUDITS_DIR).is_dir())
+    }
+
+    /// Whether the registries audited the payload at `root`, the content of
+    /// the cargo-sourced package `id`. The payload is hashed only when the
+    /// crate has an audits file with an `[[audit]]` entry. A package of
+    /// another package manager, or a crate with no `[[audit]]` entry, is
+    /// `Unaudited`; a crate with entries whose payload cannot be digested is
+    /// `Ineligible`.
+    pub fn lookup(&self, id: &PackageId, root: &Path) -> AuditLookup {
+        if id.pm != CARGO_PM {
+            return AuditLookup::Unaudited;
+        }
+        self.lookup_in(&self.for_crate(&id.name), id, root)
+    }
+
+    /// [`lookup`](Self::lookup) against `audits`, which must be
+    /// `self.for_crate(&id.name)`: for a caller that already read the crate's
+    /// files (to decide whether a lookup is worth a fetch) and should not
+    /// read and parse them again.
+    pub fn lookup_in(&self, audits: &CrateAudits, id: &PackageId, root: &Path) -> AuditLookup {
+        if id.pm != CARGO_PM || audits.audited.is_empty() {
+            return AuditLookup::Unaudited;
+        }
+        match self.digest_of(id, root) {
+            Ok(d) => match audits.audited_by(&d) {
+                Some(registry) => AuditLookup::Audited(registry.to_string()),
+                None => AuditLookup::PayloadDiffers,
+            },
+            Err(why) => {
+                tracing::debug!(id = %id, %why, "no payload digest; an audit cannot match");
+                AuditLookup::Ineligible
+            }
+        }
     }
 
     /// Whether a registry revoked `id`, a cargo-sourced package whose content
@@ -135,7 +198,7 @@ impl AuditIndex {
         let version = semver::Version::parse(&id.version).ok();
         let digest = audits
             .has_digest_revocation()
-            .then(|| digest::payload_digest(root))
+            .then(|| self.digest_of(id, root))
             .and_then(|result| match result {
                 Ok(d) => Some(d),
                 Err(why) => {
@@ -172,6 +235,11 @@ impl CrateAudits {
     fn merge(&mut self, other: CrateAudits) {
         self.audited.extend(other.audited);
         self.revoked.extend(other.revoked);
+    }
+
+    /// Does any registry audit (not merely revoke) the crate?
+    pub fn has_audits(&self) -> bool {
+        !self.audited.is_empty()
     }
 
     /// No audits and no revocations.

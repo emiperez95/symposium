@@ -469,11 +469,20 @@ async fn run_auto_sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, session_start
 /// plugin in — since expansion evaluates edge and plugin predicates against the
 /// crate graph too. Registry plugins reached without any of these dispatch on a
 /// crate-free context (the fast path for `PreToolUse`).
-fn hook_dispatch_needs_deps(sym: &Symposium, registry_plugins: &[Plugin]) -> bool {
+fn hook_dispatch_needs_deps(
+    sym: &Symposium,
+    registry_plugins: &[Plugin],
+    pms: &crate::pm::PmRegistry,
+) -> bool {
     registry_plugins
         .iter()
         .any(|p| p.manifest.hooks_need_dep_resolution() || !p.manifest.chained.is_empty())
         || sym.config.plugins.has_enablement_entries()
+        // Under `auto-accept = "audit"` a dependency a registry audited loads
+        // with no config entry, so the graph is needed whenever some trusted
+        // registry carries audits at all (a directory check, no file reads).
+        || (sym.config.plugins.auto_accept == crate::config::AutoAccept::Audit
+            && sym.audit_index(pms).any_audits_dir())
 }
 
 /// Refresh the source cache for every hook the workspace could fire this
@@ -493,12 +502,12 @@ async fn prewarm_hook_sources(sym: &Symposium, deps: &Arc<WorkspaceDeps>) {
     // Resolving the workspace runs cargo, so only do it when some hook's
     // gating references a concrete crate, or there is crate-plugin expansion to
     // perform (mirrors dispatch).
-    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins) {
-        crate::pm::workspace_dep_ids(sym, deps).await
+    let pms = sym.package_managers(deps);
+    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins, &pms) {
+        crate::pm::dep_ids(&pms).await
     } else {
         Vec::new()
     };
-    let pms = sym.package_managers(deps);
     let used = workspace
         .as_ref()
         .map(|ws| crate::discovery::used_plugins(sym, &pms, &registry.plugins, &ws.root))
@@ -735,12 +744,12 @@ pub async fn dispatch_plugin_hooks(
     // wildcard or env/shell/path predicate never needs the crate graph), or
     // when there is crate-plugin expansion to perform — that too evaluates
     // predicates against the crate graph.
-    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins) {
-        crate::pm::workspace_dep_ids(sym, deps).await
+    let pms = sym.package_managers(deps);
+    let dep_ids = if hook_dispatch_needs_deps(sym, &registry.plugins, &pms) {
+        crate::pm::dep_ids(&pms).await
     } else {
         Vec::new()
     };
-    let pms = sym.package_managers(deps);
     let used = workspace
         .as_ref()
         .map(|ws| crate::discovery::used_plugins(sym, &pms, &registry.plugins, &ws.root))
@@ -1094,6 +1103,37 @@ mod tests {
     use crate::pm::{ANY_VERSION, PackageId};
 
     use super::*;
+
+    /// The audited-loading branch of `hook_dispatch_needs_deps`: it needs the
+    /// crate graph only under `auto-accept = "audit"` with some trusted
+    /// registry carrying an `audits/` directory.
+    #[test]
+    fn audited_loading_needs_deps_only_under_audit_with_an_audits_dir() {
+        let needs = |auto_accept: &str, audits_dir: bool| {
+            let tmp = tempfile::tempdir().unwrap();
+            let config_dir = tmp.path().join("config");
+            std::fs::create_dir_all(&config_dir).unwrap();
+            std::fs::write(
+                config_dir.join("config.toml"),
+                format!(
+                    "[plugins]\nauto-accept = \"{auto_accept}\"\n\n[[registry]]\nname = \"reg\"\npath = \"reg\"\n\n\
+                     [defaults]\nsymposium-recommendations = false\nuser-plugins = false\n"
+                ),
+            )
+            .unwrap();
+            let reg = config_dir.join("reg");
+            std::fs::create_dir_all(&reg).unwrap();
+            if audits_dir {
+                std::fs::create_dir_all(reg.join("audits")).unwrap();
+            }
+            let sym = Symposium::from_dir(&config_dir);
+            let deps = Arc::new(WorkspaceDeps::detached());
+            hook_dispatch_needs_deps(&sym, &[], &sym.package_managers(&deps))
+        };
+        assert!(needs("audit", true));
+        assert!(!needs("none", true));
+        assert!(!needs("audit", false));
+    }
 
     #[test]
     fn env_safe_sanitizes_punctuation() {
