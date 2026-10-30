@@ -15,7 +15,7 @@ The payload is parsed first, and the agent's parser can declare it not an occurr
    - **Consent hint**: the dependency plugins awaiting consent, telling the agent to point the user at `cargo agents sync` or `cargo agents use`.
    - **Update nudge** — when `auto-update = "warn"`, the 24-hour check throttle has elapsed, and the registry reports a newer version: a line suggesting `cargo agents self-update`.
 
-   On `PostToolUse` and `UserPromptSubmit`, when auto-sync just re-synced because `Cargo.lock` changed, a generic notice says there may be new plugins and points at `cargo agents sync`. That is right after a tool call that changed the dependencies, or the user's next prompt when they changed them. `run_auto_sync` returns that as a bool, so an event with an unchanged `Cargo.lock` does no extra work. The notice is lost when the agent ignores context on that event (Antigravity after a tool call), or when the change is first seen on `PreToolUse` or `Stop`, which sync but carry no notice.
+   On `PostToolUse` and `UserPromptSubmit`, when auto-sync just re-synced because `Cargo.lock` changed, a generic notice says there may be new plugins and points at `cargo agents sync`. That is right after a tool call that changed the dependencies, or the user's next prompt when they changed them. `run_auto_sync` reports that in its `AutoSync` outcome, so an event with an unchanged `Cargo.lock` does no extra work. The notice is lost when the agent ignores context on that event (Antigravity after a tool call), or when the change is first seen on `PreToolUse` or `Stop`, which sync but carry no notice.
 
    Agents without hook registration (OpenCode, Goose) never receive this; for them the only discovery surface is `cargo agents --help` itself.
 
@@ -35,6 +35,6 @@ The payload is parsed first, and the agent's parser can declare it not an occurr
      - Return the merged result to the agent.
    - **A hook that exits 2 blocks**: dispatch stops, and `blocked_response` turns its stderr into the reason. On `PreToolUse` that is a canonical deny, translated like any other so each agent receives it in the form it honors (Antigravity ignores exit codes, Copilot drops the reason of a failing hook). On other events the process exits 2 with the reason on stderr.
 
-4. **Respond**: the agent's handler renders the final output as a `HookResponse` (stdout, stderr, exit code). Most agents read everything from stdout; Kiro, whose stdout is plain context, is told to deny a tool through exit 2.
+4. **Respond**: the agent's handler renders the final output as a `HookResponse` (stdout, stderr, exit code). On Claude's `SessionStart` after a successful auto-sync, `reloadSkills: true` is added first (see [Claude Code](./agent-details/claude-code.md#sessionstart-output)). Most agents read everything from stdout; Kiro, whose stdout is plain context, is told to deny a tool through exit 2.
 
 Plugin hooks can respond to agent-specific events (e.g., `pre-tool-use`, `post-tool-use`, `user-prompt-submit` for Claude Code). The available events depend on which agent is in use.

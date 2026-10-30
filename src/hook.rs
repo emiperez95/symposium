@@ -268,7 +268,7 @@ pub async fn execute_hook(
         // Auto-sync: install applicable skills into agent dirs (non-fatal).
         // SessionStart refreshes source caches and syncs unconditionally.
         let session_start = event == HookEvent::SessionStart;
-        let notify_about_possible_new_plugins = run_auto_sync(sym, &deps, session_start).await;
+        let auto_sync = run_auto_sync(sym, &deps, session_start).await;
 
         // SessionStart (once per session) also refreshes every hook's already-
         // cached source, so later events dispatch fresh binaries without per-
@@ -279,7 +279,7 @@ pub async fn execute_hook(
 
         // Builtin dispatch → symposium output → host agent output as Value
         let builtin_sym_output =
-            dispatch_builtin(sym, &sym_input, &deps, notify_about_possible_new_plugins).await;
+            dispatch_builtin(sym, &sym_input, &deps, auto_sync.dependencies_changed()).await;
         let builtin_agent_output = handler.translate_output(&builtin_sym_output);
         let prior_output = builtin_agent_output.to_hook_output();
 
@@ -296,7 +296,12 @@ pub async fn execute_hook(
         )
         .await
         {
-            Ok(final_output) => handler.respond(&final_output),
+            Ok(mut final_output) => {
+                if agent == HookAgent::Claude && session_start && auto_sync.synced() {
+                    request_claude_skill_reload(&mut final_output);
+                }
+                handler.respond(&final_output)
+            }
             Err(stderr) => blocked_response(handler.as_ref(), event, &stderr),
         };
         tracing::trace!(
@@ -413,11 +418,15 @@ fn write_hook_trace(agent: HookAgent, event: HookEvent, input: &str, response: &
 /// the `Cargo.lock` freshness gate — upstream skill changes land even when the
 /// workspace's dependencies are unchanged.
 ///
-/// Returns whether it re-synced because `Cargo.lock` changed mid-session.
-async fn run_auto_sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, session_start: bool) -> bool {
+/// Returns what it did; see [`AutoSync`].
+async fn run_auto_sync(
+    sym: &Symposium,
+    deps: &Arc<WorkspaceDeps>,
+    session_start: bool,
+) -> AutoSync {
     if !sym.config.auto_sync {
         tracing::debug!("auto-sync disabled, skipping");
-        return false;
+        return AutoSync::NotRun;
     }
 
     let cwd = deps.cwd().to_path_buf();
@@ -433,7 +442,7 @@ async fn run_auto_sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, session_start
         let state = crate::workspace_state::WorkspaceState::load(sym, root);
         if state.sync_is_fresh(root) {
             tracing::debug!("auto-sync skipped: Cargo.lock unchanged since last sync");
-            return false;
+            return AutoSync::NotRun;
         }
     }
     let dependencies_changed = !session_start && workspace_root.is_some();
@@ -447,7 +456,7 @@ async fn run_auto_sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, session_start
     tracing::debug!("auto-sync running");
     if let Err(e) = crate::sync::sync(sym, deps, update).await {
         tracing::warn!(error = %e, "auto-sync during hook failed (continuing)");
-        return false;
+        return AutoSync::NotRun;
     }
 
     // Record successful sync. If we didn't find the root earlier,
@@ -459,7 +468,56 @@ async fn run_auto_sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, session_start
         state.workspace_root = Some(root.clone());
         state.save(sym, root);
     }
-    dependencies_changed
+    if dependencies_changed {
+        AutoSync::SyncedAfterDependencyChange
+    } else {
+        AutoSync::Synced
+    }
+}
+
+/// What [`run_auto_sync`] did on this hook call. Two different signals are
+/// read from it: whether the dependencies changed (a notice that new plugins
+/// may be available) and whether a sync succeeded (on `SessionStart`, a request
+/// that Claude Code rescan its skill directories).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoSync {
+    /// Disabled, skipped by the `Cargo.lock` freshness gate, or failed. `sync`
+    /// fails only before it installs anything (outside a Rust workspace), so
+    /// this always means nothing changed on disk.
+    NotRun,
+    /// Synced successfully.
+    Synced,
+    /// Synced successfully because `Cargo.lock` changed mid-session.
+    SyncedAfterDependencyChange,
+}
+
+impl AutoSync {
+    fn synced(self) -> bool {
+        self != AutoSync::NotRun
+    }
+
+    fn dependencies_changed(self) -> bool {
+        self == AutoSync::SyncedAfterDependencyChange
+    }
+}
+
+/// Ask Claude Code to rescan its skill directories once `SessionStart` hooks
+/// finish. Claude discovers skills before they do, so the skills this
+/// session's sync just installed would otherwise stay invisible for the
+/// session. Set on the final output, after every plugin hook has been merged
+/// in, so that no plugin answering `false` cancels it (Claude ORs the field
+/// across hooks). It is requested after every successful sync, since `sync`
+/// does not report whether skills changed; a failed sync installed nothing.
+fn request_claude_skill_reload(output: &mut serde_json::Value) {
+    if !output.is_object() {
+        *output = serde_json::json!({});
+    }
+    let specific = &mut output["hookSpecificOutput"];
+    if !specific.is_object() {
+        *specific = serde_json::json!({});
+    }
+    specific["hookEventName"] = "SessionStart".into();
+    specific["reloadSkills"] = true.into();
 }
 
 /// Whether the hook pipeline must resolve the workspace crate graph before

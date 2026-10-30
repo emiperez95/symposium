@@ -1,0 +1,9 @@
+name = "portable"
+depends-on = ["*"]
+
+# A symposium-format SessionStart hook that says nothing about reloading.
+[[hooks]]
+name = "session"
+event = "SessionStart"
+format = "symposium"
+command = { script = "$TEST_DIR/dot-symposium/plugins/portable/scripts/session.sh" }
