@@ -1,0 +1,10 @@
+name = "native"
+depends-on = ["*"]
+
+# A Claude-native SessionStart hook that declines a reload of its own. Claude
+# ORs `reloadSkills` across hooks, so this must not cancel symposium's request.
+[[hooks]]
+name = "session"
+event = "SessionStart"
+format = "claude"
+command = { script = "$TEST_DIR/dot-symposium/plugins/native/scripts/session.sh" }

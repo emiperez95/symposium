@@ -296,7 +296,12 @@ pub async fn execute_hook(
         )
         .await
         {
-            Ok(final_output) => handler.respond(&final_output),
+            Ok(mut final_output) => {
+                if agent == HookAgent::Claude && session_start {
+                    request_claude_skill_reload(&mut final_output);
+                }
+                handler.respond(&final_output)
+            }
             Err(stderr) => blocked_response(handler.as_ref(), event, &stderr),
         };
         tracing::trace!(
@@ -460,6 +465,23 @@ async fn run_auto_sync(sym: &Symposium, deps: &Arc<WorkspaceDeps>, session_start
         state.save(sym, root);
     }
     dependencies_changed
+}
+
+/// Ask Claude Code to rescan its skill directories once `SessionStart` hooks
+/// finish: it discovers skills before they do, so the skills this session's
+/// auto-sync installed would otherwise stay invisible for the session. Set on
+/// the final output, after every plugin hook has been merged in, so a plugin
+/// answering `false` cannot cancel it.
+fn request_claude_skill_reload(output: &mut serde_json::Value) {
+    if !output.is_object() {
+        *output = serde_json::json!({});
+    }
+    let specific = &mut output["hookSpecificOutput"];
+    if !specific.is_object() {
+        *specific = serde_json::json!({});
+    }
+    specific["hookEventName"] = "SessionStart".into();
+    specific["reloadSkills"] = true.into();
 }
 
 /// Whether the hook pipeline must resolve the workspace crate graph before
