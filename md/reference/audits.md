@@ -111,6 +111,7 @@ Audits themselves do not yet change what loads: an audited payload is still aske
 Symposium is lenient where the tooling that maintains a list is strict:
 
 - A malformed entry is dropped with a warning and the rest of the file is used: a digest that is not `sha256:` plus 64 lowercase hex characters, an entry that sets both or neither of `versions` and `digest`, or a requirement that does not parse.
+- An `audit` or `revoked` key that is present but not an array of tables (`[revoked]` instead of `[[revoked]]`, or `revoked = "x"`) is dropped with a warning that says so, so a missing bracket cannot silently lose revocations. The rest of the file is still used.
 - A file whose `format` is not one Symposium knows is ignored whole, with a warning: it contributes no audits and no revocations.
 - Unknown keys are ignored.
 - Warnings go to the log, never to standard output, because the same reader runs inside agent hooks.

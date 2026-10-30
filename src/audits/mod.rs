@@ -267,7 +267,10 @@ fn parse_file(registry: &str, crate_name: &str, text: &str) -> (Option<CrateAudi
     }
 
     let mut out = CrateAudits::default();
-    for (i, value) in array(&table, "audit").into_iter().enumerate() {
+    for (i, value) in array(&table, "audit", &mut warnings)
+        .into_iter()
+        .enumerate()
+    {
         let digest = value
             .clone()
             .try_into::<RawAudit>()
@@ -278,7 +281,10 @@ fn parse_file(registry: &str, crate_name: &str, text: &str) -> (Option<CrateAudi
             None => warnings.push(format!("dropping malformed [[audit]] entry #{}", i + 1)),
         }
     }
-    for (i, value) in array(&table, "revoked").into_iter().enumerate() {
+    for (i, value) in array(&table, "revoked", &mut warnings)
+        .into_iter()
+        .enumerate()
+    {
         match value
             .clone()
             .try_into::<RawRevoked>()
@@ -296,12 +302,26 @@ fn parse_file(registry: &str, crate_name: &str, text: &str) -> (Option<CrateAudi
     (Some(out), warnings)
 }
 
-fn array<'a>(table: &'a toml::Table, key: &str) -> Vec<&'a toml::Value> {
-    table
-        .get(key)
-        .and_then(toml::Value::as_array)
-        .map(|a| a.iter().collect())
-        .unwrap_or_default()
+/// The entries of the `[[key]]` array of tables, empty when the key is absent.
+/// A key that is present but not an array (`[revoked]` for `[[revoked]]`, or
+/// `revoked = "x"`) yields nothing too, but says so: dropping it silently would
+/// lose every revocation in the file because of one missing bracket.
+fn array<'a>(
+    table: &'a toml::Table,
+    key: &str,
+    warnings: &mut Vec<String>,
+) -> Vec<&'a toml::Value> {
+    match table.get(key) {
+        None => Vec::new(),
+        Some(toml::Value::Array(a)) => a.iter().collect(),
+        Some(other) => {
+            warnings.push(format!(
+                "ignoring `{key}`: expected an array of tables ([[{key}]]), found {}",
+                other.type_str()
+            ));
+            Vec::new()
+        }
+    }
 }
 
 /// A revocation's selector and reason, or `None` when it is malformed.

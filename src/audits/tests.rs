@@ -80,6 +80,27 @@ fn an_unknown_format_ignores_the_whole_file_with_a_warning() {
 }
 
 #[test]
+fn a_revoked_key_that_is_not_an_array_warns_and_drops_it() {
+    let (audits, warnings) = parse(&format!(
+        "format = 1\ncrate = \"widget-lib\"\n\n[revoked]\nversions = \"<2.0.0\"\n\n[[audit]]\ndigest = \"{A}\"\n"
+    ));
+    let audits = audits.unwrap();
+    assert!(audits.revoked.is_empty());
+    assert_eq!(audits.audited.len(), 1, "the rest of the file is kept");
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("ignoring `revoked`") && warnings[0].contains("[[revoked]]"),
+        "{warnings:?}"
+    );
+
+    let (audits, warnings) =
+        parse("format = 1\ncrate = \"widget-lib\"\nrevoked = \"x\"\naudit = 3\n");
+    assert!(audits.unwrap().is_empty());
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(warnings[0].contains("`audit`") || warnings[1].contains("`audit`"));
+}
+
+#[test]
 fn malformed_entries_are_dropped_and_the_rest_kept() {
     let (audits, warnings) = parse(&format!(
         r#"
