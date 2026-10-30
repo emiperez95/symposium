@@ -23,6 +23,17 @@ pub enum ReportMode {
     Json,
 }
 
+/// The outcome of `cargo agents plugin digest`: a digest, or the reason the
+/// payload has none. Exactly one, by construction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DigestOutcome {
+    /// The payload digest (`sha256:<hex>` in JSON).
+    Digest(symposium_sdk::audits::Digest),
+    /// Why there is no digest.
+    Ineligible(String),
+}
+
 /// A structured event emitted during command execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -161,12 +172,10 @@ pub enum ReportEvent {
         /// The crate and version, when the target was a crate.
         #[serde(skip_serializing_if = "Option::is_none")]
         krate: Option<String>,
-        /// The payload digest (`sha256:<hex>`), when the payload has one.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        digest: Option<String>,
-        /// Why there is no digest, when there is none.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        ineligible: Option<String>,
+        /// Either the payload digest or why there is none. Flattened, so the
+        /// JSON keys are `digest` or `ineligible`.
+        #[serde(flatten)]
+        outcome: DigestOutcome,
     },
 
     /// A provider was listed with its plugins.
@@ -347,16 +356,12 @@ impl ReportEvent {
             // A bare digest on success, so `$(cargo agents plugin digest ..)`
             // is usable in scripts.
             Self::PayloadDigest {
-                target,
-                digest,
-                ineligible,
-                ..
-            } => match (digest, ineligible) {
-                (Some(digest), _) => digest.clone(),
-                (None, why) => format!(
-                    "no payload digest for {target}: {}",
-                    why.as_deref().unwrap_or("unknown reason")
-                ),
+                target, outcome, ..
+            } => match outcome {
+                DigestOutcome::Digest(digest) => digest.to_string(),
+                DigestOutcome::Ineligible(why) => {
+                    format!("no payload digest for {target}: {why}")
+                }
             },
             Self::PluginStatus {
                 name,

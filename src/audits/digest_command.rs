@@ -11,7 +11,7 @@ use anyhow::{Result, bail};
 
 use super::digest::payload_digest;
 use crate::config::Symposium;
-use crate::report::ReportEvent;
+use crate::report::{DigestOutcome, ReportEvent};
 
 /// Compute and report the digest for `target`: an existing directory is a crate
 /// root; anything else is a crate name, resolved the way `crate-info` resolves
@@ -36,8 +36,7 @@ pub async fn run(sym: &Symposium, cwd: &Path, target: &str) -> Result<()> {
                 report = %ReportEvent::PayloadDigest {
                     target: target.to_string(),
                     krate,
-                    digest: Some(digest.to_string()),
-                    ineligible: None,
+                    outcome: DigestOutcome::Digest(digest),
                 },
             );
             Ok(())
@@ -47,8 +46,7 @@ pub async fn run(sym: &Symposium, cwd: &Path, target: &str) -> Result<()> {
                 report = %ReportEvent::PayloadDigest {
                     target: target.to_string(),
                     krate,
-                    digest: None,
-                    ineligible: Some(why.to_string()),
+                    outcome: DigestOutcome::Ineligible(why.to_string()),
                 },
             );
             bail!("the payload of `{target}` is not eligible for a digest")
