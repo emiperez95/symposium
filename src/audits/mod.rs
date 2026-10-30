@@ -67,6 +67,19 @@ pub struct Revocation {
     pub reason: RevokeReason,
 }
 
+/// The sentence status output and the activation report both use: who issued
+/// the revocation and why.
+impl std::fmt::Display for Revocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "revoked by registry `{}`: it {}",
+            self.registry,
+            self.reason.sentence()
+        )
+    }
+}
+
 impl AuditIndex {
     pub fn new(sources: Vec<AuditSource>) -> Self {
         Self { sources }

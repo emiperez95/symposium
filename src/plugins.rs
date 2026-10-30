@@ -1250,11 +1250,7 @@ fn withheld(
                 reason = ?revocation.reason,
                 "not loading a revoked plugin"
             );
-            format!(
-                "revoked by registry `{}`: it {}",
-                revocation.registry,
-                revocation.reason.sentence()
-            )
+            revocation.to_string()
         }
     };
     tracing::debug!(

@@ -31,7 +31,6 @@ use anyhow::Result;
 use std::sync::Arc;
 use symposium_install::UpdateLevel;
 
-use crate::audits::Revocation;
 use crate::config::Symposium;
 use crate::discovery::{DiscoveredPlugin, Enablement};
 use crate::report::ReportEvent;
@@ -189,7 +188,7 @@ pub async fn workspace_status(
             entries.push(StatusEntry {
                 name: id.name,
                 version: Some(fetched.id.version),
-                root: revoked_root(&revocation),
+                root: revocation.to_string(),
                 state: StatusState::Revoked,
             });
             continue;
@@ -273,7 +272,7 @@ fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
             StatusState::Declined,
             "declined (`[plugins] disable`)".to_string(),
         ),
-        Enablement::Revoked(revocation) => (StatusState::Revoked, revoked_root(revocation)),
+        Enablement::Revoked(revocation) => (StatusState::Revoked, revocation.to_string()),
         Enablement::Candidate => (
             StatusState::Candidate,
             format!(
@@ -289,15 +288,6 @@ fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
         root,
         state,
     }
-}
-
-/// The status text for a revocation: who issued it and why.
-fn revoked_root(revocation: &Revocation) -> String {
-    format!(
-        "revoked by registry `{}`: it {}",
-        revocation.registry,
-        revocation.reason.sentence()
-    )
 }
 
 /// The `cargo agents status` entry point.
