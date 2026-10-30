@@ -77,7 +77,8 @@ pub struct RawRevoked {
     /// A payload digest, `sha256:<64 hex>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,
-    /// Why, as one of a closed set of codes.
+    /// Why, as one of a closed set of codes. Optional: a missing `reason`
+    /// reads as [`RevokeReason::Unknown`], and the revocation still applies.
     #[serde(default)]
     pub reason: RevokeReason,
 }
@@ -101,7 +102,8 @@ pub enum RevokeReason {
     Advisory,
     /// Reported as unsafe by someone.
     Report,
-    /// A code a newer release of Symposium added.
+    /// No `reason` was given, or a code this release does not know (one a
+    /// newer release added). The revocation applies either way.
     #[default]
     #[serde(other)]
     Unknown,
@@ -119,7 +121,7 @@ impl RevokeReason {
             Self::InjectionBait => "contains text meant to manipulate the agent",
             Self::Advisory => "is covered by a security advisory",
             Self::Report => "was reported as unsafe",
-            Self::Unknown => "was revoked for a reason this version of symposium does not know",
+            Self::Unknown => "was revoked, with no reason this version of symposium recognizes",
         }
     }
 }
@@ -291,5 +293,14 @@ extra = 1
         .unwrap();
         assert_eq!(file.revoked[0].reason, RevokeReason::Unknown);
         assert!(!RevokeReason::Unknown.sentence().is_empty());
+    }
+
+    #[test]
+    fn a_missing_reason_is_unknown_and_the_entry_stays_valid() {
+        let file: RawAuditFile =
+            toml::from_str("format = 1\ncrate = \"x\"\n[[revoked]]\nversions = \"<1.0.0\"\n")
+                .unwrap();
+        assert_eq!(file.revoked[0].reason, RevokeReason::Unknown);
+        assert_eq!(file.revoked[0].versions.as_deref(), Some("<1.0.0"));
     }
 }

@@ -50,7 +50,7 @@ reason = "injection-bait"
 | `[[revoked]]` | A release or payload that must not load. Set **exactly one** of `versions` and `digest`. |
 | `[[revoked]].versions` | A [semver requirement](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html) such as `>=1.3.0, <1.4.2`, matched against the resolved crate version. A version that is not valid semver never matches. As in cargo, a pre-release version matches only a requirement that itself names a pre-release. |
 | `[[revoked]].digest` | A payload digest. Revokes every release carrying that payload. |
-| `[[revoked]].reason` | Why, as one of the codes below. |
+| `[[revoked]].reason` | Why, as one of the codes below. Optional: a missing `reason` is read as unknown, and the revocation still applies. |
 
 ### Reasons
 
@@ -66,7 +66,7 @@ reason = "injection-bait"
 | `advisory` | is covered by a security advisory |
 | `report` | was reported as unsafe |
 
-A code this version of Symposium does not know (one a newer release added) is read as unknown and rendered generically; the revocation still applies.
+A missing `reason`, or a code this version of Symposium does not know (one a newer release added), is read as unknown and rendered generically ("was revoked, with no reason this version of symposium recognizes"); the revocation still applies.
 
 ## Payload digest
 
