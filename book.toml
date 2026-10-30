@@ -4,6 +4,10 @@ language = "en"
 src = "md"
 title = "Symposium"
 
+[preprocessor.habeas]
+command = "habeas mdbook"
+renderers = ["html"]
+
 [preprocessor.mermaid]
 command = "mdbook-mermaid"
 
@@ -11,7 +15,7 @@ command = "mdbook-mermaid"
 
 [output.html]
 additional-js = ["mermaid.min.js", "mermaid-init.js"]
-additional-css = ["theme/custom.css"]
+additional-css = ["theme/custom.css", "md/habeas.css"]
 fold.enable = true
 fold.level = 0
 git-repository-url = "https://github.com/symposium-dev/symposium"
