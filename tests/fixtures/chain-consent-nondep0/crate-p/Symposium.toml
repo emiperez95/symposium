@@ -1,0 +1,5 @@
+[[plugins]]
+source.cargo = "crate-z"
+
+[[plugins]]
+source.cargo = "crate-w"

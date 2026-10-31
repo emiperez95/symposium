@@ -137,18 +137,11 @@ pub async fn workspace_status(
         .map(|p| pms.identity(&p.canonical))
         .chain(discovery.all().map(|d| pms.identity(&d.id)))
         .collect();
-    let enabled = crate::discovery::enabled_dependencies(
-        sym,
-        &pms,
-        &registry.plugins,
-        &dep_ids,
-        &ws.root,
-        UpdateLevel::None,
-    )
-    .await;
     let used =
         crate::discovery::resolve_used(sym, &pms, &registry.plugins, &ws.root, UpdateLevel::None)
             .await;
+    let enabled =
+        crate::discovery::enabled_dependencies(sym, &pms, &registry.plugins, &dep_ids, &used).await;
     let audits = sym.audit_index(&pms);
     for id in enabled {
         if shown.contains(&pms.identity(&id)) {
@@ -262,11 +255,18 @@ fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
         Enablement::Revoked(revocation) => (StatusState::Revoked, revocation.to_string()),
         Enablement::Candidate => (
             StatusState::Candidate,
-            format!(
-                "found via dependency `{}`, awaiting consent (`cargo agents use {}`)",
-                found.recommends,
-                found.name()
-            ),
+            match &found.pulled_in_by {
+                Some(by) => format!(
+                    "pulled in by `{}`, awaiting consent (`cargo agents use {}`)",
+                    by.name,
+                    found.name()
+                ),
+                None => format!(
+                    "found via dependency `{}`, awaiting consent (`cargo agents use {}`)",
+                    found.recommends,
+                    found.name()
+                ),
+            },
         ),
     };
     StatusEntry {

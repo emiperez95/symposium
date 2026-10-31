@@ -1,0 +1,7 @@
+[package]
+name = "chain-consent-nondep-host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crate-p = { path = "crate-p" }

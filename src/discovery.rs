@@ -42,10 +42,11 @@ use std::sync::Arc;
 use symposium_install::UpdateLevel;
 
 use crate::audits::{AuditIndex, AuditLookup, Revocation};
-use crate::config::{AutoAccept, Symposium};
+use crate::config::{AutoAccept, Symposium, UseEntry};
 use crate::output::Output;
 use crate::plugins::Plugin;
 use crate::pm::{CARGO_PM, CargoPm, PackageId, PmRegistry};
+use crate::predicate::PredicateContext;
 use crate::report::ReportEvent;
 
 /// Why a discovered offer is (or is not) enabled.
@@ -102,6 +103,12 @@ pub struct DiscoveredPlugin {
     /// step (not disabled, revoked or already enabled), which is every
     /// [`Enablement::Candidate`] and [`Enablement::Audited`] offer.
     pub audit: Option<AuditLookup>,
+    /// For a crate named by the `[[plugins]] source.cargo` edge of a
+    /// dependency-sourced plugin (see [`plugins::resolve_active`]): the plugin
+    /// whose edge names it. `None` for a crate that is only a dependency.
+    ///
+    /// [`plugins::resolve_active`]: crate::plugins::resolve_active
+    pub pulled_in_by: Option<PackageId>,
 }
 
 impl DiscoveredPlugin {
@@ -133,6 +140,19 @@ pub struct Discovery {
 }
 
 impl Discovery {
+    /// File an offer under the bucket its enablement names.
+    fn file(&mut self, discovered: DiscoveredPlugin) {
+        match discovered.enablement {
+            Enablement::Used => self.active.push(discovered),
+            Enablement::AutoEnabled => self.auto_enabled.push(discovered),
+            Enablement::AutoAccepted => self.auto_accepted.push(discovered),
+            Enablement::Audited { .. } => self.audited.push(discovered),
+            Enablement::Declined => self.declined.push(discovered),
+            Enablement::Revoked(_) => self.revoked.push(discovered),
+            Enablement::Candidate => self.candidates.push(discovered),
+        }
+    }
+
     /// Every offer that may run, whatever enabled it.
     pub fn enabled(&self) -> impl Iterator<Item = &DiscoveredPlugin> {
         self.active
@@ -170,12 +190,8 @@ pub async fn discover(
     let pms = sym.package_managers(deps);
     let audits = sym.audit_index(&pms);
     let dep_ids = pms.list_deps().await.unwrap_or_default();
-    let used: HashSet<PackageId> =
-        resolve_used(sym, &pms, registry, &workspace_root, UpdateLevel::None)
-            .await
-            .into_iter()
-            .map(|(_, id)| id)
-            .collect();
+    let used_names = resolve_used(sym, &pms, registry, &workspace_root, UpdateLevel::None).await;
+    let used: HashSet<PackageId> = used_names.iter().map(|(_, id)| id.clone()).collect();
 
     let mut discovery = Discovery::default();
     // Untrusted instances = the cargo transport: its `active_plugins` are the
@@ -198,17 +214,68 @@ pub async fn discover(
                 description,
                 enablement,
                 audit,
+                pulled_in_by: None,
             };
-            match discovered.enablement {
-                Enablement::Used => discovery.active.push(discovered),
-                Enablement::AutoEnabled => discovery.auto_enabled.push(discovered),
-                Enablement::AutoAccepted => discovery.auto_accepted.push(discovered),
-                Enablement::Audited { .. } => discovery.audited.push(discovered),
-                Enablement::Declined => discovery.declined.push(discovered),
-                Enablement::Revoked(_) => discovery.revoked.push(discovered),
-                Enablement::Candidate => discovery.candidates.push(discovered),
-            }
+            discovery.file(discovered);
         }
+    }
+
+    // Crates a dependency-sourced plugin chains to that nothing accepted. They
+    // are as pending as an undecided dependency, and not always dependencies at
+    // all, so the loop above cannot see them.
+    let mut ctx = PredicateContext::new(&dep_ids).with_used(&crate::discovery::used_plugins(
+        sym,
+        &pms,
+        registry,
+        &workspace_root,
+    ));
+    let held_back = crate::plugins::resolve_active(
+        sym,
+        registry,
+        &pms,
+        Some(&workspace_root),
+        &used_names,
+        &mut ctx,
+        UpdateLevel::None,
+    )
+    .await
+    .pending_chains;
+    for chain in held_back {
+        let identity = pms.identity(&chain.id);
+        // Already classified above (a dependency that embeds a plugin): say who
+        // pulled it in when it is a candidate, and never list it twice, whichever
+        // bucket it is in.
+        if let Some(found) = discovery
+            .candidates
+            .iter_mut()
+            .find(|d| pms.identity(&d.id) == identity)
+        {
+            found.pulled_in_by = Some(chain.pulled_in_by);
+            continue;
+        }
+        if discovery.all().any(|d| pms.identity(&d.id) == identity) {
+            continue;
+        }
+        // Cache-only, like the load that held it back; an unfetchable crate is
+        // still pending, just undescribed.
+        let loaded = pms.load_plugin(&chain.id, UpdateLevel::None).await;
+        let loaded = loaded.first();
+        let id = loaded.map_or(chain.id.clone(), |l| l.plugin.canonical.clone());
+        let revocation = loaded.and_then(|l| audits.revocation(&l.plugin.canonical, &l.root));
+        let (enablement, audit) = decide(sym, &pms, &used, &id, revocation, || {
+            loaded.map_or(AuditLookup::Unaudited, |l| {
+                audits.lookup(&l.plugin.canonical, &l.root)
+            })
+        });
+        discovery.file(DiscoveredPlugin {
+            registry: CARGO_PM.to_string(),
+            recommends: id.name.clone(),
+            description: loaded.map(|l| describe_plugin(&l.plugin.manifest)),
+            id,
+            enablement,
+            audit,
+            pulled_in_by: Some(chain.pulled_in_by),
+        });
     }
     discovery
 }
@@ -228,8 +295,9 @@ pub async fn discover(
 ///
 /// `auto-enable` and `auto-accept` intentionally contribute only (1): they are
 /// consent for what a dependency you already have carries, not a way to add crates. Declined
-/// packages are pruned. A `use` name is resolved through the package managers
-/// ([`PmRegistry::identify`]) at `update`: one that names a plugin in
+/// packages are pruned. `used` is the resolved `use` entries ([`resolve_used`],
+/// done once by the caller): a `use` name is resolved through the package managers
+/// ([`PmRegistry::identify`]) at the caller's update level: one that names a plugin in
 /// `registry` is left out, since that plugin is loaded already and
 /// [`used_plugins`] wakes it, and one that no package manager has is skipped.
 pub async fn enabled_dependencies(
@@ -237,34 +305,27 @@ pub async fn enabled_dependencies(
     pms: &PmRegistry,
     registry: &[Plugin],
     dep_ids: &[PackageId],
-    workspace_root: &Path,
-    update: UpdateLevel,
+    used: &[(&str, PackageId)],
 ) -> Vec<PackageId> {
     let plugins = &sym.config.plugins;
-    let used = resolve_used(sym, pms, registry, workspace_root, update).await;
+    let used_ids: HashSet<PackageId> = used.iter().map(|(_, id)| id.clone()).collect();
     let mut enabled = Vec::new();
     let mut known = HashSet::new();
     let audits = sym.audit_index(pms);
     for id in dep_ids.iter().filter(|id| id.pm == CARGO_PM) {
-        let identity = pms.identity(id);
-        let is_used = used.iter().any(|(_, used)| *used == identity);
-        known.insert(identity);
-        if plugins.is_disabled(pms, id) {
-            continue;
-        }
-        if plugins.is_accepted_without_asking(pms, id)
-            || is_used
-            || is_audited_dependency(sym, pms, &audits, id).await
+        known.insert(pms.identity(id));
+        if acceptance(sym, pms, &audits, &used_ids, id, Payload::Cached).await
+            == Acceptance::Accepted
         {
             enabled.push(PackageId::any_version(&id.pm, &id.name));
         }
     }
 
     for (name, id) in used {
-        let named = PackageId::any_version(&id.pm, name);
-        if !registry.iter().any(|p| pms.identity(&p.canonical) == id)
+        let named = PackageId::any_version(&id.pm, *name);
+        if !registry.iter().any(|p| pms.identity(&p.canonical) == *id)
             && !plugins.is_disabled(pms, &named)
-            && known.insert(id)
+            && known.insert(id.clone())
         {
             enabled.push(named);
         }
@@ -274,33 +335,120 @@ pub async fn enabled_dependencies(
 }
 
 /// Under `auto-accept = "audit"`, does a trusted registry audit exactly the
-/// payload of the dependency `id`? Cache-only: the source is the one already on
-/// disk. Looked up by name first, so a crate nobody audited is neither fetched
-/// nor hashed. A revoked payload is not excluded here; activation withholds it
-/// (see `plugins::withheld`) exactly as it does for any other grant.
-async fn is_audited_dependency(
+/// payload of the crate `id`, which the caller has not loaded? The release is
+/// the one cargo's cache holds for the crate (the workspace pin or path
+/// override for a dependency), fetched cache-only. Looked up by name first, so a
+/// crate nobody audited is neither fetched nor hashed. A revoked payload is not
+/// excluded here; activation withholds it (see `plugins::withheld`) exactly as
+/// it does for any other grant.
+async fn is_audited_crate(
     sym: &Symposium,
     pms: &PmRegistry,
     audits: &AuditIndex,
     id: &PackageId,
 ) -> bool {
-    if sym.config.plugins.auto_accept != AutoAccept::Audit {
+    if sym.config.plugins.auto_accept != AutoAccept::Audit
+        || !audits.for_crate(&id.name).has_audits()
+    {
         return false;
     }
-    let crate_audits = audits.for_crate(&id.name);
-    if !crate_audits.has_audits() {
-        return false;
-    }
-    // Fetched by name, as loading will: the workspace pin (or path override)
-    // picks the release.
     let any = PackageId::any_version(&id.pm, &id.name);
     let Ok(fetched) = pms.fetch(&any, UpdateLevel::None).await else {
         return false;
     };
-    matches!(
-        audits.lookup_in(&crate_audits, &fetched.id, &fetched.root),
-        AuditLookup::Audited(_)
-    )
+    is_audited_payload(sym, audits, &fetched.id, &fetched.root)
+}
+
+/// Under `auto-accept = "audit"`, does a trusted registry audit exactly the
+/// payload in `root`, the content directory of release `id`?
+fn is_audited_payload(sym: &Symposium, audits: &AuditIndex, id: &PackageId, root: &Path) -> bool {
+    if sym.config.plugins.auto_accept != AutoAccept::Audit {
+        return false;
+    }
+    let crate_audits = audits.for_crate(&id.name);
+    crate_audits.has_audits()
+        && matches!(
+            audits.lookup_in(&crate_audits, id, root),
+            AuditLookup::Audited(_)
+        )
+}
+
+/// What the user's config and the audits say about a chain target.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Acceptance {
+    /// Accepted: it loads.
+    Accepted,
+    /// Refused outright, whatever else says: `disable` or a revocation. Not a
+    /// question for the user, so never pending.
+    Refused(Refusal),
+    /// Neither accepted nor refused: awaiting consent or an audit.
+    Pending,
+}
+
+/// Why a chain target is refused.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    Disabled,
+    Revoked(Revocation),
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Refusal::Disabled => f.write_str("disabled by `[plugins] disable`"),
+            Refusal::Revoked(revocation) => revocation.fmt(f),
+        }
+    }
+}
+
+/// The payload an [`acceptance`] decision weighs.
+pub(crate) enum Payload<'a> {
+    /// What `load_plugin` returned for the package: its release and root are what
+    /// would run, so a revocation and an audit are decided on exactly that.
+    Loaded(&'a crate::pm::LoadedPlugin),
+    /// Not loaded: an audit fetches cargo's cached release of the crate
+    /// cache-only. A revocation is not weighed (activation withholds it after
+    /// loading, `plugins::withheld`, as for every grant).
+    Cached,
+}
+
+/// The one acceptance rule for a package that is not a trust root: a workspace
+/// dependency in [`enabled_dependencies`] and the crate a dependency-sourced
+/// plugin chains to in `plugins::resolve_active`. In this precedence: `disable`,
+/// then (for a [`Payload::Loaded`]) a revocation of this release or payload,
+/// each [`Acceptance::Refused`]; then a `use` entry (`used`, the identities those
+/// entries name), an `auto-enable` entry or `auto-accept = "all"`, or under
+/// `auto-accept = "audit"` a trusted registry's audit of exactly the payload,
+/// each [`Acceptance::Accepted`]. Anything else is [`Acceptance::Pending`].
+/// Nothing is written.
+pub(crate) async fn acceptance(
+    sym: &Symposium,
+    pms: &PmRegistry,
+    audits: &AuditIndex,
+    used: &HashSet<PackageId>,
+    id: &PackageId,
+    payload: Payload<'_>,
+) -> Acceptance {
+    let plugins = &sym.config.plugins;
+    if plugins.is_disabled(pms, id) {
+        return Acceptance::Refused(Refusal::Disabled);
+    }
+    if let Payload::Loaded(loaded) = &payload
+        && let Some(revocation) = audits.revocation(&loaded.plugin.canonical, &loaded.root)
+    {
+        return Acceptance::Refused(Refusal::Revoked(revocation));
+    }
+    let granted = used.contains(&pms.identity(id)) || plugins.is_accepted_without_asking(pms, id);
+    let audited = !granted
+        && match &payload {
+            Payload::Loaded(l) => is_audited_payload(sym, audits, &l.plugin.canonical, &l.root),
+            Payload::Cached => is_audited_crate(sym, pms, audits, id).await,
+        };
+    if granted || audited {
+        Acceptance::Accepted
+    } else {
+        Acceptance::Pending
+    }
 }
 
 pub(crate) async fn resolve_used<'a>(
@@ -350,17 +498,31 @@ pub async fn discover_for(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Discove
 
 /// The names of the discovered offers still awaiting consent, deduplicated
 /// and sorted — what a consent prompt would ask about, and what the
-/// non-interactive hint names.
+/// non-interactive hint names. Includes crates a dependency-sourced plugin
+/// chains to ([`DiscoveredPlugin::pulled_in_by`]).
 pub async fn pending_candidates(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Vec<String> {
-    let mut names: Vec<String> = discover_for(sym, deps)
+    pending_candidate_notes(sym, deps)
+        .await
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// [`pending_candidates`] with, for a chained crate, the package whose plugin
+/// pulled it in. Sorted by name, one entry per name.
+pub async fn pending_candidate_notes(
+    sym: &Symposium,
+    deps: &Arc<WorkspaceDeps>,
+) -> Vec<(String, Option<PackageId>)> {
+    let mut notes: Vec<(String, Option<PackageId>)> = discover_for(sym, deps)
         .await
         .candidates
         .into_iter()
-        .map(|c| c.id.name)
+        .map(|c| (c.id.name, c.pulled_in_by))
         .collect();
-    names.sort();
-    names.dedup();
-    names
+    notes.sort();
+    notes.dedup_by(|a, b| a.0 == b.0);
+    notes
 }
 
 /// Record consent decisions: approvals into `[plugins] auto-enable`,
@@ -370,14 +532,43 @@ pub async fn pending_candidates(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> V
 /// Split out from the prompt so the decision recording is testable without a
 /// terminal, and so other entry points can record the same way.
 pub fn apply_consent(sym: &mut Symposium, approved: &[String], declined: &[String]) -> Result<()> {
-    if approved.is_empty() && declined.is_empty() {
+    apply_consent_scoped(sym, approved, &[], None, declined)
+}
+
+/// [`apply_consent`] with a second list of approvals recorded as
+/// workspace-scoped `[plugins] use` entries instead: crates the workspace does
+/// not depend on, which `auto-enable` (consent for what a *dependency*
+/// carries) cannot cover. The `use_in` entries are scoped to `workspace`, which
+/// they require.
+pub fn apply_consent_scoped(
+    sym: &mut Symposium,
+    approved: &[String],
+    use_in: &[String],
+    workspace: Option<&Path>,
+    declined: &[String],
+) -> Result<()> {
+    if approved.is_empty() && use_in.is_empty() && declined.is_empty() {
         return Ok(());
     }
+    let workspace = match (use_in.is_empty(), workspace) {
+        (false, None) => anyhow::bail!("`use` entries need a workspace to be scoped to"),
+        (_, workspace) => workspace,
+    };
     let pms = sym.detached_managers();
     let plugins = &mut sym.config.plugins;
     for name in approved {
         if !plugins.is_auto_enabled(&pms, &CargoPm::id_for(name, None)) {
             plugins.auto_enable.push(name.clone());
+        }
+    }
+    if let Some(root) = workspace {
+        for name in use_in {
+            if !plugins.is_used_in(&pms, &CargoPm::id_for(name, None), root) {
+                plugins.used.push(UseEntry::Workspace {
+                    name: name.clone(),
+                    workspace: root.to_path_buf(),
+                });
+            }
         }
     }
     for name in declined {
@@ -387,10 +578,15 @@ pub fn apply_consent(sym: &mut Symposium, approved: &[String], declined: &[Strin
     }
     sym.save_config().context("failed to write user config")?;
 
-    if !approved.is_empty() {
+    let enabled: Vec<&str> = approved
+        .iter()
+        .map(String::as_str)
+        .chain(use_in.iter().map(String::as_str))
+        .collect();
+    if !enabled.is_empty() {
         tracing::info!(
             report = %ReportEvent::Info {
-                message: format!("enabled dependency plugins: {}", approved.join(", ")),
+                message: format!("enabled dependency plugins: {}", enabled.join(", ")),
             },
         );
     }
@@ -431,28 +627,75 @@ pub async fn prompt_for_consent(
         return Ok(());
     }
 
+    // A chained crate that is not a dependency cannot be covered by
+    // `auto-enable`, so it is recorded as a workspace-scoped `use` entry.
+    let dep_ids = crate::pm::workspace_dep_ids(sym, deps).await;
+    let workspace_root = deps.workspace_root().map(Path::to_path_buf);
+    let pms = sym.detached_managers();
+
     let mut approved = Vec::new();
+    let mut use_in = Vec::new();
     let mut declined = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    for candidate in candidates {
-        let name = candidate.id.name.clone();
-        if !seen.insert(name.clone()) {
+    for candidate in &candidates {
+        let name = candidate.id.name.as_str();
+        if !seen.insert(name) {
             continue;
         }
         let answer = dialoguer::Select::new()
-            .with_prompt(consent_question(&candidate))
+            .with_prompt(consent_question(candidate))
             .items(["Ask me later", "Enable", "No — don't ask again"])
             .default(0)
             .interact_opt()
             .context("consent prompt failed")?;
         match answer {
-            Some(1) => approved.push(name),
-            Some(2) => declined.push(name),
+            Some(1) => match enable_record(candidate, &dep_ids, &pms, workspace_root.is_some()) {
+                EnableRecord::UseInWorkspace => use_in.push(name.to_string()),
+                EnableRecord::AutoEnable => approved.push(name.to_string()),
+            },
+            Some(2) => declined.push(name.to_string()),
             Some(_) => {}  // ask me later — record nothing
             None => break, // Esc — leave the rest undecided
         }
     }
-    apply_consent(sym, &approved, &declined)
+    apply_consent_scoped(
+        sym,
+        &approved,
+        &use_in,
+        workspace_root.as_deref(),
+        &declined,
+    )
+}
+
+/// Where an "Enable" answer is recorded.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum EnableRecord {
+    /// `[plugins] auto-enable`: consent for what a *dependency* carries.
+    AutoEnable,
+    /// A `use` entry scoped to the workspace: a chained crate the workspace
+    /// does not depend on, which `auto-enable` cannot cover (it contributes only
+    /// dependencies).
+    UseInWorkspace,
+}
+
+/// Choose how to record enabling `candidate`: a workspace `use` entry only for a
+/// crate that was pulled in by a chain, is not a workspace dependency (compared
+/// by package identity, so `crate_t` and `crate-t` are one) and has a workspace
+/// to scope to; `auto-enable` otherwise.
+pub(crate) fn enable_record(
+    candidate: &DiscoveredPlugin,
+    dep_ids: &[PackageId],
+    pms: &PmRegistry,
+    has_workspace: bool,
+) -> EnableRecord {
+    let dependency = dep_ids
+        .iter()
+        .any(|dep| pms.identity(dep) == pms.identity(&candidate.id));
+    if has_workspace && candidate.pulled_in_by.is_some() && !dependency {
+        EnableRecord::UseInWorkspace
+    } else {
+        EnableRecord::AutoEnable
+    }
 }
 
 /// The question the consent prompt asks about one candidate. It leads with the
@@ -479,7 +722,13 @@ fn consent_question(candidate: &DiscoveredPlugin) -> String {
             "Audited by registry `{registry}`, but `[plugins] auto-accept` is `none`, so it asks anyway."
         ),
     };
-    format!("{status}\nDependency `{name}` provides {what}. Enable it?")
+    match &candidate.pulled_in_by {
+        Some(by) => format!(
+            "{status}\nCrate `{name}`, pulled in by `{}`, provides {what}. Enable it?",
+            by.name
+        ),
+        None => format!("{status}\nDependency `{name}` provides {what}. Enable it?"),
+    }
 }
 
 /// A short human summary of what a discovered plugin contributes, for the
@@ -827,7 +1076,9 @@ mod tests {
     }
 
     async fn enabled_names(sym: &Symposium, deps: &[PackageId], root: &Path) -> Vec<String> {
-        enabled_dependencies(sym, &cached_crates(), &[], deps, root, UpdateLevel::None)
+        let pms = cached_crates();
+        let used = resolve_used(sym, &pms, &[], root, UpdateLevel::None).await;
+        enabled_dependencies(sym, &pms, &[], deps, &used)
             .await
             .into_iter()
             .map(|id| id.name)
@@ -977,7 +1228,55 @@ mod tests {
             description: Some("1 skill group".into()),
             enablement: Enablement::Candidate,
             audit: Some(audit),
+            pulled_in_by: None,
         }
+    }
+
+    #[test]
+    fn enabling_records_use_only_for_a_chained_crate_that_is_not_a_dependency() {
+        let pms = cached_crates();
+        let chained = |name: &str| {
+            let mut c = candidate_with(AuditLookup::Unaudited);
+            c.id = CargoPm::id_for(name, None);
+            c.pulled_in_by = Some(CargoPm::id_for("crate-p", None));
+            c
+        };
+        let deps = [CargoPm::id_for("widget-lib", Some("1.0.0"))];
+
+        // Chained and not a dependency: a workspace `use` entry.
+        assert_eq!(
+            enable_record(&chained("crate-t"), &deps, &pms, true),
+            EnableRecord::UseInWorkspace
+        );
+        // Chained, but a dependency (in another spelling): `auto-enable`.
+        assert_eq!(
+            enable_record(&chained("widget_lib"), &deps, &pms, true),
+            EnableRecord::AutoEnable
+        );
+        // A plain dependency candidate: `auto-enable`.
+        assert_eq!(
+            enable_record(&candidate_with(AuditLookup::Unaudited), &deps, &pms, true),
+            EnableRecord::AutoEnable
+        );
+        // Nothing to scope a `use` entry to: `auto-enable`.
+        assert_eq!(
+            enable_record(&chained("crate-t"), &deps, &pms, false),
+            EnableRecord::AutoEnable
+        );
+    }
+
+    #[test]
+    fn the_prompt_names_the_plugin_that_pulled_a_chained_crate_in() {
+        let mut candidate = candidate_with(AuditLookup::Unaudited);
+        candidate.pulled_in_by = Some(CargoPm::id_for("crate-p", None));
+        let q = consent_question(&candidate);
+        assert!(q.starts_with("NOT AUDITED"), "{q}");
+        assert!(
+            q.contains(
+                "Crate `widget-lib`, pulled in by `crate-p`, provides 1 skill group. Enable it?"
+            ),
+            "{q}"
+        );
     }
 
     #[test]

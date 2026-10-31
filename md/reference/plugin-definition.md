@@ -84,7 +84,7 @@ A skill group must have exactly one of `source.path` or `source.git`. A crate is
 
 ## Chained plugins
 
-A `[[plugins]]` entry names *another* plugin that loads whenever this plugin is active (the "a package is a plugin" edge). Today the referenced plugin is a **crate**, which always loads as a first-class plugin built from its manifest sources (see [Crate-embedded manifest](#crate-embedded-manifest) below). The referenced crate loads without a consent step of its own: the plugin that names it vouches for it (see [Configuration](./configuration.md#plugins)).
+A `[[plugins]]` entry names *another* plugin that loads whenever this plugin is active (the "a package is a plugin" edge). Today the referenced plugin is a **crate**, which always loads as a first-class plugin built from its manifest sources (see [Crate-embedded manifest](#crate-embedded-manifest) below). Whether the referenced crate needs a consent step of its own depends on who wrote the edge: see [Who vouches for a chained crate](#who-vouches-for-a-chained-crate).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -119,7 +119,17 @@ Because the chained reference is already the gate, a crate manifest may omit `na
 - `foo` declares `[defaults] skills = false` and nothing else → nothing loads.
 - `foo` carries its own `[[plugins]] source.cargo = "bar"` → `bar` resolves the same way, recursively.
 
-Everything a crate manifest declares loads like a registry plugin's: skills, hooks, MCP servers, subcommands, custom predicates, and further `[[plugins]]` references.
+Everything a crate manifest declares loads like a registry plugin's: skills, hooks, MCP servers, subcommands, custom predicates, and further `[[plugins]]` references (each of which is subject to the rule below).
+
+### Who vouches for a chained crate
+
+A chain is only as trusted as the plugin that declares it.
+
+- **From a registry plugin or a workspace plugin**, the edge is vouched for: the crate it names loads with no `[plugins]` entry of its own. (`[plugins] disable` and [revocations](./audits.md#revocations) still apply.)
+- **From a plugin embedded in a dependency, or in a crate that was itself reached through a chain**, the edge is *not* vouched for. The audit of the declaring crate pins its manifest, which names the target, but not the target's content, so a later release of the target could change what it ships. The target crate loads only if it would be accepted like any other dependency plugin, in the usual order: `disable` (not loaded), a [revocation](./audits.md#revocations) (not loaded), a [`[plugins] use`](./configuration.md#plugins) or `auto-enable` entry naming it, `auto-accept = "all"`, then, under `auto-accept = "audit"`, a trusted registry's [audit](./audits.md#audited-loading) of the target's own payload. Anything else is a pending candidate: it is not loaded, [`cargo agents status`](./cargo-agents-status.md) lists it as `candidate` with the crate that pulled it in, and the interactive [`cargo agents sync`](./cargo-agents-sync.md#consent-prompt) asks about it.
+- The status carries down the chain: the edges of a crate reached from a dependency are unvouched in turn, and so are the edges of a crate reached from a registry plugin's edge (only a registry or workspace plugin itself vouches). A crate reachable through both a vouched and an unvouched edge loads.
+
+If you publish a crate whose plugin chains to other crates, tell your users to expect this: those crates are enabled or audited individually.
 
 ### Delegating to another crate
 
