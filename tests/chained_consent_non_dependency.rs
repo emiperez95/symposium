@@ -81,6 +81,29 @@ async fn a_chain_target_that_is_not_a_dependency() {
             // Nothing accepts crate-z yet.
             assert!(!z_dispatches(&mut ctx).await);
 
+            // Both targets are listed as candidates naming the package that pulled
+            // them in. The cached one is described; `crate-w`, in no cache, is
+            // still pending but undescribed.
+            let root = ctx.workspace_root.clone().unwrap();
+            let deps = ctx.sym.workspace_deps(&root);
+            let found = symposium::discovery::discover_for(&ctx.sym, &deps).await;
+            let candidate = |name: &str| {
+                found
+                    .candidates
+                    .iter()
+                    .find(|d| d.id.name == name)
+                    .unwrap_or_else(|| panic!("no candidate `{name}` in {:?}", found.candidates))
+            };
+            let z = candidate("crate-z");
+            assert_eq!(z.pulled_in_by.as_ref().unwrap().name, "crate-p");
+            assert!(z.description.as_deref().unwrap().contains("skill"), "{z:?}");
+            let w = candidate("crate-w");
+            assert_eq!(w.pulled_in_by.as_ref().unwrap().name, "crate-p");
+            assert_eq!(w.description, None, "{w:?}");
+            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+            let z = entries.iter().find(|e| e.name == "crate-z").unwrap();
+            assert!(z.root.contains("pulled in by `crate-p`"), "{z:?}");
+
             // An audit of a different payload than the one that loads does not
             // accept it: the decision is made on the loaded release.
             let other = cache_crate(
@@ -94,6 +117,12 @@ async fn a_chain_target_that_is_not_a_dependency() {
 
             // An audit of the payload that loads does.
             write_audit(&ctx, "crate-z", payload_digest(&z_dir).unwrap());
+            assert!(z_dispatches(&mut ctx).await);
+
+            // `auto-accept = "none"` never lets an audit decide.
+            ctx.sym.config.plugins.auto_accept = AutoAccept::None;
+            assert!(!z_dispatches(&mut ctx).await);
+            ctx.sym.config.plugins.auto_accept = AutoAccept::Audit;
             assert!(z_dispatches(&mut ctx).await);
 
             // Disabled: one `declined` line (from the config entry), not pending.
