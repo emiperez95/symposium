@@ -46,6 +46,7 @@ use crate::config::{AutoAccept, Symposium};
 use crate::output::Output;
 use crate::plugins::Plugin;
 use crate::pm::{CARGO_PM, CargoPm, PackageId, PmRegistry};
+use crate::predicate::PredicateContext;
 use crate::report::ReportEvent;
 
 /// Why a discovered offer is (or is not) enabled.
@@ -102,6 +103,12 @@ pub struct DiscoveredPlugin {
     /// step (not disabled, revoked or already enabled), which is every
     /// [`Enablement::Candidate`] and [`Enablement::Audited`] offer.
     pub audit: Option<AuditLookup>,
+    /// For a crate named by the `[[plugins]] source.cargo` edge of a
+    /// dependency-sourced plugin (see [`plugins::resolve_active`]): the plugin
+    /// whose edge names it. `None` for a crate that is only a dependency.
+    ///
+    /// [`plugins::resolve_active`]: crate::plugins::resolve_active
+    pub pulled_in_by: Option<String>,
 }
 
 impl DiscoveredPlugin {
@@ -133,6 +140,19 @@ pub struct Discovery {
 }
 
 impl Discovery {
+    /// File an offer under the bucket its enablement names.
+    fn file(&mut self, discovered: DiscoveredPlugin) {
+        match discovered.enablement {
+            Enablement::Used => self.active.push(discovered),
+            Enablement::AutoEnabled => self.auto_enabled.push(discovered),
+            Enablement::AutoAccepted => self.auto_accepted.push(discovered),
+            Enablement::Audited { .. } => self.audited.push(discovered),
+            Enablement::Declined => self.declined.push(discovered),
+            Enablement::Revoked(_) => self.revoked.push(discovered),
+            Enablement::Candidate => self.candidates.push(discovered),
+        }
+    }
+
     /// Every offer that may run, whatever enabled it.
     pub fn enabled(&self) -> impl Iterator<Item = &DiscoveredPlugin> {
         self.active
@@ -198,17 +218,63 @@ pub async fn discover(
                 description,
                 enablement,
                 audit,
+                pulled_in_by: None,
             };
-            match discovered.enablement {
-                Enablement::Used => discovery.active.push(discovered),
-                Enablement::AutoEnabled => discovery.auto_enabled.push(discovered),
-                Enablement::AutoAccepted => discovery.auto_accepted.push(discovered),
-                Enablement::Audited { .. } => discovery.audited.push(discovered),
-                Enablement::Declined => discovery.declined.push(discovered),
-                Enablement::Revoked(_) => discovery.revoked.push(discovered),
-                Enablement::Candidate => discovery.candidates.push(discovered),
-            }
+            discovery.file(discovered);
         }
+    }
+
+    // Crates a dependency-sourced plugin chains to that nothing accepted. They
+    // are as pending as an undecided dependency, and not always dependencies at
+    // all, so the loop above cannot see them.
+    let mut ctx = PredicateContext::new(&dep_ids).with_used(&crate::discovery::used_plugins(
+        sym,
+        &pms,
+        registry,
+        &workspace_root,
+    ));
+    let held_back = crate::plugins::resolve_active(
+        sym,
+        registry,
+        &pms,
+        Some(&workspace_root),
+        &mut ctx,
+        UpdateLevel::None,
+    )
+    .await
+    .pending_chains;
+    for chain in held_back {
+        let identity = pms.identity(&chain.id);
+        // A dependency that embeds a plugin was classified above: say who
+        // pulled it in, without offering it twice.
+        if let Some(found) = discovery
+            .candidates
+            .iter_mut()
+            .find(|d| pms.identity(&d.id) == identity)
+        {
+            found.pulled_in_by = Some(chain.pulled_in_by);
+            continue;
+        }
+        // Cache-only, like the load that held it back; an unfetchable crate is
+        // still pending, just undescribed.
+        let loaded = pms.load_plugin(&chain.id, UpdateLevel::None).await;
+        let loaded = loaded.first();
+        let id = loaded.map_or(chain.id.clone(), |l| l.plugin.canonical.clone());
+        let revocation = loaded.and_then(|l| audits.revocation(&l.plugin.canonical, &l.root));
+        let (enablement, audit) = decide(sym, &pms, &used, &id, revocation, || {
+            loaded.map_or(AuditLookup::Unaudited, |l| {
+                audits.lookup(&l.plugin.canonical, &l.root)
+            })
+        });
+        discovery.file(DiscoveredPlugin {
+            registry: CARGO_PM.to_string(),
+            recommends: id.name.clone(),
+            description: loaded.map(|l| describe_plugin(&l.plugin.manifest)),
+            id,
+            enablement,
+            audit,
+            pulled_in_by: Some(chain.pulled_in_by),
+        });
     }
     discovery
 }
@@ -374,17 +440,31 @@ pub async fn discover_for(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Discove
 
 /// The names of the discovered offers still awaiting consent, deduplicated
 /// and sorted — what a consent prompt would ask about, and what the
-/// non-interactive hint names.
+/// non-interactive hint names. Includes crates a dependency-sourced plugin
+/// chains to ([`DiscoveredPlugin::pulled_in_by`]).
 pub async fn pending_candidates(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Vec<String> {
-    let mut names: Vec<String> = discover_for(sym, deps)
+    pending_candidate_notes(sym, deps)
+        .await
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// [`pending_candidates`] with, for a chained crate, the plugin that pulled it
+/// in. Sorted by name, one entry per name.
+pub async fn pending_candidate_notes(
+    sym: &Symposium,
+    deps: &Arc<WorkspaceDeps>,
+) -> Vec<(String, Option<String>)> {
+    let mut notes: Vec<(String, Option<String>)> = discover_for(sym, deps)
         .await
         .candidates
         .into_iter()
-        .map(|c| c.id.name)
+        .map(|c| (c.id.name, c.pulled_in_by))
         .collect();
-    names.sort();
-    names.dedup();
-    names
+    notes.sort();
+    notes.dedup_by(|a, b| a.0 == b.0);
+    notes
 }
 
 /// Record consent decisions: approvals into `[plugins] auto-enable`,
@@ -1001,6 +1081,7 @@ mod tests {
             description: Some("1 skill group".into()),
             enablement: Enablement::Candidate,
             audit: Some(audit),
+            pulled_in_by: None,
         }
     }
 

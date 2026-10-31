@@ -238,3 +238,83 @@ async fn a_diamond_with_one_vouched_edge_loads() {
     .await
     .unwrap();
 }
+
+async fn status(ctx: &TestContext) -> Vec<symposium::status_command::StatusEntry> {
+    let deps = ctx.sym.workspace_deps(ctx.workspace_root.as_ref().unwrap());
+    symposium::status_command::workspace_status(&ctx.sym, &deps)
+        .await
+        .unwrap()
+}
+
+/// A held-back chain target is a candidate in `status`, `pending_candidates`
+/// and the `SessionStart` hint, each naming the crate that pulled it in; once
+/// accepted it is active and no longer pending.
+#[tokio::test]
+async fn a_held_back_chain_target_is_surfaced_with_who_pulled_it_in() {
+    use symposium::status_command::StatusState;
+    use symposium_testlib::HookStep;
+
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["chain-consent0"],
+        async |mut ctx| {
+            ctx.sym.config.auto_update = symposium::config::AutoUpdate::Off;
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            ctx.sym.config.plugins.auto_enable = vec!["crate-p".into()];
+
+            let entries = status(&ctx).await;
+            let t = entries.iter().find(|e| e.name == "crate-t").unwrap();
+            assert_eq!(t.state, StatusState::Candidate, "{t:?}");
+            assert!(t.root.contains("pulled in by `crate-p`"), "{t:?}");
+            // `crate-u` is only reachable through `crate-t`, which is not loaded.
+            let u = entries.iter().find(|e| e.name == "crate-u").unwrap();
+            assert!(!u.root.contains("pulled in by"), "{u:?}");
+
+            let deps = ctx.sym.workspace_deps(ctx.workspace_root.as_ref().unwrap());
+            let notes = symposium::discovery::pending_candidate_notes(&ctx.sym, &deps).await;
+            assert!(
+                notes.contains(&("crate-t".to_string(), Some("crate-p".to_string()))),
+                "{notes:?}"
+            );
+
+            let result = ctx
+                .prompt_or_hook(
+                    "hello",
+                    &[HookStep::session_start()],
+                    symposium::hook_schema::HookAgent::Claude,
+                )
+                .await?;
+            let context = result
+                .hooks
+                .iter()
+                .filter_map(|h| {
+                    h.output
+                        .get("additionalContext")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| {
+                            h.output
+                                .get("hookSpecificOutput")
+                                .and_then(|o| o.get("additionalContext"))
+                                .and_then(|v| v.as_str())
+                        })
+                })
+                .next()
+                .expect("session-start should produce additionalContext")
+                .to_string();
+            assert!(
+                context.contains("crate-t (named by the plugin of `crate-p`)"),
+                "{context}"
+            );
+
+            ctx.sym.config.plugins.used = vec![UseEntry::Global("crate-t".into())];
+            let entries = status(&ctx).await;
+            let t = entries.iter().find(|e| e.name == "crate-t").unwrap();
+            assert_eq!(t.state, StatusState::Active, "{t:?}");
+            let notes = symposium::discovery::pending_candidate_notes(&ctx.sym, &deps).await;
+            assert!(notes.iter().all(|(n, _)| n != "crate-t"), "{notes:?}");
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}

@@ -262,11 +262,17 @@ fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
         Enablement::Revoked(revocation) => (StatusState::Revoked, revocation.to_string()),
         Enablement::Candidate => (
             StatusState::Candidate,
-            format!(
-                "found via dependency `{}`, awaiting consent (`cargo agents use {}`)",
-                found.recommends,
-                found.name()
-            ),
+            match &found.pulled_in_by {
+                Some(by) => format!(
+                    "pulled in by `{by}`, awaiting consent (`cargo agents use {}`)",
+                    found.name()
+                ),
+                None => format!(
+                    "found via dependency `{}`, awaiting consent (`cargo agents use {}`)",
+                    found.recommends,
+                    found.name()
+                ),
+            },
         ),
     };
     StatusEntry {
