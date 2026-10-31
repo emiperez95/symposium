@@ -318,3 +318,78 @@ async fn a_held_back_chain_target_is_surfaced_with_who_pulled_it_in() {
     .await
     .unwrap();
 }
+
+/// Answering "Enable" for a chained crate the workspace does not depend on
+/// records a workspace-scoped `use` entry (`auto-enable` only covers
+/// dependencies); one it does depend on keeps the `auto-enable` recording.
+#[tokio::test]
+async fn consent_records_use_for_a_non_dependency_and_auto_enable_for_a_dependency() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["chain-consent0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let root = ctx.workspace_root.clone().unwrap();
+
+            symposium::discovery::apply_consent_scoped(
+                &mut ctx.sym,
+                &["crate-t".to_string()],
+                &[("crate-ghost".to_string(), root.clone())],
+                &["crate-u".to_string()],
+            )?;
+            let plugins = &ctx.sym.config.plugins;
+            assert_eq!(plugins.auto_enable, vec!["crate-t".to_string()]);
+            assert_eq!(
+                plugins.used,
+                vec![UseEntry::Workspace {
+                    name: "crate-ghost".into(),
+                    workspace: root.clone()
+                }]
+            );
+            assert_eq!(plugins.disable, vec!["crate-u".to_string()]);
+
+            // Recording again, in another spelling, changes nothing.
+            let before = std::fs::read_to_string(ctx.sym.config_dir().join("config.toml"))?;
+            symposium::discovery::apply_consent_scoped(
+                &mut ctx.sym,
+                &["crate_t".to_string()],
+                &[("crate_ghost".to_string(), root)],
+                &["crate_u".to_string()],
+            )?;
+            let after = std::fs::read_to_string(ctx.sym.config_dir().join("config.toml"))?;
+            assert_eq!(before, after);
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// The prompt stays inert off a terminal even with a chain candidate pending.
+#[tokio::test]
+async fn the_prompt_stays_inert_for_chain_candidates() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["chain-consent0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            ctx.sym.config.plugins.auto_enable = vec!["crate-p".into()];
+            let deps = ctx.sym.workspace_deps(ctx.workspace_root.as_ref().unwrap());
+            symposium::discovery::prompt_for_consent(
+                &mut ctx.sym,
+                &deps,
+                &symposium::output::Output::quiet(),
+            )
+            .await?;
+            assert_eq!(
+                ctx.sym.config.plugins.auto_enable,
+                vec!["crate-p".to_string()]
+            );
+            assert!(ctx.sym.config.plugins.used.is_empty());
+            assert!(ctx.sym.config.plugins.disable.is_empty());
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
