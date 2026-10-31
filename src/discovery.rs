@@ -34,7 +34,7 @@
 //! [`PackageManager::active_plugins`]: crate::pm::PackageManager::active_plugins
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::pm::WorkspaceDeps;
 use anyhow::{Context, Result};
@@ -190,12 +190,8 @@ pub async fn discover(
     let pms = sym.package_managers(deps);
     let audits = sym.audit_index(&pms);
     let dep_ids = pms.list_deps().await.unwrap_or_default();
-    let used: HashSet<PackageId> =
-        resolve_used(sym, &pms, registry, &workspace_root, UpdateLevel::None)
-            .await
-            .into_iter()
-            .map(|(_, id)| id)
-            .collect();
+    let used_names = resolve_used(sym, &pms, registry, &workspace_root, UpdateLevel::None).await;
+    let used: HashSet<PackageId> = used_names.iter().map(|(_, id)| id.clone()).collect();
 
     let mut discovery = Discovery::default();
     // Untrusted instances = the cargo transport: its `active_plugins` are the
@@ -238,6 +234,7 @@ pub async fn discover(
         registry,
         &pms,
         Some(&workspace_root),
+        &used_names,
         &mut ctx,
         UpdateLevel::None,
     )
@@ -298,8 +295,9 @@ pub async fn discover(
 ///
 /// `auto-enable` and `auto-accept` intentionally contribute only (1): they are
 /// consent for what a dependency you already have carries, not a way to add crates. Declined
-/// packages are pruned. A `use` name is resolved through the package managers
-/// ([`PmRegistry::identify`]) at `update`: one that names a plugin in
+/// packages are pruned. `used` is the resolved `use` entries ([`resolve_used`],
+/// done once by the caller): a `use` name is resolved through the package managers
+/// ([`PmRegistry::identify`]) at the caller's update level: one that names a plugin in
 /// `registry` is left out, since that plugin is loaded already and
 /// [`used_plugins`] wakes it, and one that no package manager has is skipped.
 pub async fn enabled_dependencies(
@@ -307,34 +305,27 @@ pub async fn enabled_dependencies(
     pms: &PmRegistry,
     registry: &[Plugin],
     dep_ids: &[PackageId],
-    workspace_root: &Path,
-    update: UpdateLevel,
+    used: &[(&str, PackageId)],
 ) -> Vec<PackageId> {
     let plugins = &sym.config.plugins;
-    let used = resolve_used(sym, pms, registry, workspace_root, update).await;
+    let used_ids: HashSet<PackageId> = used.iter().map(|(_, id)| id.clone()).collect();
     let mut enabled = Vec::new();
     let mut known = HashSet::new();
     let audits = sym.audit_index(pms);
     for id in dep_ids.iter().filter(|id| id.pm == CARGO_PM) {
-        let identity = pms.identity(id);
-        let is_used = used.iter().any(|(_, used)| *used == identity);
-        known.insert(identity);
-        if plugins.is_disabled(pms, id) {
-            continue;
-        }
-        if plugins.is_accepted_without_asking(pms, id)
-            || is_used
-            || is_audited_crate(sym, pms, &audits, id).await
+        known.insert(pms.identity(id));
+        if acceptance(sym, pms, &audits, &used_ids, id, Payload::Cached).await
+            == Acceptance::Accepted
         {
             enabled.push(PackageId::any_version(&id.pm, &id.name));
         }
     }
 
     for (name, id) in used {
-        let named = PackageId::any_version(&id.pm, name);
-        if !registry.iter().any(|p| pms.identity(&p.canonical) == id)
+        let named = PackageId::any_version(&id.pm, *name);
+        if !registry.iter().any(|p| pms.identity(&p.canonical) == *id)
             && !plugins.is_disabled(pms, &named)
-            && known.insert(id)
+            && known.insert(id.clone())
         {
             enabled.push(named);
         }
@@ -410,35 +401,50 @@ impl std::fmt::Display for Refusal {
     }
 }
 
-/// May the chain target `loaded` load? `loaded` is what `load_plugin` returned
-/// for the edge, so the decision is made on the payload that would actually run,
-/// not on a separate lookup that could resolve a different release. The same
-/// acceptance as any dependency plugin, in the same precedence: `disable`, then
-/// a revocation of this release or payload, each a [`Acceptance::Refused`];
-/// then a `use` entry (`used`, the identities those entries name), an
-/// `auto-enable` entry or `auto-accept = "all"`, or under `auto-accept =
-/// "audit"` a trusted registry's audit of exactly `loaded`'s content, whether or
-/// not the workspace depends on the crate, each [`Acceptance::Accepted`].
-/// Anything else is [`Acceptance::Pending`]. Nothing is fetched or written.
-pub(crate) fn chain_acceptance(
+/// The payload an [`acceptance`] decision weighs.
+pub(crate) enum Payload<'a> {
+    /// What `load_plugin` returned for the package: its release and root are what
+    /// would run, so a revocation and an audit are decided on exactly that.
+    Loaded(&'a crate::pm::LoadedPlugin),
+    /// Not loaded: an audit fetches cargo's cached release of the crate
+    /// cache-only. A revocation is not weighed (activation withholds it after
+    /// loading, `plugins::withheld`, as for every grant).
+    Cached,
+}
+
+/// The one acceptance rule for a package that is not a trust root: a workspace
+/// dependency in [`enabled_dependencies`] and the crate a dependency-sourced
+/// plugin chains to in `plugins::resolve_active`. In this precedence: `disable`,
+/// then (for a [`Payload::Loaded`]) a revocation of this release or payload,
+/// each [`Acceptance::Refused`]; then a `use` entry (`used`, the identities those
+/// entries name), an `auto-enable` entry or `auto-accept = "all"`, or under
+/// `auto-accept = "audit"` a trusted registry's audit of exactly the payload,
+/// each [`Acceptance::Accepted`]. Anything else is [`Acceptance::Pending`].
+/// Nothing is written.
+pub(crate) async fn acceptance(
     sym: &Symposium,
     pms: &PmRegistry,
     audits: &AuditIndex,
     used: &HashSet<PackageId>,
-    loaded: &crate::pm::LoadedPlugin,
+    id: &PackageId,
+    payload: Payload<'_>,
 ) -> Acceptance {
     let plugins = &sym.config.plugins;
-    let id = &loaded.plugin.canonical;
     if plugins.is_disabled(pms, id) {
         return Acceptance::Refused(Refusal::Disabled);
     }
-    if let Some(revocation) = audits.revocation(id, &loaded.root) {
+    if let Payload::Loaded(loaded) = &payload
+        && let Some(revocation) = audits.revocation(&loaded.plugin.canonical, &loaded.root)
+    {
         return Acceptance::Refused(Refusal::Revoked(revocation));
     }
-    if used.contains(&pms.identity(id))
-        || plugins.is_accepted_without_asking(pms, id)
-        || is_audited_payload(sym, audits, id, &loaded.root)
-    {
+    let granted = used.contains(&pms.identity(id)) || plugins.is_accepted_without_asking(pms, id);
+    let audited = !granted
+        && match &payload {
+            Payload::Loaded(l) => is_audited_payload(sym, audits, &l.plugin.canonical, &l.root),
+            Payload::Cached => is_audited_crate(sym, pms, audits, id).await,
+        };
+    if granted || audited {
         Acceptance::Accepted
     } else {
         Acceptance::Pending
@@ -526,23 +532,28 @@ pub async fn pending_candidate_notes(
 /// Split out from the prompt so the decision recording is testable without a
 /// terminal, and so other entry points can record the same way.
 pub fn apply_consent(sym: &mut Symposium, approved: &[String], declined: &[String]) -> Result<()> {
-    apply_consent_scoped(sym, approved, &[], declined)
+    apply_consent_scoped(sym, approved, &[], None, declined)
 }
 
 /// [`apply_consent`] with a second list of approvals recorded as
 /// workspace-scoped `[plugins] use` entries instead: crates the workspace does
 /// not depend on, which `auto-enable` (consent for what a *dependency*
-/// carries) cannot cover. `use_in` pairs each name with the workspace root the
-/// entry is scoped to.
+/// carries) cannot cover. The `use_in` entries are scoped to `workspace`, which
+/// they require.
 pub fn apply_consent_scoped(
     sym: &mut Symposium,
     approved: &[String],
-    use_in: &[(String, PathBuf)],
+    use_in: &[String],
+    workspace: Option<&Path>,
     declined: &[String],
 ) -> Result<()> {
     if approved.is_empty() && use_in.is_empty() && declined.is_empty() {
         return Ok(());
     }
+    let workspace = match (use_in.is_empty(), workspace) {
+        (false, None) => anyhow::bail!("`use` entries need a workspace to be scoped to"),
+        (_, workspace) => workspace,
+    };
     let pms = sym.detached_managers();
     let plugins = &mut sym.config.plugins;
     for name in approved {
@@ -550,13 +561,14 @@ pub fn apply_consent_scoped(
             plugins.auto_enable.push(name.clone());
         }
     }
-    for (name, root) in use_in {
-        let id = CargoPm::id_for(name, None);
-        if !plugins.is_used_in(&pms, &id, root) {
-            plugins.used.push(UseEntry::Workspace {
-                name: name.clone(),
-                workspace: root.clone(),
-            });
+    if let Some(root) = workspace {
+        for name in use_in {
+            if !plugins.is_used_in(&pms, &CargoPm::id_for(name, None), root) {
+                plugins.used.push(UseEntry::Workspace {
+                    name: name.clone(),
+                    workspace: root.to_path_buf(),
+                });
+            }
         }
     }
     for name in declined {
@@ -569,7 +581,7 @@ pub fn apply_consent_scoped(
     let enabled: Vec<&str> = approved
         .iter()
         .map(String::as_str)
-        .chain(use_in.iter().map(|(name, _)| name.as_str()))
+        .chain(use_in.iter().map(String::as_str))
         .collect();
     if !enabled.is_empty() {
         tracing::info!(
@@ -625,31 +637,34 @@ pub async fn prompt_for_consent(
     let mut use_in = Vec::new();
     let mut declined = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    for candidate in candidates {
-        let name = candidate.id.name.clone();
-        if !seen.insert(name.clone()) {
+    for candidate in &candidates {
+        let name = candidate.id.name.as_str();
+        if !seen.insert(name) {
             continue;
         }
         let answer = dialoguer::Select::new()
-            .with_prompt(consent_question(&candidate))
+            .with_prompt(consent_question(candidate))
             .items(["Ask me later", "Enable", "No — don't ask again"])
             .default(0)
             .interact_opt()
             .context("consent prompt failed")?;
         match answer {
-            Some(1) => match (
-                enable_record(&candidate, &dep_ids, &pms, workspace_root.is_some()),
-                &workspace_root,
-            ) {
-                (EnableRecord::UseInWorkspace, Some(root)) => use_in.push((name, root.clone())),
-                _ => approved.push(name),
+            Some(1) => match enable_record(candidate, &dep_ids, &pms, workspace_root.is_some()) {
+                EnableRecord::UseInWorkspace => use_in.push(name.to_string()),
+                EnableRecord::AutoEnable => approved.push(name.to_string()),
             },
-            Some(2) => declined.push(name),
+            Some(2) => declined.push(name.to_string()),
             Some(_) => {}  // ask me later — record nothing
             None => break, // Esc — leave the rest undecided
         }
     }
-    apply_consent_scoped(sym, &approved, &use_in, &declined)
+    apply_consent_scoped(
+        sym,
+        &approved,
+        &use_in,
+        workspace_root.as_deref(),
+        &declined,
+    )
 }
 
 /// Where an "Enable" answer is recorded.
@@ -1061,7 +1076,9 @@ mod tests {
     }
 
     async fn enabled_names(sym: &Symposium, deps: &[PackageId], root: &Path) -> Vec<String> {
-        enabled_dependencies(sym, &cached_crates(), &[], deps, root, UpdateLevel::None)
+        let pms = cached_crates();
+        let used = resolve_used(sym, &pms, &[], root, UpdateLevel::None).await;
+        enabled_dependencies(sym, &pms, &[], deps, &used)
             .await
             .into_iter()
             .map(|id| id.name)

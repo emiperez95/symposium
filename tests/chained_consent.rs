@@ -411,7 +411,8 @@ async fn consent_records_use_for_a_non_dependency_and_auto_enable_for_a_dependen
             symposium::discovery::apply_consent_scoped(
                 &mut ctx.sym,
                 &["crate-t".to_string()],
-                &[("crate-ghost".to_string(), root.clone())],
+                &["crate-ghost".to_string()],
+                Some(&root),
                 &["crate-u".to_string()],
             )?;
             let plugins = &ctx.sym.config.plugins;
@@ -430,7 +431,8 @@ async fn consent_records_use_for_a_non_dependency_and_auto_enable_for_a_dependen
             symposium::discovery::apply_consent_scoped(
                 &mut ctx.sym,
                 &["crate_t".to_string()],
-                &[("crate_ghost".to_string(), root)],
+                &["crate_ghost".to_string()],
+                Some(&root),
                 &["crate_u".to_string()],
             )?;
             let after = std::fs::read_to_string(ctx.sym.config_dir().join("config.toml"))?;

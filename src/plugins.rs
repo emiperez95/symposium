@@ -1157,9 +1157,23 @@ pub async fn active_plugins(
     ctx: &mut crate::predicate::PredicateContext<'_>,
     update: UpdateLevel,
 ) -> Vec<Plugin> {
-    resolve_active(sym, &registry.plugins, pms, workspace_root, ctx, update)
-        .await
-        .plugins
+    let used = match workspace_root {
+        Some(root) => {
+            crate::discovery::resolve_used(sym, pms, &registry.plugins, root, update).await
+        }
+        None => Vec::new(),
+    };
+    resolve_active(
+        sym,
+        &registry.plugins,
+        pms,
+        workspace_root,
+        &used,
+        ctx,
+        update,
+    )
+    .await
+    .plugins
 }
 
 /// A crate named by a `[[plugins]] source.cargo` edge of a dependency-sourced
@@ -1217,11 +1231,12 @@ pub async fn resolve_active(
     registry_plugins: &[Plugin],
     pms: &crate::pm::PmRegistry,
     workspace_root: Option<&Path>,
+    used: &[(&str, crate::pm::PackageId)],
     ctx: &mut crate::predicate::PredicateContext<'_>,
     update: UpdateLevel,
 ) -> ActiveSet {
     let mut active = Vec::new();
-    use crate::discovery::Acceptance;
+    use crate::discovery::{Acceptance, Payload, acceptance};
     let mut pending: Vec<PendingChain> = Vec::new();
     // Crate identities already resolved through the set (a plugin came back for
     // them, whether it was then recorded or gated out), keyed on `(pm, name)` so
@@ -1247,22 +1262,14 @@ pub async fn resolve_active(
 
     // Enabled packages: consented dependencies and what `use` entries name,
     // each resolved by the package managers.
-    if let Some(root) = workspace_root {
+    if workspace_root.is_some() {
         worklist.vouched.extend(
-            crate::discovery::enabled_dependencies(
-                sym,
-                pms,
-                registry_plugins,
-                ctx.deps,
-                root,
-                update,
-            )
-            .await,
+            crate::discovery::enabled_dependencies(sym, pms, registry_plugins, ctx.deps, used)
+                .await,
         );
     }
-
-    // The identities `use` entries name, resolved on first need.
-    let mut used: Option<std::collections::HashSet<crate::pm::PackageId>> = None;
+    let used_ids: std::collections::HashSet<crate::pm::PackageId> =
+        used.iter().map(|(_, id)| id.clone()).collect();
 
     // Fixed-point: resolve each id through the set, record any new plugin, and
     // enqueue its own chained references.
@@ -1288,33 +1295,16 @@ pub async fn resolve_active(
             // audit accepts *that payload*. A disabled or revoked target is
             // refused, not pending. Nothing loaded, or only unaccepted
             // plugins, leaves the crate pending.
-            if used.is_none() {
-                used = Some(match workspace_root {
-                    Some(root) => {
-                        crate::discovery::resolve_used(sym, pms, registry_plugins, root, update)
-                            .await
-                            .into_iter()
-                            .map(|(_, id)| id)
-                            .collect()
-                    }
-                    None => Default::default(),
-                });
-            }
-            let used = used.as_ref().expect("resolved above");
             let mut any_pending = loaded.is_empty();
-            loaded.retain(|l| {
-                match crate::discovery::chain_acceptance(sym, pms, &audits, used, l) {
-                    Acceptance::Accepted => true,
-                    Acceptance::Refused(why) => {
-                        debug_chain_refused(&id, &format!("{why}"));
-                        false
-                    }
-                    Acceptance::Pending => {
-                        any_pending = true;
-                        false
-                    }
+            let mut kept = Vec::new();
+            for l in loaded {
+                match acceptance(sym, pms, &audits, &used_ids, &id, Payload::Loaded(&l)).await {
+                    Acceptance::Accepted => kept.push(l),
+                    Acceptance::Refused(why) => debug_chain_refused(&id, &why.to_string()),
+                    Acceptance::Pending => any_pending = true,
                 }
-            });
+            }
+            loaded = kept;
             if loaded.is_empty() {
                 if any_pending {
                     tracing::debug!(

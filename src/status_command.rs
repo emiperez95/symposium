@@ -137,18 +137,11 @@ pub async fn workspace_status(
         .map(|p| pms.identity(&p.canonical))
         .chain(discovery.all().map(|d| pms.identity(&d.id)))
         .collect();
-    let enabled = crate::discovery::enabled_dependencies(
-        sym,
-        &pms,
-        &registry.plugins,
-        &dep_ids,
-        &ws.root,
-        UpdateLevel::None,
-    )
-    .await;
     let used =
         crate::discovery::resolve_used(sym, &pms, &registry.plugins, &ws.root, UpdateLevel::None)
             .await;
+    let enabled =
+        crate::discovery::enabled_dependencies(sym, &pms, &registry.plugins, &dep_ids, &used).await;
     let audits = sym.audit_index(&pms);
     for id in enabled {
         if shown.contains(&pms.identity(&id)) {
