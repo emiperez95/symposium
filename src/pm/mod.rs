@@ -239,7 +239,11 @@ impl PmInstance {
                 let id = plugin.id.clone();
                 let root = plugin.root.clone();
                 match crate::plugins::validate_plugin(plugin, self.kind) {
-                    Ok(plugin) => Some(LoadedPlugin { plugin, root }),
+                    Ok(plugin) => Some(LoadedPlugin {
+                        plugin,
+                        root,
+                        trusted: self.trusted,
+                    }),
                     Err(e) => {
                         match self.kind {
                             PluginKind::Registry => tracing::warn!(
@@ -269,6 +273,11 @@ pub struct LoadedPlugin {
     /// The package's content directory: a crate's source tree, a registry
     /// entry's directory.
     pub root: PathBuf,
+    /// Whether the instance that produced it is a trust root
+    /// ([`PmInstance::trusted`]). Symposium's to set from the instance, never
+    /// from anything the plugin says; it decides whether the plugin's
+    /// `[[plugins]]` edges are vouched for.
+    pub trusted: bool,
 }
 
 #[derive(Debug)]

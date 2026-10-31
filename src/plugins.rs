@@ -1185,7 +1185,7 @@ pub struct ActiveSet {
 
 /// The ids still to resolve, in two stacks. A `[[plugins]]` edge is **vouched
 /// for** when the plugin that declares it is a trust root (a registry or
-/// workspace plugin: its `canonical.pm` is not the cargo PM). Such an edge, and
+/// workspace plugin: loaded by a trusted package-manager instance). Such an edge, and
 /// every consented dependency, sits in `vouched`. An edge declared by a
 /// cargo-sourced plugin (dependency-embedded or itself chain-reached) names
 /// content nobody vouched for, so it sits in `unvouched` and its target loads
@@ -1238,7 +1238,8 @@ pub async fn resolve_active(
         if withheld(sym, pms, &audits, parsed, None).is_some() {
             continue;
         }
-        record_active(parsed.clone(), ctx, &mut active, &mut worklist);
+        // Registry and workspace plugins are trust roots: their edges are vouched.
+        record_active(parsed.clone(), true, ctx, &mut active, &mut worklist);
     }
 
     // Enabled packages: consented dependencies and what `use` entries name,
@@ -1338,7 +1339,7 @@ pub async fn resolve_active(
             if visited.insert(pms.identity(&plugin.canonical))
                 && withheld(sym, pms, &audits, &plugin, Some(&loaded.root)).is_none()
             {
-                record_active(plugin, ctx, &mut active, &mut worklist);
+                record_active(plugin, loaded.trusted, ctx, &mut active, &mut worklist);
             }
         }
     }
@@ -1417,9 +1418,10 @@ fn withheld(
 
 /// Gate `plugin` and, if it passes, record it into `active` and enqueue its
 /// `[[plugins]]` chained references (evaluated against this plugin's provenance)
-/// onto `worklist`.
+/// onto `worklist`, vouched for or not according to `vouches`.
 fn record_active(
     plugin: Plugin,
+    vouches: bool,
     ctx: &mut crate::predicate::PredicateContext<'_>,
     active: &mut Vec<Plugin>,
     worklist: &mut Worklist,
@@ -1442,9 +1444,12 @@ fn record_active(
         },
     );
     warn_undispatched_crate_features(&plugin);
-    // An edge is vouched for only by a trust root: a cargo-sourced plugin names
-    // content nobody vouched for (see `Worklist`).
-    let vouches = plugin.canonical.pm != crate::pm::CARGO_PM;
+    // `vouches` is whether this plugin came from a trust root, read off the
+    // instance that produced it (`LoadedPlugin::trusted`), not from its name or
+    // id. Today's rule, kept as is: only a trust-root plugin vouches for its
+    // edges. A crate reached *through* a vouched edge is still cargo-sourced and
+    // untrusted, so its own edges are not vouched (see `Worklist`); whether the
+    // vouch should extend down the chain is an open decision.
     for edge in &plugin.manifest.chained {
         ctx.set_workspace_member(plugin.workspace_member);
         if edge.predicates.evaluate(ctx) {
