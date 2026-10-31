@@ -1167,7 +1167,9 @@ pub async fn active_plugins(
 /// `SessionStart` hint and the consent prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingChain {
-    /// The crate the edge names (any version: the workspace pin picks it).
+    /// The crate the edge names, at any version: which release loads is cargo's
+    /// choice (the workspace pin for a dependency, else what its cache or
+    /// crates.io resolves to), and it is audited as loaded.
     pub id: crate::pm::PackageId,
     /// Manifest name of the plugin whose edge names it.
     pub pulled_in_by: String,
@@ -1204,7 +1206,7 @@ struct Worklist {
 /// the audit digest of the plugin that names the target pins the name, not the
 /// target's content. The target loads only when a `use` or `auto-enable` entry
 /// names it, `auto-accept = "all"`, or `auto-accept = "audit"` and a trusted
-/// registry audited its payload (looked up cache-only; a failed fetch is "not
+/// registry audited the payload that loaded (a target that does not load is "not
 /// accepted"). Otherwise it is a [`PendingChain`]. The status propagates: the
 /// edges of a crate that did load are unvouched in their turn. A held-back crate
 /// is not marked visited, so a vouched edge reaching it later still loads it.
@@ -1260,12 +1262,21 @@ pub async fn resolve_active(
     // Fixed-point: resolve each id through the set, record any new plugin, and
     // enqueue its own chained references.
     loop {
-        let id = if let Some(id) = worklist.vouched.pop() {
-            id
+        let (id, pulled_in_by) = if let Some(id) = worklist.vouched.pop() {
+            (id, None)
         } else if let Some((id, by)) = worklist.unvouched.pop() {
             if visited.contains(&pms.identity(&id)) {
                 continue;
             }
+            (id, Some(by))
+        } else {
+            break;
+        };
+        let mut loaded = pms.load_plugin(&id, update).await;
+        if let Some(by) = pulled_in_by {
+            // An unvouched edge: accept what loaded only if the user or an
+            // audit accepts *that payload*. Nothing loaded, or nothing accepted,
+            // leaves the crate pending.
             if used.is_none() {
                 used = Some(match workspace_root {
                     Some(root) => {
@@ -1278,15 +1289,9 @@ pub async fn resolve_active(
                     None => Default::default(),
                 });
             }
-            if !crate::discovery::chain_target_accepted(
-                sym,
-                pms,
-                &audits,
-                used.as_ref().expect("resolved above"),
-                &id,
-            )
-            .await
-            {
+            let used = used.as_ref().expect("resolved above");
+            loaded.retain(|l| crate::discovery::chain_target_accepted(sym, pms, &audits, used, l));
+            if loaded.is_empty() {
                 tracing::debug!(
                     report = %crate::report::ReportEvent::PluginConsidered {
                         plugin: id.name.clone(),
@@ -1303,11 +1308,8 @@ pub async fn resolve_active(
                 }
                 continue;
             }
-            id
-        } else {
-            break;
-        };
-        for loaded in pms.load_plugin(&id, update).await {
+        }
+        for loaded in loaded {
             let plugin = loaded.plugin;
             if visited.insert(pms.identity(&plugin.canonical))
                 && withheld(sym, pms, &audits, &plugin, Some(&loaded.root)).is_none()

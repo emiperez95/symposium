@@ -320,7 +320,7 @@ pub async fn enabled_dependencies(
         }
         if plugins.is_accepted_without_asking(pms, id)
             || is_used
-            || is_audited_dependency(sym, pms, &audits, id).await
+            || is_audited_crate(sym, pms, &audits, id).await
         {
             enabled.push(PackageId::any_version(&id.pm, &id.name));
         }
@@ -340,57 +340,69 @@ pub async fn enabled_dependencies(
 }
 
 /// Under `auto-accept = "audit"`, does a trusted registry audit exactly the
-/// payload of the dependency `id`? Cache-only: the source is the one already on
-/// disk. Looked up by name first, so a crate nobody audited is neither fetched
-/// nor hashed. A revoked payload is not excluded here; activation withholds it
-/// (see `plugins::withheld`) exactly as it does for any other grant.
-async fn is_audited_dependency(
+/// payload of the crate `id`, which the caller has not loaded? The release is
+/// the one cargo's cache holds for the crate (the workspace pin or path
+/// override for a dependency), fetched cache-only. Looked up by name first, so a
+/// crate nobody audited is neither fetched nor hashed. A revoked payload is not
+/// excluded here; activation withholds it (see `plugins::withheld`) exactly as
+/// it does for any other grant.
+async fn is_audited_crate(
     sym: &Symposium,
     pms: &PmRegistry,
     audits: &AuditIndex,
     id: &PackageId,
 ) -> bool {
-    if sym.config.plugins.auto_accept != AutoAccept::Audit {
+    if sym.config.plugins.auto_accept != AutoAccept::Audit
+        || !audits.for_crate(&id.name).has_audits()
+    {
         return false;
     }
-    let crate_audits = audits.for_crate(&id.name);
-    if !crate_audits.has_audits() {
-        return false;
-    }
-    // Fetched by name, as loading will: the workspace pin (or path override)
-    // picks the release.
     let any = PackageId::any_version(&id.pm, &id.name);
     let Ok(fetched) = pms.fetch(&any, UpdateLevel::None).await else {
         return false;
     };
-    matches!(
-        audits.lookup_in(&crate_audits, &fetched.id, &fetched.root),
-        AuditLookup::Audited(_)
-    )
+    is_audited_payload(sym, audits, &fetched.id, &fetched.root)
 }
 
-/// May the crate a dependency-sourced plugin chains to load? The same
+/// Under `auto-accept = "audit"`, does a trusted registry audit exactly the
+/// payload in `root`, the content directory of release `id`?
+fn is_audited_payload(sym: &Symposium, audits: &AuditIndex, id: &PackageId, root: &Path) -> bool {
+    if sym.config.plugins.auto_accept != AutoAccept::Audit {
+        return false;
+    }
+    let crate_audits = audits.for_crate(&id.name);
+    crate_audits.has_audits()
+        && matches!(
+            audits.lookup_in(&crate_audits, id, root),
+            AuditLookup::Audited(_)
+        )
+}
+
+/// May the chain target `loaded` load? `loaded` is what `load_plugin` returned
+/// for the edge, so the decision is made on the payload that would actually run,
+/// not on a separate lookup that could resolve a different release. The same
 /// acceptance as any dependency plugin, in the same precedence: `disable` says
 /// no; a `use` entry (`used`, the identities those entries name), an
 /// `auto-enable` entry or `auto-accept = "all"` says yes; under
-/// `auto-accept = "audit"` a trusted registry's audit of exactly this payload
-/// says yes, whether or not the workspace depends on the crate. A revocation is
-/// not weighed here: activation withholds a revoked crate after loading it
-/// (`plugins::withheld`), as for every grant. Cache-only; nothing is written.
-pub(crate) async fn chain_target_accepted(
+/// `auto-accept = "audit"` a trusted registry's audit of exactly `loaded`'s
+/// content says yes, whether or not the workspace depends on the crate. A
+/// revocation is not weighed here: activation withholds a revoked crate
+/// (`plugins::withheld`), as for every grant. Nothing is fetched or written.
+pub(crate) fn chain_target_accepted(
     sym: &Symposium,
     pms: &PmRegistry,
     audits: &AuditIndex,
     used: &HashSet<PackageId>,
-    id: &PackageId,
+    loaded: &crate::pm::LoadedPlugin,
 ) -> bool {
     let plugins = &sym.config.plugins;
+    let id = &loaded.plugin.canonical;
     if plugins.is_disabled(pms, id) {
         return false;
     }
     used.contains(&pms.identity(id))
         || plugins.is_accepted_without_asking(pms, id)
-        || is_audited_dependency(sym, pms, audits, id).await
+        || is_audited_payload(sym, audits, id, &loaded.root)
 }
 
 pub(crate) async fn resolve_used<'a>(
