@@ -3,6 +3,16 @@
 //! plugin names a crate that loads only if the user enabled it or a trusted
 //! registry audited it. Fixture `chain-consent0`: `crate-p` chains to
 //! `crate-t`, which chains to `crate-u`; all three are workspace dependencies.
+//!
+//! Because they are dependencies, a grant for `crate-t` (`use`, `auto-enable`,
+//! `auto-accept`, an audit) reaches it through dependency enablement
+//! (`enabled_dependencies` seeds it as an accepted package), not through the
+//! chain-target acceptance check. What these tests pin down is what the
+//! unvouched edge does *not* do (load an un-enabled target, vouch for the chain
+//! behind it), the vouched/diamond cases, and how a held-back or refused target
+//! is reported. Acceptance of a chain target the workspace does not depend on,
+//! the case `chain_acceptance` itself decides, is in
+//! `chained_consent_non_dependency.rs`.
 
 use std::path::{Path, PathBuf};
 
@@ -81,8 +91,9 @@ async fn an_unaccepted_chain_target_is_not_loaded() {
     .unwrap();
 }
 
-/// Each way of accepting a crate accepts a chain target too. The target's own
-/// edge is unvouched in turn: `crate-u` stays out.
+/// Each way of enabling `crate-t` (a workspace dependency, so seeded by
+/// dependency enablement) loads it with the chain's other end unaffected: its
+/// own edge is unvouched in turn, so `crate-u` stays out.
 #[tokio::test]
 async fn every_grant_loads_the_chain_target_but_not_the_chain_behind_it() {
     for (name, grant) in grants_for_t() {
@@ -95,7 +106,7 @@ async fn every_grant_loads_the_chain_target_but_not_the_chain_behind_it() {
                 grant(&mut ctx.sym);
                 let loaded = synced(&mut ctx).await;
                 if name == "auto-accept = all" {
-                    // `all` accepts every unvouched crate, so the whole chain loads.
+                    // `all` enables every dependency, so `crate-u` is seeded too.
                     assert_eq!(loaded, "ptu", "{name}");
                 } else {
                     assert_eq!(loaded, "pt", "{name}");
@@ -126,7 +137,8 @@ async fn a_use_entry_for_the_far_end_does_not_vouch_for_the_middle() {
     .unwrap();
 }
 
-/// A matching audit in a trusted registry accepts the chain target.
+/// A matching audit in a trusted registry enables the dependency `crate-t`, which
+/// is then loaded as the chain's target.
 #[tokio::test]
 async fn an_audited_chain_target_loads() {
     with_fixture(
@@ -342,7 +354,7 @@ async fn a_held_back_chain_target_is_surfaced_with_who_pulled_it_in() {
                 .expect("session-start should produce additionalContext")
                 .to_string();
             assert!(
-                context.contains("crate-t (named by the plugin of `crate-p`)"),
+                context.contains("crate-t (pulled in by `crate-p`)"),
                 "{context}"
             );
 

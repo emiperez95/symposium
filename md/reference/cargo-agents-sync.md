@@ -53,7 +53,7 @@ cannot be checked against an audit at all (it fetches skills from outside the
 crate, or is too large), is marked `NOT AUDITED` and says so. Under `auto-accept = "none"`, an audited plugin is still asked
 about, and the question says which registry audited it.
 
-A crate named by the `[[plugins]]` chain of a dependency's plugin is asked about too, unless something already accepts it (see [who vouches for a chained crate](./plugin-definition.md#who-vouches-for-a-chained-crate)). The question names the plugin that pulls it in. Answering **Enable** for such a crate that is a dependency of the workspace records `auto-enable`, as for any dependency; for one that is not, it records a `use` entry scoped to this workspace. **No** records `disable`, as always.
+A crate named by the `[[plugins]]` chain of a dependency's plugin is asked about too, unless something already accepts it (see [who vouches for a chained crate](./plugin-definition.md#who-vouches-for-a-chained-crate)). The question says which package it was pulled in by. Answering **Enable** for such a crate that is a dependency of the workspace records `auto-enable`, as for any dependency; for one that is not, it records a `use` entry scoped to this workspace. **No** records `disable`, as always.
 
 Only explicit answers are recorded, so hitting Enter through the prompt never
 permanently declines anything. Escape leaves the remaining questions undecided.

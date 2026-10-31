@@ -647,7 +647,7 @@ async fn consent_hint(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Option<Stri
         .await
         .into_iter()
         .map(|(name, by)| match by {
-            Some(by) => format!("{name} (named by the plugin of `{}`)", by.name),
+            Some(by) => format!("{name} (pulled in by `{}`)", by.name),
             None => name,
         })
         .collect();

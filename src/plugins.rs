@@ -1223,7 +1223,8 @@ pub async fn resolve_active(
     let mut active = Vec::new();
     use crate::discovery::Acceptance;
     let mut pending: Vec<PendingChain> = Vec::new();
-    // Crate identities already loaded through the set, keyed on `(pm, name)` so
+    // Crate identities already resolved through the set (a plugin came back for
+    // them, whether it was then recorded or gated out), keyed on `(pm, name)` so
     // a crate reached through two chains — or a chain and dependency enablement —
     // loads once (its hooks don't double-fire, its subcommands aren't a false
     // conflict), while a registry plugin and a crate of the same name stay
@@ -1347,7 +1348,7 @@ pub async fn resolve_active(
         }
     }
 
-    // A crate held back through one edge may have loaded through another.
+    // A crate held back through one edge may have been resolved through another.
     pending.retain(|p| !visited.contains(&pms.identity(&p.id)));
 
     ActiveSet {

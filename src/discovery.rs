@@ -682,7 +682,7 @@ fn consent_question(candidate: &DiscoveredPlugin) -> String {
     };
     match &candidate.pulled_in_by {
         Some(by) => format!(
-            "{status}\nThe plugin of `{}` pulls in crate `{name}`, which provides {what}. Enable it?",
+            "{status}\nCrate `{name}`, pulled in by `{}`, provides {what}. Enable it?",
             by.name
         ),
         None => format!("{status}\nDependency `{name}` provides {what}. Enable it?"),
@@ -1195,7 +1195,9 @@ mod tests {
         let q = consent_question(&candidate);
         assert!(q.starts_with("NOT AUDITED"), "{q}");
         assert!(
-            q.contains("The plugin of `crate-p` pulls in crate `widget-lib`, which provides 1 skill group. Enable it?"),
+            q.contains(
+                "Crate `widget-lib`, pulled in by `crate-p`, provides 1 skill group. Enable it?"
+            ),
             "{q}"
         );
     }
