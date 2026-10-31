@@ -314,10 +314,8 @@ async fn a_held_back_chain_target_is_surfaced_with_who_pulled_it_in() {
 
             let deps = ctx.sym.workspace_deps(ctx.workspace_root.as_ref().unwrap());
             let notes = symposium::discovery::pending_candidate_notes(&ctx.sym, &deps).await;
-            assert!(
-                notes.contains(&("crate-t".to_string(), Some("crate-p".to_string()))),
-                "{notes:?}"
-            );
+            let t = notes.iter().find(|(n, _)| n == "crate-t").unwrap();
+            assert_eq!(t.1.as_ref().map(|id| id.name.as_str()), Some("crate-p"));
 
             let result = ctx
                 .prompt_or_hook(
@@ -354,6 +352,31 @@ async fn a_held_back_chain_target_is_surfaced_with_who_pulled_it_in() {
             assert_eq!(t.state, StatusState::Active, "{t:?}");
             let notes = symposium::discovery::pending_candidate_notes(&ctx.sym, &deps).await;
             assert!(notes.iter().all(|(n, _)| n != "crate-t"), "{notes:?}");
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// The crate named as pulling a target in is the declaring package, not the
+/// `name` its manifest chose: an author can set that to any crate's name.
+#[tokio::test]
+async fn the_puller_is_the_package_not_its_manifest_name() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["chain-consent0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            ctx.sym.config.plugins.auto_enable = vec!["crate-p".into()];
+            std::fs::write(
+                crate_dir(&ctx, "crate-p").join("Symposium.toml"),
+                "name = \"serde\"\n[[plugins]]\nsource.cargo = \"crate-t\"\n",
+            )?;
+            let entries = status(&ctx).await;
+            let t = entries.iter().find(|e| e.name == "crate-t").unwrap();
+            assert!(t.root.contains("pulled in by `crate-p`"), "{t:?}");
+            assert!(!t.root.contains("serde"), "{t:?}");
             Ok(())
         },
     )

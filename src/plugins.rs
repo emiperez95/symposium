@@ -1171,8 +1171,10 @@ pub struct PendingChain {
     /// choice (the workspace pin for a dependency, else what its cache or
     /// crates.io resolves to), and it is audited as loaded.
     pub id: crate::pm::PackageId,
-    /// Manifest name of the plugin whose edge names it.
-    pub pulled_in_by: String,
+    /// The resolved package of the plugin whose edge names it. Its identity,
+    /// not the manifest `name` its author chose, which anyone can set to
+    /// another crate's name.
+    pub pulled_in_by: crate::pm::PackageId,
 }
 
 /// What [`resolve_active`] produced: the active plugins, and the chained crates
@@ -1194,7 +1196,7 @@ pub struct ActiveSet {
 #[derive(Default)]
 struct Worklist {
     vouched: Vec<crate::pm::PackageId>,
-    unvouched: Vec<(crate::pm::PackageId, String)>,
+    unvouched: Vec<(crate::pm::PackageId, crate::pm::PackageId)>,
 }
 
 /// [`active_plugins`] over the already-loaded trust-root `registry` plugins,
@@ -1319,7 +1321,8 @@ pub async fn resolve_active(
                             plugin: id.name.clone(),
                             matched: false,
                             reason: Some(format!(
-                                "pulled in by `{by}`; awaiting consent or an audit"
+                                "pulled in by `{}`; awaiting consent or an audit",
+                                by.name
                             )),
                         },
                     );
@@ -1457,9 +1460,7 @@ fn record_active(
             if vouches {
                 worklist.vouched.push(target);
             } else {
-                worklist
-                    .unvouched
-                    .push((target, plugin.manifest.name.clone()));
+                worklist.unvouched.push((target, plugin.canonical.clone()));
             }
         }
     }

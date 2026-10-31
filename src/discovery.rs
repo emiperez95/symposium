@@ -108,7 +108,7 @@ pub struct DiscoveredPlugin {
     /// whose edge names it. `None` for a crate that is only a dependency.
     ///
     /// [`plugins::resolve_active`]: crate::plugins::resolve_active
-    pub pulled_in_by: Option<String>,
+    pub pulled_in_by: Option<PackageId>,
 }
 
 impl DiscoveredPlugin {
@@ -502,13 +502,13 @@ pub async fn pending_candidates(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> V
         .collect()
 }
 
-/// [`pending_candidates`] with, for a chained crate, the plugin that pulled it
-/// in. Sorted by name, one entry per name.
+/// [`pending_candidates`] with, for a chained crate, the package whose plugin
+/// pulled it in. Sorted by name, one entry per name.
 pub async fn pending_candidate_notes(
     sym: &Symposium,
     deps: &Arc<WorkspaceDeps>,
-) -> Vec<(String, Option<String>)> {
-    let mut notes: Vec<(String, Option<String>)> = discover_for(sym, deps)
+) -> Vec<(String, Option<PackageId>)> {
+    let mut notes: Vec<(String, Option<PackageId>)> = discover_for(sym, deps)
         .await
         .candidates
         .into_iter()
@@ -682,7 +682,8 @@ fn consent_question(candidate: &DiscoveredPlugin) -> String {
     };
     match &candidate.pulled_in_by {
         Some(by) => format!(
-            "{status}\nThe plugin of `{by}` pulls in crate `{name}`, which provides {what}. Enable it?"
+            "{status}\nThe plugin of `{}` pulls in crate `{name}`, which provides {what}. Enable it?",
+            by.name
         ),
         None => format!("{status}\nDependency `{name}` provides {what}. Enable it?"),
     }
@@ -1190,7 +1191,7 @@ mod tests {
     #[test]
     fn the_prompt_names_the_plugin_that_pulled_a_chained_crate_in() {
         let mut candidate = candidate_with(AuditLookup::Unaudited);
-        candidate.pulled_in_by = Some("crate-p".into());
+        candidate.pulled_in_by = Some(CargoPm::id_for("crate-p", None));
         let q = consent_question(&candidate);
         assert!(q.starts_with("NOT AUDITED"), "{q}");
         assert!(

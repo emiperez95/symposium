@@ -264,7 +264,8 @@ fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
             StatusState::Candidate,
             match &found.pulled_in_by {
                 Some(by) => format!(
-                    "pulled in by `{by}`, awaiting consent (`cargo agents use {}`)",
+                    "pulled in by `{}`, awaiting consent (`cargo agents use {}`)",
+                    by.name,
                     found.name()
                 ),
                 None => format!(
