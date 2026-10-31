@@ -1219,6 +1219,7 @@ pub async fn resolve_active(
     update: UpdateLevel,
 ) -> ActiveSet {
     let mut active = Vec::new();
+    use crate::discovery::Acceptance;
     let mut pending: Vec<PendingChain> = Vec::new();
     // Crate identities already loaded through the set, keyed on `(pm, name)` so
     // a crate reached through two chains — or a chain and dependency enablement —
@@ -1272,11 +1273,17 @@ pub async fn resolve_active(
         } else {
             break;
         };
+        // `disable` is the user's last word: nothing to load, nothing to ask.
+        if pulled_in_by.is_some() && sym.config.plugins.is_disabled(pms, &id) {
+            debug_chain_refused(&id, "disabled by `[plugins] disable`");
+            continue;
+        }
         let mut loaded = pms.load_plugin(&id, update).await;
         if let Some(by) = pulled_in_by {
             // An unvouched edge: accept what loaded only if the user or an
-            // audit accepts *that payload*. Nothing loaded, or nothing accepted,
-            // leaves the crate pending.
+            // audit accepts *that payload*. A disabled or revoked target is
+            // refused, not pending. Nothing loaded, or only unaccepted
+            // plugins, leaves the crate pending.
             if used.is_none() {
                 used = Some(match workspace_root {
                     Some(root) => {
@@ -1290,21 +1297,38 @@ pub async fn resolve_active(
                 });
             }
             let used = used.as_ref().expect("resolved above");
-            loaded.retain(|l| crate::discovery::chain_target_accepted(sym, pms, &audits, used, l));
+            let mut any_pending = loaded.is_empty();
+            loaded.retain(|l| {
+                match crate::discovery::chain_acceptance(sym, pms, &audits, used, l) {
+                    Acceptance::Accepted => true,
+                    Acceptance::Refused(why) => {
+                        debug_chain_refused(&id, &format!("{why}"));
+                        false
+                    }
+                    Acceptance::Pending => {
+                        any_pending = true;
+                        false
+                    }
+                }
+            });
             if loaded.is_empty() {
-                tracing::debug!(
-                    report = %crate::report::ReportEvent::PluginConsidered {
-                        plugin: id.name.clone(),
-                        matched: false,
-                        reason: Some(format!("pulled in by `{by}`; awaiting consent or an audit")),
-                    },
-                );
-                let identity = pms.identity(&id);
-                if !pending.iter().any(|p| pms.identity(&p.id) == identity) {
-                    pending.push(PendingChain {
-                        id,
-                        pulled_in_by: by,
-                    });
+                if any_pending {
+                    tracing::debug!(
+                        report = %crate::report::ReportEvent::PluginConsidered {
+                            plugin: id.name.clone(),
+                            matched: false,
+                            reason: Some(format!(
+                                "pulled in by `{by}`; awaiting consent or an audit"
+                            )),
+                        },
+                    );
+                    let identity = pms.identity(&id);
+                    if !pending.iter().any(|p| pms.identity(&p.id) == identity) {
+                        pending.push(PendingChain {
+                            id,
+                            pulled_in_by: by,
+                        });
+                    }
                 }
                 continue;
             }
@@ -1326,6 +1350,16 @@ pub async fn resolve_active(
         plugins: active,
         pending_chains: pending,
     }
+}
+
+fn debug_chain_refused(id: &crate::pm::PackageId, reason: &str) {
+    tracing::debug!(
+        report = %crate::report::ReportEvent::PluginConsidered {
+            plugin: id.name.clone(),
+            matched: false,
+            reason: Some(reason.to_string()),
+        },
+    );
 }
 
 /// Why activation refuses a plugin before its own predicates are consulted.

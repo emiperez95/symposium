@@ -95,6 +95,32 @@ async fn a_chain_target_that_is_not_a_dependency() {
             // An audit of the payload that loads does.
             write_audit(&ctx, "crate-z", payload_digest(&z_dir).unwrap());
             assert!(z_dispatches(&mut ctx).await);
+
+            // Disabled: one `declined` line (from the config entry), not pending.
+            let root = ctx.workspace_root.clone().unwrap();
+            let deps = ctx.sym.workspace_deps(&root);
+            ctx.sym.config.plugins.disable = vec!["crate-z".into()];
+            assert!(!z_dispatches(&mut ctx).await);
+            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+            let z: Vec<_> = entries.iter().filter(|e| e.name == "crate-z").collect();
+            assert_eq!(z.len(), 1, "{entries:?}");
+            assert_eq!(z[0].state, symposium::status_command::StatusState::Declined);
+            let notes = symposium::discovery::pending_candidate_notes(&ctx.sym, &deps).await;
+            assert!(notes.iter().all(|(n, _)| n != "crate-z"), "{notes:?}");
+            ctx.sym.config.plugins.disable = vec![];
+
+            // Revoked: refused and, being reached only through a chain and not
+            // a dependency, not listed at all (as the status reference says).
+            let audits = ctx.sym.config_dir().join("plugins/audits");
+            std::fs::write(
+                audits.join("crate_z.toml"),
+                "format = 1\ncrate = \"crate-z\"\n[[revoked]]\nversions = \"*\"\nreason = \"exfiltration\"\n",
+            )?;
+            assert!(!z_dispatches(&mut ctx).await);
+            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+            assert!(entries.iter().all(|e| e.name != "crate-z"), "{entries:?}");
+            let notes = symposium::discovery::pending_candidate_notes(&ctx.sym, &deps).await;
+            assert!(notes.iter().all(|(n, _)| n != "crate-z"), "{notes:?}");
             Ok(())
         },
     )

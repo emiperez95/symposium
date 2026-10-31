@@ -245,14 +245,18 @@ pub async fn discover(
     .pending_chains;
     for chain in held_back {
         let identity = pms.identity(&chain.id);
-        // A dependency that embeds a plugin was classified above: say who
-        // pulled it in, without offering it twice.
+        // Already classified above (a dependency that embeds a plugin): say who
+        // pulled it in when it is a candidate, and never list it twice, whichever
+        // bucket it is in.
         if let Some(found) = discovery
             .candidates
             .iter_mut()
             .find(|d| pms.identity(&d.id) == identity)
         {
             found.pulled_in_by = Some(chain.pulled_in_by);
+            continue;
+        }
+        if discovery.all().any(|d| pms.identity(&d.id) == identity) {
             continue;
         }
         // Cache-only, like the load that held it back; an unfetchable crate is
@@ -378,31 +382,67 @@ fn is_audited_payload(sym: &Symposium, audits: &AuditIndex, id: &PackageId, root
         )
 }
 
+/// What the user's config and the audits say about a chain target.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Acceptance {
+    /// Accepted: it loads.
+    Accepted,
+    /// Refused outright, whatever else says: `disable` or a revocation. Not a
+    /// question for the user, so never pending.
+    Refused(Refusal),
+    /// Neither accepted nor refused: awaiting consent or an audit.
+    Pending,
+}
+
+/// Why a chain target is refused.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    Disabled,
+    Revoked(Revocation),
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Refusal::Disabled => f.write_str("disabled by `[plugins] disable`"),
+            Refusal::Revoked(revocation) => revocation.fmt(f),
+        }
+    }
+}
+
 /// May the chain target `loaded` load? `loaded` is what `load_plugin` returned
 /// for the edge, so the decision is made on the payload that would actually run,
 /// not on a separate lookup that could resolve a different release. The same
-/// acceptance as any dependency plugin, in the same precedence: `disable` says
-/// no; a `use` entry (`used`, the identities those entries name), an
-/// `auto-enable` entry or `auto-accept = "all"` says yes; under
-/// `auto-accept = "audit"` a trusted registry's audit of exactly `loaded`'s
-/// content says yes, whether or not the workspace depends on the crate. A
-/// revocation is not weighed here: activation withholds a revoked crate
-/// (`plugins::withheld`), as for every grant. Nothing is fetched or written.
-pub(crate) fn chain_target_accepted(
+/// acceptance as any dependency plugin, in the same precedence: `disable`, then
+/// a revocation of this release or payload, each a [`Acceptance::Refused`];
+/// then a `use` entry (`used`, the identities those entries name), an
+/// `auto-enable` entry or `auto-accept = "all"`, or under `auto-accept =
+/// "audit"` a trusted registry's audit of exactly `loaded`'s content, whether or
+/// not the workspace depends on the crate, each [`Acceptance::Accepted`].
+/// Anything else is [`Acceptance::Pending`]. Nothing is fetched or written.
+pub(crate) fn chain_acceptance(
     sym: &Symposium,
     pms: &PmRegistry,
     audits: &AuditIndex,
     used: &HashSet<PackageId>,
     loaded: &crate::pm::LoadedPlugin,
-) -> bool {
+) -> Acceptance {
     let plugins = &sym.config.plugins;
     let id = &loaded.plugin.canonical;
     if plugins.is_disabled(pms, id) {
-        return false;
+        return Acceptance::Refused(Refusal::Disabled);
     }
-    used.contains(&pms.identity(id))
+    if let Some(revocation) = audits.revocation(id, &loaded.root) {
+        return Acceptance::Refused(Refusal::Revoked(revocation));
+    }
+    if used.contains(&pms.identity(id))
         || plugins.is_accepted_without_asking(pms, id)
         || is_audited_payload(sym, audits, id, &loaded.root)
+    {
+        Acceptance::Accepted
+    } else {
+        Acceptance::Pending
+    }
 }
 
 pub(crate) async fn resolve_used<'a>(

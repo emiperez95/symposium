@@ -246,6 +246,48 @@ async fn status(ctx: &TestContext) -> Vec<symposium::status_command::StatusEntry
         .unwrap()
 }
 
+/// A chain target the user disabled or a registry revoked is refused, not
+/// awaiting consent: one `status` line (`declined` or `revoked`) and nothing in
+/// the pending notes the hint and the prompt are built from.
+#[tokio::test]
+async fn a_disabled_or_revoked_chain_target_is_listed_once_and_never_pending() {
+    use symposium::status_command::StatusState;
+
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["chain-consent0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            ctx.sym.config.plugins.auto_enable = vec!["crate-p".into()];
+            let deps = ctx.sym.workspace_deps(ctx.workspace_root.as_ref().unwrap());
+
+            ctx.sym.config.plugins.disable = vec!["crate-t".into()];
+            let entries = status(&ctx).await;
+            let t: Vec<_> = entries.iter().filter(|e| e.name == "crate-t").collect();
+            assert_eq!(t.len(), 1, "{entries:?}");
+            assert_eq!(t[0].state, StatusState::Declined, "{t:?}");
+            let notes = symposium::discovery::pending_candidate_notes(&ctx.sym, &deps).await;
+            assert!(notes.iter().all(|(n, _)| n != "crate-t"), "{notes:?}");
+            ctx.sym.config.plugins.disable = vec![];
+
+            write_audits(
+                &ctx,
+                "crate_t.toml",
+                "format = 1\ncrate = \"crate-t\"\n[[revoked]]\nversions = \"*\"\nreason = \"exfiltration\"\n",
+            );
+            let entries = status(&ctx).await;
+            let t: Vec<_> = entries.iter().filter(|e| e.name == "crate-t").collect();
+            assert_eq!(t.len(), 1, "{entries:?}");
+            assert_eq!(t[0].state, StatusState::Revoked, "{t:?}");
+            let notes = symposium::discovery::pending_candidate_notes(&ctx.sym, &deps).await;
+            assert!(notes.iter().all(|(n, _)| n != "crate-t"), "{notes:?}");
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// A held-back chain target is a candidate in `status`, `pending_candidates`
 /// and the `SessionStart` hint, each naming the crate that pulled it in; once
 /// accepted it is active and no longer pending.
