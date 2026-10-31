@@ -303,6 +303,30 @@ async fn is_audited_dependency(
     )
 }
 
+/// May the crate a dependency-sourced plugin chains to load? The same
+/// acceptance as any dependency plugin, in the same precedence: `disable` says
+/// no; a `use` entry (`used`, the identities those entries name), an
+/// `auto-enable` entry or `auto-accept = "all"` says yes; under
+/// `auto-accept = "audit"` a trusted registry's audit of exactly this payload
+/// says yes, whether or not the workspace depends on the crate. A revocation is
+/// not weighed here: activation withholds a revoked crate after loading it
+/// (`plugins::withheld`), as for every grant. Cache-only; nothing is written.
+pub(crate) async fn chain_target_accepted(
+    sym: &Symposium,
+    pms: &PmRegistry,
+    audits: &AuditIndex,
+    used: &HashSet<PackageId>,
+    id: &PackageId,
+) -> bool {
+    let plugins = &sym.config.plugins;
+    if plugins.is_disabled(pms, id) {
+        return false;
+    }
+    used.contains(&pms.identity(id))
+        || plugins.is_accepted_without_asking(pms, id)
+        || is_audited_dependency(sym, pms, audits, id).await
+}
+
 pub(crate) async fn resolve_used<'a>(
     sym: &'a Symposium,
     pms: &PmRegistry,

@@ -1,0 +1,9 @@
+[package]
+name = "chain-consent-host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crate-p = { path = "crate-p" }
+crate-t = { path = "crate-t" }
+crate-u = { path = "crate-u" }
