@@ -637,23 +637,50 @@ pub async fn prompt_for_consent(
             .interact_opt()
             .context("consent prompt failed")?;
         match answer {
-            Some(1) => {
-                let dependency = dep_ids
-                    .iter()
-                    .any(|dep| pms.identity(dep) == pms.identity(&candidate.id));
-                match &workspace_root {
-                    Some(root) if candidate.pulled_in_by.is_some() && !dependency => {
-                        use_in.push((name, root.clone()))
-                    }
-                    _ => approved.push(name),
-                }
-            }
+            Some(1) => match (
+                enable_record(&candidate, &dep_ids, &pms, workspace_root.is_some()),
+                &workspace_root,
+            ) {
+                (EnableRecord::UseInWorkspace, Some(root)) => use_in.push((name, root.clone())),
+                _ => approved.push(name),
+            },
             Some(2) => declined.push(name),
             Some(_) => {}  // ask me later — record nothing
             None => break, // Esc — leave the rest undecided
         }
     }
     apply_consent_scoped(sym, &approved, &use_in, &declined)
+}
+
+/// Where an "Enable" answer is recorded.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum EnableRecord {
+    /// `[plugins] auto-enable`: consent for what a *dependency* carries.
+    AutoEnable,
+    /// A `use` entry scoped to the workspace: a chained crate the workspace
+    /// does not depend on, which `auto-enable` cannot cover (it contributes only
+    /// dependencies).
+    UseInWorkspace,
+}
+
+/// Choose how to record enabling `candidate`: a workspace `use` entry only for a
+/// crate that was pulled in by a chain, is not a workspace dependency (compared
+/// by package identity, so `crate_t` and `crate-t` are one) and has a workspace
+/// to scope to; `auto-enable` otherwise.
+pub(crate) fn enable_record(
+    candidate: &DiscoveredPlugin,
+    dep_ids: &[PackageId],
+    pms: &PmRegistry,
+    has_workspace: bool,
+) -> EnableRecord {
+    let dependency = dep_ids
+        .iter()
+        .any(|dep| pms.identity(dep) == pms.identity(&candidate.id));
+    if has_workspace && candidate.pulled_in_by.is_some() && !dependency {
+        EnableRecord::UseInWorkspace
+    } else {
+        EnableRecord::AutoEnable
+    }
 }
 
 /// The question the consent prompt asks about one candidate. It leads with the
@@ -1186,6 +1213,39 @@ mod tests {
             audit: Some(audit),
             pulled_in_by: None,
         }
+    }
+
+    #[test]
+    fn enabling_records_use_only_for_a_chained_crate_that_is_not_a_dependency() {
+        let pms = cached_crates();
+        let chained = |name: &str| {
+            let mut c = candidate_with(AuditLookup::Unaudited);
+            c.id = CargoPm::id_for(name, None);
+            c.pulled_in_by = Some(CargoPm::id_for("crate-p", None));
+            c
+        };
+        let deps = [CargoPm::id_for("widget-lib", Some("1.0.0"))];
+
+        // Chained and not a dependency: a workspace `use` entry.
+        assert_eq!(
+            enable_record(&chained("crate-t"), &deps, &pms, true),
+            EnableRecord::UseInWorkspace
+        );
+        // Chained, but a dependency (in another spelling): `auto-enable`.
+        assert_eq!(
+            enable_record(&chained("widget_lib"), &deps, &pms, true),
+            EnableRecord::AutoEnable
+        );
+        // A plain dependency candidate: `auto-enable`.
+        assert_eq!(
+            enable_record(&candidate_with(AuditLookup::Unaudited), &deps, &pms, true),
+            EnableRecord::AutoEnable
+        );
+        // Nothing to scope a `use` entry to: `auto-enable`.
+        assert_eq!(
+            enable_record(&chained("crate-t"), &deps, &pms, false),
+            EnableRecord::AutoEnable
+        );
     }
 
     #[test]
