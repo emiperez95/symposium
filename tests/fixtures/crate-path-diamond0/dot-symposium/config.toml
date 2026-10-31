@@ -3,3 +3,7 @@ hook-scope = "project"
 [defaults]
 symposium-recommendations = false
 user-plugins = true
+
+# A chain edge declared by a dependency is unvouched, so its target needs consent.
+[plugins]
+auto-enable = ["crate-c"]

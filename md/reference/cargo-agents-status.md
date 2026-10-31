@@ -30,6 +30,8 @@ Each line is in one of five states:
 Discovery is cache-only, so a dependency whose source has not been fetched yet
 is simply not listed as a candidate. Enabling it by name still works.
 
+A crate named by the `[[plugins]]` chain of a plugin embedded in a dependency, and neither accepted nor audited, is not loaded (see [who vouches for a chained crate](./plugin-definition.md#who-vouches-for-a-chained-crate)). It is listed as a `candidate` whose `root` says `pulled in by `<crate>``, awaiting consent. The JSON form is unchanged: the note is in `root`.
+
 A revoked crate that is only reached through another plugin's `[[plugins]]` chain, not named by a dependency or a `use` entry, is not listed.
 
 With `--json`, each line is emitted as a `plugin_status` event carrying

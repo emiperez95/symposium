@@ -643,7 +643,14 @@ async fn discovery_hint(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Option<St
 /// context, with a pointer at the interactive command that can actually ask.
 /// `None` when nothing is pending.
 async fn consent_hint(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Option<String> {
-    let names = crate::discovery::pending_candidates(sym, deps).await;
+    let names: Vec<String> = crate::discovery::pending_candidate_notes(sym, deps)
+        .await
+        .into_iter()
+        .map(|(name, by)| match by {
+            Some(by) => format!("{name} (named by the plugin of `{by}`)"),
+            None => name,
+        })
+        .collect();
     if names.is_empty() {
         return None;
     }

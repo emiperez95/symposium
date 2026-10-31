@@ -34,7 +34,7 @@
 //! [`PackageManager::active_plugins`]: crate::pm::PackageManager::active_plugins
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::pm::WorkspaceDeps;
 use anyhow::{Context, Result};
@@ -42,10 +42,11 @@ use std::sync::Arc;
 use symposium_install::UpdateLevel;
 
 use crate::audits::{AuditIndex, AuditLookup, Revocation};
-use crate::config::{AutoAccept, Symposium};
+use crate::config::{AutoAccept, Symposium, UseEntry};
 use crate::output::Output;
 use crate::plugins::Plugin;
 use crate::pm::{CARGO_PM, CargoPm, PackageId, PmRegistry};
+use crate::predicate::PredicateContext;
 use crate::report::ReportEvent;
 
 /// Why a discovered offer is (or is not) enabled.
@@ -102,6 +103,12 @@ pub struct DiscoveredPlugin {
     /// step (not disabled, revoked or already enabled), which is every
     /// [`Enablement::Candidate`] and [`Enablement::Audited`] offer.
     pub audit: Option<AuditLookup>,
+    /// For a crate named by the `[[plugins]] source.cargo` edge of a
+    /// dependency-sourced plugin (see [`plugins::resolve_active`]): the plugin
+    /// whose edge names it. `None` for a crate that is only a dependency.
+    ///
+    /// [`plugins::resolve_active`]: crate::plugins::resolve_active
+    pub pulled_in_by: Option<String>,
 }
 
 impl DiscoveredPlugin {
@@ -133,6 +140,19 @@ pub struct Discovery {
 }
 
 impl Discovery {
+    /// File an offer under the bucket its enablement names.
+    fn file(&mut self, discovered: DiscoveredPlugin) {
+        match discovered.enablement {
+            Enablement::Used => self.active.push(discovered),
+            Enablement::AutoEnabled => self.auto_enabled.push(discovered),
+            Enablement::AutoAccepted => self.auto_accepted.push(discovered),
+            Enablement::Audited { .. } => self.audited.push(discovered),
+            Enablement::Declined => self.declined.push(discovered),
+            Enablement::Revoked(_) => self.revoked.push(discovered),
+            Enablement::Candidate => self.candidates.push(discovered),
+        }
+    }
+
     /// Every offer that may run, whatever enabled it.
     pub fn enabled(&self) -> impl Iterator<Item = &DiscoveredPlugin> {
         self.active
@@ -198,17 +218,63 @@ pub async fn discover(
                 description,
                 enablement,
                 audit,
+                pulled_in_by: None,
             };
-            match discovered.enablement {
-                Enablement::Used => discovery.active.push(discovered),
-                Enablement::AutoEnabled => discovery.auto_enabled.push(discovered),
-                Enablement::AutoAccepted => discovery.auto_accepted.push(discovered),
-                Enablement::Audited { .. } => discovery.audited.push(discovered),
-                Enablement::Declined => discovery.declined.push(discovered),
-                Enablement::Revoked(_) => discovery.revoked.push(discovered),
-                Enablement::Candidate => discovery.candidates.push(discovered),
-            }
+            discovery.file(discovered);
         }
+    }
+
+    // Crates a dependency-sourced plugin chains to that nothing accepted. They
+    // are as pending as an undecided dependency, and not always dependencies at
+    // all, so the loop above cannot see them.
+    let mut ctx = PredicateContext::new(&dep_ids).with_used(&crate::discovery::used_plugins(
+        sym,
+        &pms,
+        registry,
+        &workspace_root,
+    ));
+    let held_back = crate::plugins::resolve_active(
+        sym,
+        registry,
+        &pms,
+        Some(&workspace_root),
+        &mut ctx,
+        UpdateLevel::None,
+    )
+    .await
+    .pending_chains;
+    for chain in held_back {
+        let identity = pms.identity(&chain.id);
+        // A dependency that embeds a plugin was classified above: say who
+        // pulled it in, without offering it twice.
+        if let Some(found) = discovery
+            .candidates
+            .iter_mut()
+            .find(|d| pms.identity(&d.id) == identity)
+        {
+            found.pulled_in_by = Some(chain.pulled_in_by);
+            continue;
+        }
+        // Cache-only, like the load that held it back; an unfetchable crate is
+        // still pending, just undescribed.
+        let loaded = pms.load_plugin(&chain.id, UpdateLevel::None).await;
+        let loaded = loaded.first();
+        let id = loaded.map_or(chain.id.clone(), |l| l.plugin.canonical.clone());
+        let revocation = loaded.and_then(|l| audits.revocation(&l.plugin.canonical, &l.root));
+        let (enablement, audit) = decide(sym, &pms, &used, &id, revocation, || {
+            loaded.map_or(AuditLookup::Unaudited, |l| {
+                audits.lookup(&l.plugin.canonical, &l.root)
+            })
+        });
+        discovery.file(DiscoveredPlugin {
+            registry: CARGO_PM.to_string(),
+            recommends: id.name.clone(),
+            description: loaded.map(|l| describe_plugin(&l.plugin.manifest)),
+            id,
+            enablement,
+            audit,
+            pulled_in_by: Some(chain.pulled_in_by),
+        });
     }
     discovery
 }
@@ -303,6 +369,30 @@ async fn is_audited_dependency(
     )
 }
 
+/// May the crate a dependency-sourced plugin chains to load? The same
+/// acceptance as any dependency plugin, in the same precedence: `disable` says
+/// no; a `use` entry (`used`, the identities those entries name), an
+/// `auto-enable` entry or `auto-accept = "all"` says yes; under
+/// `auto-accept = "audit"` a trusted registry's audit of exactly this payload
+/// says yes, whether or not the workspace depends on the crate. A revocation is
+/// not weighed here: activation withholds a revoked crate after loading it
+/// (`plugins::withheld`), as for every grant. Cache-only; nothing is written.
+pub(crate) async fn chain_target_accepted(
+    sym: &Symposium,
+    pms: &PmRegistry,
+    audits: &AuditIndex,
+    used: &HashSet<PackageId>,
+    id: &PackageId,
+) -> bool {
+    let plugins = &sym.config.plugins;
+    if plugins.is_disabled(pms, id) {
+        return false;
+    }
+    used.contains(&pms.identity(id))
+        || plugins.is_accepted_without_asking(pms, id)
+        || is_audited_dependency(sym, pms, audits, id).await
+}
+
 pub(crate) async fn resolve_used<'a>(
     sym: &'a Symposium,
     pms: &PmRegistry,
@@ -350,17 +440,31 @@ pub async fn discover_for(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Discove
 
 /// The names of the discovered offers still awaiting consent, deduplicated
 /// and sorted — what a consent prompt would ask about, and what the
-/// non-interactive hint names.
+/// non-interactive hint names. Includes crates a dependency-sourced plugin
+/// chains to ([`DiscoveredPlugin::pulled_in_by`]).
 pub async fn pending_candidates(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> Vec<String> {
-    let mut names: Vec<String> = discover_for(sym, deps)
+    pending_candidate_notes(sym, deps)
+        .await
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// [`pending_candidates`] with, for a chained crate, the plugin that pulled it
+/// in. Sorted by name, one entry per name.
+pub async fn pending_candidate_notes(
+    sym: &Symposium,
+    deps: &Arc<WorkspaceDeps>,
+) -> Vec<(String, Option<String>)> {
+    let mut notes: Vec<(String, Option<String>)> = discover_for(sym, deps)
         .await
         .candidates
         .into_iter()
-        .map(|c| c.id.name)
+        .map(|c| (c.id.name, c.pulled_in_by))
         .collect();
-    names.sort();
-    names.dedup();
-    names
+    notes.sort();
+    notes.dedup_by(|a, b| a.0 == b.0);
+    notes
 }
 
 /// Record consent decisions: approvals into `[plugins] auto-enable`,
@@ -370,7 +474,21 @@ pub async fn pending_candidates(sym: &Symposium, deps: &Arc<WorkspaceDeps>) -> V
 /// Split out from the prompt so the decision recording is testable without a
 /// terminal, and so other entry points can record the same way.
 pub fn apply_consent(sym: &mut Symposium, approved: &[String], declined: &[String]) -> Result<()> {
-    if approved.is_empty() && declined.is_empty() {
+    apply_consent_scoped(sym, approved, &[], declined)
+}
+
+/// [`apply_consent`] with a second list of approvals recorded as
+/// workspace-scoped `[plugins] use` entries instead: crates the workspace does
+/// not depend on, which `auto-enable` (consent for what a *dependency*
+/// carries) cannot cover. `use_in` pairs each name with the workspace root the
+/// entry is scoped to.
+pub fn apply_consent_scoped(
+    sym: &mut Symposium,
+    approved: &[String],
+    use_in: &[(String, PathBuf)],
+    declined: &[String],
+) -> Result<()> {
+    if approved.is_empty() && use_in.is_empty() && declined.is_empty() {
         return Ok(());
     }
     let pms = sym.detached_managers();
@@ -380,6 +498,15 @@ pub fn apply_consent(sym: &mut Symposium, approved: &[String], declined: &[Strin
             plugins.auto_enable.push(name.clone());
         }
     }
+    for (name, root) in use_in {
+        let id = CargoPm::id_for(name, None);
+        if !plugins.is_used_in(&pms, &id, root) {
+            plugins.used.push(UseEntry::Workspace {
+                name: name.clone(),
+                workspace: root.clone(),
+            });
+        }
+    }
     for name in declined {
         if !plugins.is_disabled(&pms, &CargoPm::id_for(name, None)) {
             plugins.disable.push(name.clone());
@@ -387,10 +514,15 @@ pub fn apply_consent(sym: &mut Symposium, approved: &[String], declined: &[Strin
     }
     sym.save_config().context("failed to write user config")?;
 
-    if !approved.is_empty() {
+    let enabled: Vec<&str> = approved
+        .iter()
+        .map(String::as_str)
+        .chain(use_in.iter().map(|(name, _)| name.as_str()))
+        .collect();
+    if !enabled.is_empty() {
         tracing::info!(
             report = %ReportEvent::Info {
-                message: format!("enabled dependency plugins: {}", approved.join(", ")),
+                message: format!("enabled dependency plugins: {}", enabled.join(", ")),
             },
         );
     }
@@ -431,7 +563,14 @@ pub async fn prompt_for_consent(
         return Ok(());
     }
 
+    // A chained crate that is not a dependency cannot be covered by
+    // `auto-enable`, so it is recorded as a workspace-scoped `use` entry.
+    let dep_ids = crate::pm::workspace_dep_ids(sym, deps).await;
+    let workspace_root = deps.workspace_root().map(Path::to_path_buf);
+    let pms = sym.detached_managers();
+
     let mut approved = Vec::new();
+    let mut use_in = Vec::new();
     let mut declined = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for candidate in candidates {
@@ -446,13 +585,23 @@ pub async fn prompt_for_consent(
             .interact_opt()
             .context("consent prompt failed")?;
         match answer {
-            Some(1) => approved.push(name),
+            Some(1) => {
+                let dependency = dep_ids
+                    .iter()
+                    .any(|dep| pms.identity(dep) == pms.identity(&candidate.id));
+                match &workspace_root {
+                    Some(root) if candidate.pulled_in_by.is_some() && !dependency => {
+                        use_in.push((name, root.clone()))
+                    }
+                    _ => approved.push(name),
+                }
+            }
             Some(2) => declined.push(name),
             Some(_) => {}  // ask me later — record nothing
             None => break, // Esc — leave the rest undecided
         }
     }
-    apply_consent(sym, &approved, &declined)
+    apply_consent_scoped(sym, &approved, &use_in, &declined)
 }
 
 /// The question the consent prompt asks about one candidate. It leads with the
@@ -479,7 +628,12 @@ fn consent_question(candidate: &DiscoveredPlugin) -> String {
             "Audited by registry `{registry}`, but `[plugins] auto-accept` is `none`, so it asks anyway."
         ),
     };
-    format!("{status}\nDependency `{name}` provides {what}. Enable it?")
+    match &candidate.pulled_in_by {
+        Some(by) => format!(
+            "{status}\nThe plugin of `{by}` pulls in crate `{name}`, which provides {what}. Enable it?"
+        ),
+        None => format!("{status}\nDependency `{name}` provides {what}. Enable it?"),
+    }
 }
 
 /// A short human summary of what a discovered plugin contributes, for the
@@ -977,7 +1131,20 @@ mod tests {
             description: Some("1 skill group".into()),
             enablement: Enablement::Candidate,
             audit: Some(audit),
+            pulled_in_by: None,
         }
+    }
+
+    #[test]
+    fn the_prompt_names_the_plugin_that_pulled_a_chained_crate_in() {
+        let mut candidate = candidate_with(AuditLookup::Unaudited);
+        candidate.pulled_in_by = Some("crate-p".into());
+        let q = consent_question(&candidate);
+        assert!(q.starts_with("NOT AUDITED"), "{q}");
+        assert!(
+            q.contains("The plugin of `crate-p` pulls in crate `widget-lib`, which provides 1 skill group. Enable it?"),
+            "{q}"
+        );
     }
 
     #[test]

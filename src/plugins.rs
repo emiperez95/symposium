@@ -1147,7 +1147,8 @@ async fn load_registry_impl(
 /// plugin-level gate; a facet still calls [`Plugin::applies`] before its
 /// own predicates, to re-stamp `workspace-member()` for the plugin being read.
 ///
-/// `ctx.deps` supplies the dependency list expansion evaluates against.
+/// `ctx.deps` supplies the dependency list expansion evaluates against. See
+/// [`resolve_active`] for the chain-consent rule and the crates it holds back.
 pub async fn active_plugins(
     sym: &Symposium,
     registry: &PluginRegistry,
@@ -1156,22 +1157,81 @@ pub async fn active_plugins(
     ctx: &mut crate::predicate::PredicateContext<'_>,
     update: UpdateLevel,
 ) -> Vec<Plugin> {
+    resolve_active(sym, &registry.plugins, pms, workspace_root, ctx, update)
+        .await
+        .plugins
+}
+
+/// A crate named by a `[[plugins]] source.cargo` edge of a dependency-sourced
+/// plugin that nothing accepted, so it was not loaded. Surfaced by `status`, the
+/// `SessionStart` hint and the consent prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingChain {
+    /// The crate the edge names (any version: the workspace pin picks it).
+    pub id: crate::pm::PackageId,
+    /// Manifest name of the plugin whose edge names it.
+    pub pulled_in_by: String,
+}
+
+/// What [`resolve_active`] produced: the active plugins, and the chained crates
+/// it held back.
+#[derive(Debug, Default)]
+pub struct ActiveSet {
+    pub plugins: Vec<Plugin>,
+    pub pending_chains: Vec<PendingChain>,
+}
+
+/// The ids still to resolve, in two stacks. A `[[plugins]]` edge is **vouched
+/// for** when the plugin that declares it is a trust root (a registry or
+/// workspace plugin: its `canonical.pm` is not the cargo PM). Such an edge, and
+/// every consented dependency, sits in `vouched`. An edge declared by a
+/// cargo-sourced plugin (dependency-embedded or itself chain-reached) names
+/// content nobody vouched for, so it sits in `unvouched` and its target loads
+/// only if accepted like any other dependency plugin. `vouched` drains first, so
+/// a crate reachable through both kinds of edge loads on the vouched one.
+#[derive(Default)]
+struct Worklist {
+    vouched: Vec<crate::pm::PackageId>,
+    unvouched: Vec<(crate::pm::PackageId, String)>,
+}
+
+/// [`active_plugins`] over the already-loaded trust-root `registry` plugins,
+/// also reporting the chained crates held back.
+///
+/// **Chain consent.** A `[[plugins]] source.cargo` edge of a registry or
+/// workspace plugin is vouched for: its target loads (subject, as everything
+/// is, to `disable` and revocation). An edge of a cargo-sourced plugin is not:
+/// the audit digest of the plugin that names the target pins the name, not the
+/// target's content. The target loads only when a `use` or `auto-enable` entry
+/// names it, `auto-accept = "all"`, or `auto-accept = "audit"` and a trusted
+/// registry audited its payload (looked up cache-only; a failed fetch is "not
+/// accepted"). Otherwise it is a [`PendingChain`]. The status propagates: the
+/// edges of a crate that did load are unvouched in their turn. A held-back crate
+/// is not marked visited, so a vouched edge reaching it later still loads it.
+pub async fn resolve_active(
+    sym: &Symposium,
+    registry_plugins: &[Plugin],
+    pms: &crate::pm::PmRegistry,
+    workspace_root: Option<&Path>,
+    ctx: &mut crate::predicate::PredicateContext<'_>,
+    update: UpdateLevel,
+) -> ActiveSet {
     let mut active = Vec::new();
+    let mut pending: Vec<PendingChain> = Vec::new();
     // Crate identities already loaded through the set, keyed on `(pm, name)` so
     // a crate reached through two chains — or a chain and dependency enablement —
     // loads once (its hooks don't double-fire, its subcommands aren't a false
     // conflict), while a registry plugin and a crate of the same name stay
     // distinct.
     let mut visited = std::collections::HashSet::new();
-    // Package ids still to resolve through the set.
-    let mut worklist: Vec<crate::pm::PackageId> = Vec::new();
+    let mut worklist = Worklist::default();
 
     let audits = sym.audit_index(pms);
 
     // Seed with the trust-root plugins (registry + workspace), gated. A
     // revocation has nothing to say about what the user put there, but
     // `disable` is the last word for every source.
-    for parsed in &registry.plugins {
+    for parsed in registry_plugins {
         if withheld(sym, pms, &audits, parsed, None).is_some() {
             continue;
         }
@@ -1181,11 +1241,11 @@ pub async fn active_plugins(
     // Enabled packages: consented dependencies and what `use` entries name,
     // each resolved by the package managers.
     if let Some(root) = workspace_root {
-        worklist.extend(
+        worklist.vouched.extend(
             crate::discovery::enabled_dependencies(
                 sym,
                 pms,
-                &registry.plugins,
+                registry_plugins,
                 ctx.deps,
                 root,
                 update,
@@ -1194,9 +1254,59 @@ pub async fn active_plugins(
         );
     }
 
+    // The identities `use` entries name, resolved on first need.
+    let mut used: Option<std::collections::HashSet<crate::pm::PackageId>> = None;
+
     // Fixed-point: resolve each id through the set, record any new plugin, and
     // enqueue its own chained references.
-    while let Some(id) = worklist.pop() {
+    loop {
+        let id = if let Some(id) = worklist.vouched.pop() {
+            id
+        } else if let Some((id, by)) = worklist.unvouched.pop() {
+            if visited.contains(&pms.identity(&id)) {
+                continue;
+            }
+            if used.is_none() {
+                used = Some(match workspace_root {
+                    Some(root) => {
+                        crate::discovery::resolve_used(sym, pms, registry_plugins, root, update)
+                            .await
+                            .into_iter()
+                            .map(|(_, id)| id)
+                            .collect()
+                    }
+                    None => Default::default(),
+                });
+            }
+            if !crate::discovery::chain_target_accepted(
+                sym,
+                pms,
+                &audits,
+                used.as_ref().expect("resolved above"),
+                &id,
+            )
+            .await
+            {
+                tracing::debug!(
+                    report = %crate::report::ReportEvent::PluginConsidered {
+                        plugin: id.name.clone(),
+                        matched: false,
+                        reason: Some(format!("pulled in by `{by}`; awaiting consent or an audit")),
+                    },
+                );
+                let identity = pms.identity(&id);
+                if !pending.iter().any(|p| pms.identity(&p.id) == identity) {
+                    pending.push(PendingChain {
+                        id,
+                        pulled_in_by: by,
+                    });
+                }
+                continue;
+            }
+            id
+        } else {
+            break;
+        };
         for loaded in pms.load_plugin(&id, update).await {
             let plugin = loaded.plugin;
             if visited.insert(pms.identity(&plugin.canonical))
@@ -1207,7 +1317,13 @@ pub async fn active_plugins(
         }
     }
 
-    active
+    // A crate held back through one edge may have loaded through another.
+    pending.retain(|p| !visited.contains(&pms.identity(&p.id)));
+
+    ActiveSet {
+        plugins: active,
+        pending_chains: pending,
+    }
 }
 
 /// Why activation refuses a plugin before its own predicates are consulted.
@@ -1270,7 +1386,7 @@ fn record_active(
     plugin: Plugin,
     ctx: &mut crate::predicate::PredicateContext<'_>,
     active: &mut Vec<Plugin>,
-    worklist: &mut Vec<crate::pm::PackageId>,
+    worklist: &mut Worklist,
 ) {
     if !plugin.applies(ctx) {
         tracing::debug!(
@@ -1290,10 +1406,20 @@ fn record_active(
         },
     );
     warn_undispatched_crate_features(&plugin);
+    // An edge is vouched for only by a trust root: a cargo-sourced plugin names
+    // content nobody vouched for (see `Worklist`).
+    let vouches = plugin.canonical.pm != crate::pm::CARGO_PM;
     for edge in &plugin.manifest.chained {
         ctx.set_workspace_member(plugin.workspace_member);
         if edge.predicates.evaluate(ctx) {
-            worklist.push(crate::pm::CargoPm::id_for(&edge.name, None));
+            let target = crate::pm::CargoPm::id_for(&edge.name, None);
+            if vouches {
+                worklist.vouched.push(target);
+            } else {
+                worklist
+                    .unvouched
+                    .push((target, plugin.manifest.name.clone()));
+            }
         }
     }
     active.push(plugin);

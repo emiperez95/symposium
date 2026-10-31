@@ -130,7 +130,7 @@ Symposium trusts two things without asking: the workspace you are in, and the [r
 
 Your dependency list is deliberately not a trust root. Depending on a crate means compiling its code; it should not silently let the crate's author add instructions to your agent. So a plugin embedded in a dependency runs only once you say so, and a registry plugin that names no dependency anywhere is *dormant* — loaded and listed, but inactive — until you enable it by name.
 
-Trust follows whoever supplies the *content*, not the package the content is about: a registry entry recommending a plugin for `serde` is the registry's own content and is trusted, while `serde`'s embedded plugin is not. One consequence is worth knowing: a trusted plugin may name a crate with a [`[[plugins]]` chained reference](./plugin-definition.md), and that crate's plugin content then loads without a `[plugins]` entry of its own — the registry is vouching for it.
+Trust follows whoever supplies the *content*, not the package the content is about: a registry entry recommending a plugin for `serde` is the registry's own content and is trusted, while `serde`'s embedded plugin is not. One consequence is worth knowing: a registry or workspace plugin may name a crate with a [`[[plugins]]` chained reference](./plugin-definition.md), and that crate's plugin content then loads without a `[plugins]` entry of its own — the registry is vouching for it. A crate named by a *dependency's* plugin is not vouched for; it needs a `use` or `auto-enable` entry or an audit of its own ([details](./plugin-definition.md#who-vouches-for-a-chained-crate)).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
