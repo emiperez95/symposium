@@ -108,6 +108,7 @@
       - [Proposed: Agent Plugins packages](./rfds/agent-plugins/proposed-reference.md)
       - [Proposed: How extensions are installed](./rfds/agent-plugins/proposed-install.md)
     - [Plugin audits](./rfds/plugin-audits/README.md)
+    - [Automated plugin audits](./rfds/automated-plugin-audits/README.md)
   - [Completed](./rfds/completed.md) <!-- move completed rfds to this section -->
     - [Configuration parsing and normalization](./rfds/config-normalization/README.md)
     - [RFD Process](./rfds/rfd-process/README.md)
