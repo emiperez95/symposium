@@ -51,19 +51,26 @@ Precedence for a dependency's plugin, first match wins:
 flowchart TD
     A[Dependency ships a plugin] --> B{In disable?}
     B -- yes --> X[Not loaded]
-    B -- no --> C{Denied?}
+    B -- no --> C{Denied by a registry?}
     C -- yes --> X
     C -- no --> D{use / auto-enable?}
     D -- yes --> L[Loaded]
-    D -- no --> W{Warned?}
+    D -- no --> W{Warned by a registry?}
     W -- yes --> P[Ask, showing the warning]
     W -- no --> E{auto-accept}
     E -- all --> L
-    E -- audit --> F{Allowed?}
+    E -- audit --> F{Allowed by a registry?}
     F -- yes --> L
     F -- no --> Q[Ask, saying it is not audited]
     E -- none --> R[Ask]
+
+    classDef user fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef registry fill:#fde68a,stroke:#b45309,color:#78350f
+    class B,D,E user
+    class C,W,F registry
 ```
+
+Blue steps are the user's config; amber steps are a registry's verdict.
 
 A denial outranks the user's own `use`, because it marks a payload known to be harmful; `cargo agents use` refuses a denied crate and says why. Short of that, `use` and `auto-enable` are standing grants: they trust the crate, not one release, the same way depending on a crate trusts its future code. A warning does not override them; `cargo agents status` shows it. Re-checking each release is the registry's job, and its tool for stopping a release is a denial.
 
