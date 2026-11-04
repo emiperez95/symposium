@@ -107,6 +107,7 @@
     - [Agent Plugins interoperability](./rfds/agent-plugins/README.md)
       - [Proposed: Agent Plugins packages](./rfds/agent-plugins/proposed-reference.md)
       - [Proposed: How extensions are installed](./rfds/agent-plugins/proposed-install.md)
+    - [Clearer enablement names](./rfds/enablement-names/README.md)
   - [Completed](./rfds/completed.md) <!-- move completed rfds to this section -->
     - [Configuration parsing and normalization](./rfds/config-normalization/README.md)
     - [RFD Process](./rfds/rfd-process/README.md)
