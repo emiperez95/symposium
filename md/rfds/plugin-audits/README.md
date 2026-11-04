@@ -26,8 +26,16 @@ crate  = "widget-lib"
 digest   = "sha256:9f2c41d0e8…b7"           # hash of the plugin payload
 versions = ["1.4.2", "1.4.3", "1.5.0"]      # releases known to ship it
 
+[[audit]]                                   # 1.6.0 edited a skill: new payload
+digest   = "sha256:41aa07c3d2…0c"
+versions = ["1.6.0", "1.6.1"]
+
+[[audit]]                                   # 2.0.0 rewrote the skills
+digest   = "sha256:d3e95b18a4…71"
+versions = ["2.0.0"]
+
 [[warn]]
-versions = "1.6.0"
+versions = "2.1.0"
 note     = "the setup skill pipes a remote script into sh"
 
 [[revoked]]                                 # deny
@@ -35,7 +43,7 @@ versions = ">=1.3.0, <1.4.2"
 reason   = "remote-exec"                    # code from a fixed list
 ```
 
-Sync hashes `widget-lib`'s payload (its plugin manifest and every skill directory the manifest names inside the crate), finds the matching `[[audit]]` digest, and loads the plugin with no prompt and no config write. `cargo agents status` lists it as active because of the audit. A release that changes the payload no longer matches and asks again until it is audited as a new entry. A plugin that pulls skill text from outside the crate (a `source.git` group) cannot be pinned by a digest, so it can be warned about or denied, but not allowed.
+Sync hashes `widget-lib`'s payload (its plugin manifest and every skill directory the manifest names inside the crate), finds the matching `[[audit]]` digest, and loads the plugin with no prompt and no config write. `cargo agents status` lists it as active because of the audit. There is one `[[audit]]` per distinct payload, not per release: 1.4.2 to 1.5.0 changed only code and share an entry, while 1.6.0 and 2.0.0 changed skills and were audited again. `versions` is bookkeeping; only the digest is matched, so a release with an unlisted payload asks until it gets an entry of its own. A plugin that pulls skill text from outside the crate (a `source.git` group) cannot be pinned by a digest, so it can be warned about or denied, but not allowed.
 
 Precedence for a dependency's plugin, first match wins:
 
@@ -69,7 +77,7 @@ A denial outranks the user's own `use`, because it marks a payload known to be h
 
 ```json
 { "method": "audit", "params": {
-    "id": { "pm": "cargo", "name": "widget-lib", "version": "1.6.0" },
+    "id": { "pm": "cargo", "name": "widget-lib", "version": "2.1.0" },
     "digest": "sha256:0b17…e2" } }
 { "result": { "verdict": "warn", "note": "the setup skill pipes a remote script into sh" } }
 ```
