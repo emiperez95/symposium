@@ -56,13 +56,13 @@ flowchart TD
     C -- no --> D{use / auto-enable?}
     D -- yes --> L[Loaded]
     D -- no --> W{Warned?}
-    W -- yes --> P[Ask, showing the warning]
+    W -- yes --> P[Ask]
     W -- no --> E{auto-accept}
     E -- all --> L
     E -- audit --> F{Allowed?}
     F -- yes --> L
-    F -- no --> Q[Ask, saying it is not audited]
-    E -- none --> R[Ask]
+    F -- no --> P
+    E -- none --> P
 
     classDef user fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
     classDef registry fill:#fde68a,stroke:#b45309,color:#78350f
@@ -72,7 +72,7 @@ flowchart TD
 
 Blue steps are the user's `[plugins]` config; amber steps are a trusted registry's verdict.
 
-A denial outranks the user's own `use`, because it marks a payload known to be harmful; `cargo agents use` refuses a denied crate and says why. Short of that, `use` and `auto-enable` are standing grants: they trust the crate, not one release, the same way depending on a crate trusts its future code. A warning does not override them; `cargo agents status` shows it. Re-checking each release is the registry's job, and its tool for stopping a release is a denial.
+A denial outranks the user's own `use`, because it marks a payload known to be harmful; `cargo agents use` refuses a denied crate and says why. Short of that, `use` and `auto-enable` are standing grants: they trust the crate, not one release, the same way depending on a crate trusts its future code. A warning does not override them; `cargo agents status` shows it. Re-checking each release is the registry's job, and its tool for stopping a release is a denial. When Symposium asks, the prompt shows a registry's warning, or says that the plugin is not audited.
 
 ## Detailed plans
 
