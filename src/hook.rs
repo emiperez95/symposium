@@ -290,7 +290,7 @@ pub async fn execute_hook(
             agent,
             event,
             &sym_input,
-            payload.as_ref(),
+            input,
             prior_output,
             builtin_sym_output.additional_context().map(String::from),
             &deps,
@@ -722,7 +722,7 @@ pub async fn dispatch_plugin_hooks(
     host_agent: HookAgent,
     event: HookEvent,
     sym_input: &symposium::InputEvent,
-    original_input: &dyn AgentHookInput,
+    original_input: &str,
     prior_output: serde_json::Value,
     prior_context: Option<String>,
     deps: &Arc<Workspace>,
@@ -772,19 +772,18 @@ pub async fn dispatch_plugin_hooks(
 
         // Determine stdin for the plugin based on its declared format.
         // After format selection, the only two cases are:
-        // - native (matches host agent) → pass through original input
+        // - native (matches host agent) → the agent's own payload, byte for byte
         // - symposium → deliver canonical format
         let hook_agent = hook.format.as_agent();
-        let hook_input: &dyn AgentHookInput = if hook_agent == Some(host_agent) {
-            original_input
+        let stdin_str = if hook_agent == Some(host_agent) {
+            original_input.to_string()
         } else {
-            sym_input
-        };
-        let stdin_str = match hook_input.to_string() {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!(plugin = %hook.plugin_name, hook = %hook.hook_name, error = %e, "failed to serialize hook input");
-                continue;
+            match AgentHookInput::to_string(sym_input) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!(plugin = %hook.plugin_name, hook = %hook.hook_name, error = %e, "failed to serialize hook input");
+                    continue;
+                }
             }
         };
 

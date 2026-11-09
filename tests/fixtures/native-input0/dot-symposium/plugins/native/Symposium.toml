@@ -1,0 +1,10 @@
+name = "native"
+depends-on = ["*"]
+
+# An Antigravity-format hook records the exact payload it receives.
+
+[[hooks]]
+name = "session"
+event = "SessionStart"
+format = "antigravity"
+command = { script = "$TEST_DIR/dot-symposium/plugins/native/scripts/session.sh" }
