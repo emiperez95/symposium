@@ -86,3 +86,31 @@ async fn post_tool_use_keeps_every_plugin_context() {
     .await
     .unwrap();
 }
+
+/// A symposium-format hook that prints valid JSON that is not an object
+/// (here a bare string) is ignored. Merged as-is it would replace the whole
+/// response; on `PreToolUse` no joined context is re-applied over it.
+#[tokio::test(flavor = "multi_thread")]
+async fn non_object_output_does_not_replace_the_response() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["non-object-output0"],
+        async |ctx| {
+            for agent in [HookAgent::Claude, HookAgent::Codex, HookAgent::Copilot] {
+                let stdout = respond(
+                    &ctx,
+                    agent,
+                    HookStep::PreToolUse {
+                        tool_name: "Bash".to_string(),
+                        tool_input: serde_json::json!({"command": "ls"}),
+                    },
+                )
+                .await;
+                assert!(!stdout.contains("not an object"), "{agent:?}: {stdout}");
+            }
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}

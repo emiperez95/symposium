@@ -955,8 +955,13 @@ pub async fn dispatch_plugin_hooks(
                                     {
                                         let host_out = host_h.translate_output(&sym_out);
                                         (host_out.to_hook_output(), Some(sym_out))
-                                    } else {
+                                    } else if v.is_object() {
                                         (v, None)
+                                    } else {
+                                        tracing::warn!(
+                                            "hook output is neither an output event nor a JSON object"
+                                        );
+                                        continue;
                                     }
                                 }
                                 Err(e) => {

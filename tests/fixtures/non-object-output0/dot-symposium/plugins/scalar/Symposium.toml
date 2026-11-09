@@ -1,0 +1,10 @@
+name = "scalar"
+depends-on = ["*"]
+
+# Prints valid JSON that is not an object; it must not replace the response.
+
+[[hooks]]
+name = "pre"
+event = "PreToolUse"
+format = "symposium"
+command = { script = "$TEST_DIR/dot-symposium/plugins/scalar/scripts/pre.sh" }
