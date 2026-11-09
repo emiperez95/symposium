@@ -572,9 +572,10 @@ pub async fn dispatch_builtin(
     }
 }
 
-/// Handle SessionStart: orient the agent toward crate-aware tooling and, when due, nudge the
-/// user to update. The two fragments are computed independently -- the discovery hint is never gated
-/// behind the update-check throttle -- then joined into a single context block.
+/// Handle SessionStart: orient the agent toward crate-aware tooling, name the dependency plugins
+/// awaiting consent, and, when due, nudge the user to update. The three fragments are computed
+/// independently -- only the update nudge is gated behind the update-check throttle -- then joined
+/// into a single context block.
 async fn handle_session_start(
     sym: &Symposium,
     _payload: &SessionStartInput,
@@ -648,7 +649,7 @@ async fn consent_hint(sym: &Symposium, deps: &Arc<Workspace>) -> Option<String> 
     ))
 }
 
-/// Nudge the user to update. Gated by `auto-update = \"warn\"`, the 25h throttle,
+/// Nudge the user to update. Gated by `auto-update = \"warn\"`, the 24-hour update-check throttle,
 /// and a newer published version on the registry; `None` otherwise.
 fn update_nudge(sym: &Symposium) -> Option<String> {
     use crate::config::AutoUpdate;

@@ -63,8 +63,8 @@ pub enum Enablement {
 /// One plugin offer whose recommended dependency the workspace has.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredPlugin {
-    /// The offering package-manager instance: an ecosystem transport
-    /// (`cargo`) for a dependency-embedded plugin, or a registry's name.
+    /// The untrusted package-manager instance that offered this plugin: the
+    /// ecosystem transport (`cargo`) whose dependency embeds it.
     pub registry: String,
     /// The offered package.
     pub id: PackageId,
@@ -87,7 +87,7 @@ impl DiscoveredPlugin {
 /// Every dependency-matched offer, grouped by what the config decided.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Discovery {
-    /// Already enabled: named by a `use` entry, or offered by a registry.
+    /// Enabled by a `[plugins] use` entry naming the dependency.
     pub active: Vec<DiscoveredPlugin>,
     /// Enabled by `[plugins] auto-enable`.
     pub auto_enabled: Vec<DiscoveredPlugin>,
@@ -350,8 +350,8 @@ pub async fn prompt_for_consent(
     apply_consent(sym, &approved, &declined)
 }
 
-/// A short human summary of what a discovered plugin contributes, for the
-/// consent prompt and status output. Emphasizes the facets that matter to a
+/// A short human summary of what a discovered plugin contributes, shown in
+/// the consent prompt. Emphasizes the facets that matter to a
 /// trust decision — a plugin that only ships skills is lower-stakes than one
 /// that runs a hook or an MCP server.
 fn describe_plugin(plugin: &crate::plugins::PluginManifest) -> String {
@@ -376,9 +376,9 @@ fn count_phrase(n: usize, singular: &str, plural: &str) -> Option<String> {
     (n > 0).then(|| format!("{n} {}", if n == 1 { singular } else { plural }))
 }
 
-/// Classify one offer against the `[plugins]` config. An explicit decision —
-/// `use`, then `disable` — outranks the standing `auto-enable`, so a name the
-/// user declined stays declined.
+/// Classify one offer against the `[plugins]` config. `disable` outranks every
+/// other entry, and an explicit `use` outranks the standing `auto-enable`, so a
+/// name the user declined stays declined.
 fn decide(
     sym: &Symposium,
     pms: &PmRegistry,
