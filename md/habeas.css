@@ -1,0 +1,25 @@
+.habeas-req-badge {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.habeas-shield {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+a.habeas-req-badge,
+a.habeas-req-badge:visited {
+  color: inherit;
+  text-decoration: none;
+}
+
+a.habeas-req-badge:hover {
+  filter: brightness(1.08);
+}
+
+a.habeas-req-badge:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
