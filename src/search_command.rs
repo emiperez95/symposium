@@ -17,6 +17,7 @@
 
 use anyhow::Result;
 
+use crate::UpdateLevel;
 use crate::config::Symposium;
 use crate::report::ReportEvent;
 
@@ -41,8 +42,12 @@ pub async fn find_matches(sym: &Symposium, query: &str) -> Vec<SearchMatch> {
     let mut matches = Vec::new();
 
     let registry = crate::plugins::load_registry(sym).await;
+    // Plugins already listed, by (registry, plugin name). A registry's search
+    // hit names an entry directory, which can differ from the plugin's name.
+    let mut listed = std::collections::HashSet::new();
     for parsed in &registry.plugins {
         if name_matches(&parsed.manifest.name, query) {
+            listed.insert((parsed.canonical.pm.clone(), parsed.canonical.name.clone()));
             matches.push(SearchMatch {
                 origin: parsed.canonical.pm.clone(),
                 name: parsed.manifest.name.clone(),
@@ -55,12 +60,25 @@ pub async fn find_matches(sym: &Symposium, query: &str) -> Vec<SearchMatch> {
         }
     }
     // Search is workspace-independent; a detached resolver stands in.
-    for (instance, info) in sym.detached_managers().search(query).await {
+    let pms = sym.detached_managers();
+    for (instance, info) in pms.search(query).await {
         if matches
             .iter()
             .any(|m| m.origin == instance && m.name == info.id.name)
         {
             continue;
+        }
+        // A hit from a registry that already supplied a listed plugin may be
+        // that plugin's entry under its directory name. Loading the entry is a
+        // local read; other instances' hits are never loaded here.
+        if listed.iter().any(|(pm, _)| *pm == instance) {
+            let entry = pms.load_plugin(&info.id, UpdateLevel::None).await;
+            if entry
+                .iter()
+                .any(|p| listed.contains(&(p.canonical.pm.clone(), p.canonical.name.clone())))
+            {
+                continue;
+            }
         }
         matches.push(SearchMatch {
             origin: instance,
