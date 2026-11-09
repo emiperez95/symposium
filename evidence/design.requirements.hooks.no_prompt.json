@@ -23,6 +23,48 @@
       ]
     },
     {
+      "rust_file": "src/init.rs",
+      "rust_item": "fn[interactive]",
+      "text": [
+        "/// Whether we can prompt the user interactively.",
+        "fn interactive(out: &Output) -> bool {",
+        "    // {impl}`design.requirements.hooks.no_prompt`",
+        "    out.is_interactive()",
+        "}"
+      ]
+    },
+    {
+      "matches": [
+        "design.requirements.hooks.pending_consent"
+      ],
+      "requirements": "design.requirements.hooks.pending_consent",
+      "text": [
+        ":::{example} pending_consent",
+        "A workspace depends on a crate that ships a plugin the user has not enabled or declined. When an agent starts a session, the `SessionStart` hook names that crate in the agent's context instead of asking, and for every agent that takes JSON its stdout parses as JSON. {cite}`design.requirements.hooks.no_prompt` {cite}`design.requirements.hooks.stdout_protocol`",
+        ":::"
+      ]
+    },
+    {
+      "rust_file": "src/bin/cargo-agents.rs",
+      "rust_item": "fn[command_output]",
+      "text": [
+        "/// The `Output` for this command's human-facing messages.",
+        "///",
+        "/// Hook commands are quiet (they're invoked by the agent, not the user), so",
+        "/// nothing they print reaches the agent's stdout and nothing can prompt.",
+        "/// JSON mode also suppresses human output (only JSON goes to stdout).",
+        "// {impl}`design.requirements.hooks.no_prompt`",
+        "// {impl}`design.requirements.hooks.stdout_protocol`",
+        "fn command_output(cli: &Cli, is_hook: bool) -> Output {",
+        "    if cli.quiet || is_hook || cli.json {",
+        "        Output::quiet()",
+        "    } else {",
+        "        Output::normal()",
+        "    }",
+        "}"
+      ]
+    },
+    {
       "rust_file": "src/discovery.rs",
       "rust_item": "fn[prompt_for_consent]",
       "text": [
@@ -39,7 +81,7 @@
         "/// declines anything, and Escape leaves the remaining offers undecided too.",
         "pub async fn prompt_for_consent(",
         "    sym: &mut Symposium,",
-        "    deps: &Arc<WorkspaceDeps>,",
+        "    deps: &Arc<Workspace>,",
         "    out: &Output,",
         ") -> Result<()> {",
         "    // {impl}`design.requirements.hooks.no_prompt`",
@@ -81,17 +123,6 @@
       ]
     },
     {
-      "rust_file": "src/init.rs",
-      "rust_item": "fn[interactive]",
-      "text": [
-        "/// Whether we can prompt the user interactively.",
-        "fn interactive(out: &Output) -> bool {",
-        "    // {impl}`design.requirements.hooks.no_prompt`",
-        "    out.is_interactive()",
-        "}"
-      ]
-    },
-    {
       "rust_file": "tests/enablement.rs",
       "rust_item": "fn[consent_prompt_never_fires_non_interactively]",
       "text": [
@@ -116,14 +147,14 @@
         "",
         "            // There *is* something to ask about — so nothing below is",
         "            // vacuous.",
-        "            let deps = ctx.sym.workspace_deps(&workspace_root);",
+        "            let deps = ctx.sym.workspace(&workspace_root);",
         "            assert_eq!(",
         "                symposium::discovery::pending_candidates(&ctx.sym, &deps).await,",
         "                vec![\"crate-a\".to_string()]",
         "            );",
         "",
         "            // The prompt returns without reading stdin, recording nothing.",
-        "            let deps = ctx.sym.workspace_deps(&workspace_root);",
+        "            let deps = ctx.sym.workspace(&workspace_root);",
         "            let out = Output::quiet();",
         "            symposium::discovery::prompt_for_consent(&mut ctx.sym, &deps, &out).await?;",
         "            assert!(ctx.sym.config.plugins.auto_enable.is_empty());",
@@ -136,7 +167,7 @@
         "            assert!(!config.contains(\"disable\"), \"{config}\");",
         "",
         "            // Still undecided, and still not installed.",
-        "            let deps = ctx.sym.workspace_deps(&workspace_root);",
+        "            let deps = ctx.sym.workspace(&workspace_root);",
         "            assert_eq!(",
         "                symposium::discovery::pending_candidates(&ctx.sym, &deps).await,",
         "                vec![\"crate-a\".to_string()]",
@@ -150,37 +181,6 @@
         "    )",
         "    .await",
         "    .unwrap();",
-        "}"
-      ]
-    },
-    {
-      "matches": [
-        "design.requirements.hooks.pending_consent"
-      ],
-      "requirements": "design.requirements.hooks.pending_consent",
-      "text": [
-        ":::{example} pending_consent",
-        "A workspace depends on a crate that ships a plugin the user has not enabled or declined. When an agent starts a session, the `SessionStart` hook names that crate in the agent's context instead of asking, and for every agent that takes JSON its stdout parses as JSON. {cite}`design.requirements.hooks.no_prompt` {cite}`design.requirements.hooks.stdout_protocol`",
-        ":::"
-      ]
-    },
-    {
-      "rust_file": "src/bin/cargo-agents.rs",
-      "rust_item": "fn[command_output]",
-      "text": [
-        "/// The `Output` for this command's human-facing messages.",
-        "///",
-        "/// Hook commands are quiet (they're invoked by the agent, not the user), so",
-        "/// nothing they print reaches the agent's stdout and nothing can prompt.",
-        "/// JSON mode also suppresses human output (only JSON goes to stdout).",
-        "// {impl}`design.requirements.hooks.no_prompt`",
-        "// {impl}`design.requirements.hooks.stdout_protocol`",
-        "fn command_output(cli: &Cli, is_hook: bool) -> Output {",
-        "    if cli.quiet || is_hook || cli.json {",
-        "        Output::quiet()",
-        "    } else {",
-        "        Output::normal()",
-        "    }",
         "}"
       ]
     }

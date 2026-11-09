@@ -70,41 +70,6 @@
     },
     {
       "rust_file": "tests/hook_stdout.rs",
-      "rust_item": "fn[install_command_output_stays_off_hook_stdout]",
-      "text": [
-        "/// A plugin's install commands run on every dispatch of the hook that needs",
-        "/// them; what they print must not reach the agent's stdout.",
-        "// {test}`design.requirements.hooks.stdout_protocol`",
-        "#[tokio::test(flavor = \"multi_thread\")]",
-        "async fn install_command_output_stays_off_hook_stdout() {",
-        "    with_fixture(TestMode::SimulationOnly, &[\"install-noise0\"], async |ctx| {",
-        "        let output = run_session_start(&ctx, HookAgent::Claude, &ctx.tempdir);",
-        "        assert!(output.status.success());",
-        "        let stdout: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {",
-        "            panic!(",
-        "                \"stdout is not JSON ({e}): {}\",",
-        "                String::from_utf8_lossy(&output.stdout)",
-        "            )",
-        "        });",
-        "        assert_eq!(",
-        "            stdout,",
-        "            json!({",
-        "                \"hookSpecificOutput\": {",
-        "                    \"hookEventName\": \"SessionStart\",",
-        "                    \"additionalContext\": \"noisy plugin context\",",
-        "                }",
-        "            })",
-        "        );",
-        "        assert!(String::from_utf8_lossy(&output.stderr).contains(\"installing noisy tool\"));",
-        "        Ok(())",
-        "    })",
-        "    .await",
-        "    .unwrap();",
-        "}"
-      ]
-    },
-    {
-      "rust_file": "tests/hook_stdout.rs",
       "rust_item": "fn[rejected_skill_warning_stays_off_hook_stdout]",
       "text": [
         "// {test}`design.requirements.hooks.stdout_protocol`",
@@ -218,8 +183,44 @@
         "    }",
         "}"
       ]
+    },
+    {
+      "rust_file": "tests/hook_stdout.rs",
+      "rust_item": "fn[install_command_output_stays_off_hook_stdout]",
+      "text": [
+        "/// A plugin's install commands run on every dispatch of the hook that needs",
+        "/// them; what they print must not reach the agent's stdout.",
+        "// {test}`design.requirements.hooks.stdout_protocol`",
+        "#[tokio::test(flavor = \"multi_thread\")]",
+        "async fn install_command_output_stays_off_hook_stdout() {",
+        "    with_fixture(TestMode::SimulationOnly, &[\"install-noise0\"], async |ctx| {",
+        "        let output = run_session_start(&ctx, HookAgent::Claude, &ctx.tempdir);",
+        "        assert!(output.status.success());",
+        "        let stdout: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {",
+        "            panic!(",
+        "                \"stdout is not JSON ({e}): {}\",",
+        "                String::from_utf8_lossy(&output.stdout)",
+        "            )",
+        "        });",
+        "        assert_eq!(",
+        "            stdout,",
+        "            json!({",
+        "                \"hookSpecificOutput\": {",
+        "                    \"hookEventName\": \"SessionStart\",",
+        "                    \"additionalContext\": \"noisy plugin context\",",
+        "                    \"reloadSkills\": true,",
+        "                }",
+        "            })",
+        "        );",
+        "        assert!(String::from_utf8_lossy(&output.stderr).contains(\"installing noisy tool\"));",
+        "        Ok(())",
+        "    })",
+        "    .await",
+        "    .unwrap();",
+        "}"
+      ]
     }
   ],
-  "rationale": "Nothing but the response reaches stdout on the hook path. Report events: `prints_reports` keeps the report layer off for a `hook` command unless `-v` is given, and verbose mode writes to stderr, so they are logged (and with `-v` written to stderr) but never printed to stdout. Progress messages: `command_output` returns a quiet `Output` for every `hook` command, so they are dropped, which the requirement allows; auto-sync's own progress is covered end to end by `sync_progress_stays_off_hook_stdout` below. Plugin install commands run with their stdout redirected to stderr in `run_install_commands`. `hook::run` writes `response.stdout` (the converted agent response) to stdout and `response.stderr` to stderr, and returns before writing anything when stdin cannot be read. The three `hook_stdout` tests run the real `cargo agents hook` binary: a syncing `SessionStart` for each agent whose stdout must parse as JSON (Kiro excepted, which takes plain text and is checked for the progress text), a plugin with a noisy install command whose stdout must equal the exact expected JSON while its noise appears on stderr, and a rejected-skill warning that must not appear on stdout. All pass.",
+  "rationale": "Nothing but the response reaches stdout on the hook path. Report events: `prints_reports` keeps the report layer off for a `hook` command unless `-v` is given, and verbose mode writes to stderr, so they are logged (and with `-v` written to stderr) but never printed to stdout. Progress messages: `command_output` returns a quiet `Output` for every `hook` command, so they are dropped, which the requirement allows; auto-sync's own progress is covered end to end by `sync_progress_stays_off_hook_stdout` below. Plugin install commands run with their stdout redirected to stderr in `run_install_commands`. `hook::run` writes `response.stdout` (the converted agent response) to stdout and `response.stderr` to stderr, and returns before writing anything when stdin cannot be read. The three `hook_stdout` tests run the real `cargo agents hook` binary: a syncing `SessionStart` for each agent whose stdout must parse as JSON (Kiro excepted, which takes plain text and is checked for the progress text), a plugin with a noisy install command whose stdout must equal the exact expected JSON (the plugin's context plus the `reloadSkills` flag the response carries) while its noise appears on stderr, and a rejected-skill warning that must not appear on stdout. All pass.",
   "requirement": "A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST NOT reach stdout; Symposium MAY drop them, log them, or write them to stderr."
 }
