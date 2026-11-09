@@ -1,5 +1,5 @@
 {
-  "determination": false,
+  "determination": true,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -157,6 +157,6 @@
       ]
     }
   ],
-  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "rationale": "**Implementation.** `execute_hook` (`src/hook.rs`) parses the payload with the agent's handler and then checks `payload.should_dispatch()` *before* anything else in the pipeline. When it is false the function logs at debug level, translates `OutputEvent::empty_for(event)` into the agent's neutral output and returns immediately. Everything that could sync or run a hook sits after that return: workspace resolution (`sym.workspace`), `run_auto_sync`, the `SessionStart`-only `prewarm_hook_sources`, `dispatch_builtin`, and `dispatch_plugin_hooks`, which is the only path that spawns plugin hooks. `execute_hook` is the only caller of `run_auto_sync` and `dispatch_plugin_hooks`, and `run` (the CLI entry) calls `execute_hook` directly, so no other hook path gets around the early return. Only the `AgentHookInput::should_dispatch` trait default (`true`) and Antigravity's `PreInvocation` override (`invocation_num == 0`) decide what counts as an occurrence. Every other agent's payloads always dispatch, so for them the requirement holds trivially.\n\n**Test.** `later_invocations_of_a_turn_reach_no_plugin_hook` (`tests/plugin_dispatch.rs`, passes) sends Antigravity `UserPromptSubmit` payloads with a `prompt-hook0` plugin installed. `invocationNum: 0` reaches the plugin hook (`prompt-hook-ran` is in stdout). `invocationNum: 1` gets exactly the neutral `{\\\"injectSteps\\\":[]}` and no hook output. The unit test `only_the_first_invocation_of_a_turn_is_a_prompt` in `src/hook_schema/antigravity.rs` covers the classification (0 and a missing counter dispatch; 1 and 7 do not).\n\n**Limits.** No test observes that auto-sync is skipped. That part is judged from code: the early return comes before `run_auto_sync`. The binary entry point (`src/bin/cargo-agents.rs`) still runs `plugins::ensure_registries` (the registry refresh) and the auto-update check before it reaches `hook::run`, whatever the payload. Neither is auto-sync (the skill sync that `run_auto_sync` performs) nor a plugin hook, so neither violates this requirement.",
   "requirement": "When an agent's payload is not an occurrence of the symposium event it maps to, Symposium MUST NOT run auto-sync or any plugin hook."
 }

@@ -145,8 +145,33 @@
         "    }",
         "}"
       ]
+    },
+    {
+      "rust_file": "src/hook_schema.rs",
+      "rust_item": "impl[ErasedAgentHookEventImpl<E>/ErasedAgentHookEvent]/fn[parse_input]",
+      "text": [
+        "    fn parse_input(&self, payload: &str) -> Result<Box<dyn AgentHookInput>> {",
+        "        let p = self.0.parse_input(payload)?;",
+        "        Ok(Box::new(p))",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/bin/cargo-agents.rs",
+      "rust_item": "fn[prints_reports]",
+      "text": [
+        "/// Whether the report layer prints events for this command.",
+        "///",
+        "/// A hook's stdout is the agent's protocol: any report line ahead of the",
+        "/// JSON makes the agent discard the whole output. The events still reach",
+        "/// the log file; `-v` prints them to stderr when debugging a hook by hand.",
+        "// {impl}`design.requirements.hooks.stdout_protocol`",
+        "fn prints_reports(is_hook: bool, verbose: bool) -> bool {",
+        "    !is_hook || verbose",
+        "}"
+      ]
     }
   ],
-  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "rationale": "Holds, judged from code plus a manual run of the built binary; no automated test asserts it.\n\n**Failure status.** `run` (src/hook.rs) reads stdin and calls `execute_hook`. For every event an agent supports, the first thing `execute_hook` does is `handler.parse_input(input)?`; the erased `ErasedAgentHookEventImpl::parse_input` (src/hook_schema.rs) forwards the typed `AgentHookEvent::parse_input`, and every per-agent `AgentHookInput::parse_input` (claude, codex, copilot, kiro, antigravity, and the symposium `InputEvent`) is `Ok(serde_json::from_str(payload)?)`. So a payload that is not JSON, is truncated, or does not match the event's struct propagates `Err` out of `execute_hook` before `should_dispatch`, auto-sync, builtin dispatch, or plugin dispatch runs. `run`'s `Err` arm only logs a warning and returns `ExitCode::FAILURE` (exit 1). (An agent/event pair with no handler, e.g. goose/opencode, also bails with `Err` before reading the payload, so the same failure path applies.)\n\n**Nothing on stdout.** In `run`, stdout is written only in the `Ok(response)` arm; the `Err` arm writes nothing. Before `run`, `main` (src/bin/cargo-agents.rs) installs the report layer only when `prints_reports(is_hook, verbose)` is true, i.e. never for `hook` without `-v`, and with `-v` the layer is in Verbose mode, which prints to stderr; the tracing file layer writes to the log file. `ensure_registries` and the hook-path `maybe_check_for_update` use quiet output, and `re_exec` (auto-update = on) only re-runs the binary before stdin is consumed. The `Hook` arm returns `hook::run`'s code directly without draining reports to stdout.\n\n**Manual check.** With an isolated `SYMPOSIUM_HOME` (auto-update off), `target/debug/cargo-agents hook <agent> pre-tool-use` fed `not json` and `{\\\"truncated\\\":` exited 1 with 0 bytes on stdout for claude, codex, kiro, copilot and antigravity.\n\nLimit: no test in the suite covers a malformed payload; the conclusion rests on the code paths above and that one-off run.\n\n**Refuted on review:** a payload that is not valid UTF-8 cannot be parsed (JSON text must be UTF-8), yet the process exits successfully. `run` (src/hook.rs) reads stdin with `std::io::stdin().read_to_string(&mut input)`, which consumes every byte and then returns `ErrorKind::InvalidData` (\"stream did not contain valid UTF-8\"); the `if let Err(e)` arm treats that like an unreadable stream, logs \"failed to read hook stdin\", and returns `ExitCode::SUCCESS`, so `execute_hook`/`parse_input` and its failure exit never run. Reproduced with the built binary and an isolated `SYMPOSIUM_HOME` (auto-update off): `printf '{\"session_id\":\"s\",\"tool_name\":\"Bash\\xff\",\"tool_input\":{}}' | cargo-agents hook claude pre-tool-use` exits 0 with 0 bytes on stdout (skeptics report the same for codex, kiro, copilot, antigravity and for `\\xff\\xfe{}`), while `not json` exits 1. Stdout stays empty, so only the failure-status half is violated. The code places undecodable bytes under the sibling requirement `hooks.unreadable_payload_succeeds`; a maintainer must decide which requirement governs a delivered-but-non-UTF-8 payload (e.g. narrow this text to UTF-8 payloads, or read stdin as bytes and fail on invalid UTF-8).",
   "requirement": "A `cargo agents hook` process given a payload it cannot parse MUST exit with a failure status and write nothing to stdout."
 }

@@ -716,7 +716,7 @@
           "role": "test"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "tests/enablement.rs",
@@ -837,7 +837,7 @@
           ]
         }
       ],
-      "rationale": "With dormant registry plugin `gateless-plugin`: (1) `auto-enable = [gateless-plugin]` plus `use = [gateless_plugin]` leave it asleep after sync: auto-enable does not wake registry plugins (consent.auto_enable_dependencies_only), the folded use spelling does not name it (consent.registry_name_exact), so it stays dormant (consent.dormant_inactive), and the sync succeeds although `gateless_plugin` resolves to no package (consent.unresolved_use_skipped); (2) with `disable = [gateless_plugin]`, `use gateless-plugin` wakes it (consent.use_wakes_dormant; the folded disable spelling does not match: consent.registry_name_exact); (3) with the exact `disable = [gateless-plugin]`, `use gateless-plugin` fails mentioning `[plugins] disable` and the plugin stays asleep (enablement.use_disabled_rejected). Map correction: the function map listed enablement.use_unknown_rejected, but no unknown-name error is asserted here; the error asserted is the disable refusal. Citations cover every assertion.",
+      "rationale": "With dormant registry plugin `gateless-plugin`: (1) `auto-enable = [gateless-plugin]` plus `use = [gateless_plugin]` leave it asleep after sync: auto-enable does not wake registry plugins (consent.auto_enable_dependencies_only), the folded use spelling does not name it (consent.registry_name_exact), so it stays dormant (consent.dormant_inactive), and the sync succeeds although `gateless_plugin` resolves to no package (consent.unresolved_use_skipped); (2) with `disable = [gateless_plugin]`, `use gateless-plugin` wakes it (consent.use_wakes_dormant; the folded disable spelling does not match: consent.registry_name_exact); (3) with the exact `disable = [gateless-plugin]`, `use gateless-plugin` fails mentioning `[plugins] disable` and the plugin stays asleep (enablement.use_disabled_rejected). Map correction: the function map listed enablement.use_unknown_rejected, but no unknown-name error is asserted here; the error asserted is the disable refusal. Citations cover every assertion. **Refuted on review:** enablement.use_syncs is applicable but not cited. Step 2 asserts `woken()` right after `use gateless-plugin` with no sync in between, so the skill is installed only because `use` syncs. Step 3's final `assert!(!woken())` holds only because the preceding `use --remove gateless-plugin` synced and reaped the skill step 2 installed; the refused `use` never syncs, and `disable` does not block registry plugins, so use_disabled_rejected alone does not explain it (the plugin was awake, not \"still asleep\").",
       "rust_item": "fn[plugins_entries_match_registry_plugin_names_exactly]"
     },
     {
@@ -941,7 +941,7 @@
           "role": "test"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "tests/enablement.rs",
@@ -1010,7 +1010,7 @@
           ]
         }
       ],
-      "rationale": "Asserts `use crate-a` installs the skill and `use --remove crate-a` drops the entry and reaps the skill without a separate sync (enablement.use_syncs), then that a second remove fails with `no use entry` (enablement.remove_requires_entry). Citations are complete.",
+      "rationale": "Asserts `use crate-a` installs the skill and `use --remove crate-a` drops the entry and reaps the skill without a separate sync (enablement.use_syncs), then that a second remove fails with `no use entry` (enablement.remove_requires_entry). Citations are complete. **Refuted on review:** consent.consented_active is applicable but not cited: the `a-guidance` skill installed after `use crate-a` shows the consented dependency plugin becoming active (use_syncs only says a sync happens, not what it activates). consent.unconsented_inactive is applicable but not cited: the reap after `--remove` depends on the dependency being inactive once no `use` entry names it. The `entry removed` assertion (`!read_config(..).contains(\"crate-a\")`) is accounted for by no requirement: remove_requires_entry covers only the failure case, and none states that `use --remove` deletes the entry (requirements gap).",
       "rust_item": "fn[use_remove_reaps_and_then_errors]"
     },
     {
@@ -1097,7 +1097,7 @@
           "role": "test"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "tests/enablement.rs",
@@ -1170,7 +1170,7 @@
           ]
         }
       ],
-      "rationale": "Asserts find_matches finds serde-guidance for `SERDE-gui` and my-skill for `my-skill` and `MY-SKILL` (case-insensitive substring match over registry plugin names: enablement.search_matches), that the my-skill hits are tagged origin `user-plugins` (enablement.search_origin), and that a query matching nothing returns empty without failing. Citations are complete.",
+      "rationale": "Asserts find_matches finds serde-guidance for `SERDE-gui` and my-skill for `my-skill` and `MY-SKILL` (case-insensitive substring match over registry plugin names: enablement.search_matches), that the my-skill hits are tagged origin `user-plugins` (enablement.search_origin), and that a query matching nothing returns empty without failing. Citations are complete. **Refuted on review:** The `find_matches(.., \"zzz-nothing\").is_empty()` assertion is not accounted for: enablement.search_matches is a lower bound (\"MUST list every ... plugin whose name contains <query>\") and does not forbid extra hits, and search_origin is about tagging. No requirement says a query that matches nothing lists nothing (requirements gap).",
       "rust_item": "fn[search_finds_registry_content_tagged_by_origin]"
     },
     {
@@ -1235,7 +1235,7 @@
           ]
         }
       ],
-      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rationale": "Citation incomplete; left false pending a citation fix in tests/enablement.rs (not edited here). Applicable set: read the whole test and searched md/design/requirements/*.md for every `search` requirement (enablement.search_matches, search_once, search_origin) plus consent/internal texts; only the search_* ones apply, since the test observes only find_matches. The test asserts exactly one user-plugins hit named tokio-guidance for query `tokio-guidance` (a bare SKILL.md whose plugin name equals its entry dir), then exactly one user-plugins hit named foo or foo-tools for query `foo` (plugin `foo` in entry dir foo-tools), which is the case the current find_matches handles by loading the PM-search hit's entry and skipping it when it is an already-listed plugin of that registry. The upper bound is enablement.search_once (cited). But each `== 1` also asserts the matching registry plugin IS listed (enablement.search_matches: every configured-registry plugin whose name contains the query) and filters on origin == user-plugins, so a wrong origin tag fails it (enablement.search_origin). Sibling attestations treat both patterns as citations (search_renders_grouped_by_origin added search_matches because it asserts the matching hit; search_finds_registry_content_tagged_by_origin cites search_origin for the same origin+name filter). Missing: {test} citations for enablement.search_matches and enablement.search_origin (and a requirements input covering them). Test passes.",
       "rust_item": "fn[search_lists_a_registry_entry_once]"
     },
     {
@@ -1249,7 +1249,7 @@
           "role": "test"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "tests/enablement.rs",
@@ -1326,7 +1326,7 @@
           ]
         }
       ],
-      "rationale": "Asserts the rendered `search serde` report has a group heading (info) plus search_match events, the hit is serde-guidance (enablement.search_matches) tagged origin user-plugins under its group (enablement.search_origin), and a query with no hits yields only the nothing-found notice. Map correction: added enablement.search_matches, since the test asserts the matching hit. Citations are complete.",
+      "rationale": "Asserts the rendered `search serde` report has a group heading (info) plus search_match events, the hit is serde-guidance (enablement.search_matches) tagged origin user-plugins under its group (enablement.search_origin), and a query with no hits yields only the nothing-found notice. Map correction: added enablement.search_matches, since the test asserts the matching hit. Citations are complete. **Refuted on review:** The assertion that a query with no hits yields exactly one `info` event (the nothing-found notice, and no other output) is accounted for by neither search_matches nor search_origin; no search requirement covers the empty-result rendering (requirements gap).",
       "rust_item": "fn[search_renders_grouped_by_origin]"
     },
     {
@@ -1395,7 +1395,7 @@
           "role": "test"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "tests/enablement.rs",
@@ -1475,7 +1475,7 @@
           ]
         }
       ],
-      "rationale": "Asserts workspace_status reports undecided dependency crate-a as Candidate awaiting consent, then Active with root `[plugins] use` after `use crate-a`, and a disabled name as Declined; the rendered report carries an active plugin_status. All of this is status giving each plugin its activation state: enablement.status_state. Citation is complete.",
+      "rationale": "Asserts workspace_status reports undecided dependency crate-a as Candidate awaiting consent, then Active with root `[plugins] use` after `use crate-a`, and a disabled name as Declined; the rendered report carries an active plugin_status. All of this is status giving each plugin its activation state: enablement.status_state. Citation is complete. **Refuted on review:** The only citation, enablement.status_state, covers the state alone. The assertions `candidate.root.contains(\"awaiting consent\")`, `used.root == \"`[plugins] use`\"` and `used.version == Some(\"0.1.0\")` are accounted for by no requirement in any chapter: nothing specifies status's root or version column (requirements gap).",
       "rust_item": "fn[status_reports_candidate_then_used]"
     },
     {
@@ -1489,7 +1489,7 @@
           "role": "test"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "tests/enablement.rs",
@@ -1571,7 +1571,7 @@
           ]
         }
       ],
-      "rationale": "Asserts status reports registry plugin gateless-plugin as Dormant awaiting `cargo agents use`, and Active with root `[plugins] use` after `use` (enablement.status_state); also that search finds it tagged origin user-plugins (enablement.search_origin) with a dormant hint. Map correction: dropped consent.dormant_inactive and consent.use_wakes_dormant, because the test observes only the status report, not activation itself (those are asserted by use_wakes_and_remove_sleeps_a_dormant_plugin). Citations are complete.",
+      "rationale": "Asserts status reports registry plugin gateless-plugin as Dormant awaiting `cargo agents use`, and Active with root `[plugins] use` after `use` (enablement.status_state); also that search finds it tagged origin user-plugins (enablement.search_origin) with a dormant hint. Map correction: dropped consent.dormant_inactive and consent.use_wakes_dormant, because the test observes only the status report, not activation itself (those are asserted by use_wakes_and_remove_sleeps_a_dormant_plugin). Citations are complete. **Refuted on review:** enablement.search_matches is applicable but not cited: `find_matches(.., \"gateless\")` must list `gateless-plugin`, whose name contains the query. Also unaccounted by any requirement: the search hit's description containing \"dormant\" (no requirement covers a dormancy hint) and the root-text assertions (`root.contains(\"awaiting `cargo agents use`\")`, `root == \"`[plugins] use`\"`); status_state covers only the state, not the root (requirements gap).",
       "rust_item": "fn[status_reports_dormant_registry_plugin]"
     },
     {
@@ -1691,7 +1691,7 @@
           "role": "test"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "tests/enablement.rs",
@@ -1769,7 +1769,7 @@
           ]
         }
       ],
-      "rationale": "Asserts an approval through apply_consent writes an auto-enable entry (consent.approval_recorded), that a following sync installs crate-a's skill (consent.consented_active) and it is no longer pending, and that a decline writes a disable entry (consent.decline_recorded). Citations are complete.",
+      "rationale": "Asserts an approval through apply_consent writes an auto-enable entry (consent.approval_recorded), that a following sync installs crate-a's skill (consent.consented_active) and it is no longer pending, and that a decline writes a disable entry (consent.decline_recorded). Citations are complete. **Refuted on review:** The `pending_candidates(..).is_empty()` assertion (\"a decided dependency is not offered again\") is not accounted for by the cited texts (approval_recorded, consented_active, decline_recorded), none of which says which dependencies are offered for consent. The applicable texts are consent.prompt_once_per_candidate (\"awaiting consent\") and/or hooks.consent_hint_names (\"neither enabled nor declined\"); neither is cited.",
       "rust_item": "fn[apply_consent_records_both_answers]"
     },
     {
@@ -1956,7 +1956,7 @@
           "role": "test"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "tests/enablement.rs",
@@ -2038,7 +2038,7 @@
           ]
         }
       ],
-      "rationale": "With disable = [crate_a, *, never-seen, never_seen], asserts status lists dependency crate-a exactly once, Declined, with version 0.1.0 (enablement.status_once, enablement.status_state; the crate_a spelling matches crate-a: consent.crate_name_matching), lists no `*` entry, and lists the two unresolvable spellings as two Declined lines (the documented exception in status_once's note). Citations are complete.",
+      "rationale": "With disable = [crate_a, *, never-seen, never_seen], asserts status lists dependency crate-a exactly once, Declined, with version 0.1.0 (enablement.status_once, enablement.status_state; the crate_a spelling matches crate-a: consent.crate_name_matching), lists no `*` entry, and lists the two unresolvable spellings as two Declined lines (the documented exception in status_once's note). Citations are complete. **Refuted on review:** `assert_eq!(crate_a[0].version.as_deref(), Some(\"0.1.0\"))` checks the version status reports for a declined dependency; none of the cited texts (status_once, status_state, crate_name_matching) covers it, and no requirement in the chapters specifies status's version column (requirements gap).",
       "rust_item": "fn[status_lists_each_declined_name_once]"
     },
     {
@@ -2052,7 +2052,7 @@
           "role": "test"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "tests/enablement.rs",
@@ -2135,7 +2135,7 @@
           ]
         }
       ],
-      "rationale": "With auto-enable = [*] and a global use of not-a-dep (resolved by no package manager), asserts status succeeds (consent.unresolved_use_skipped), omits pluginless plain-dep, reports crate-a Active via auto-enable and not-a-dep Dormant; after `use plain-dep` it reports plain-dep Dormant (enablement.status_state). Citations are complete.",
+      "rationale": "With auto-enable = [*] and a global use of not-a-dep (resolved by no package manager), asserts status succeeds (consent.unresolved_use_skipped), omits pluginless plain-dep, reports crate-a Active via auto-enable and not-a-dep Dormant; after `use plain-dep` it reports plain-dep Dormant (enablement.status_state). Citations are complete. **Refuted on review:** The root-text assertions `crate_a.root == \"`[plugins] auto-enable`\"`, `not_a_dep.root.contains(\"cached crate\")` and `!plain.root.contains(\"not a dependency\")` are accounted for by neither status_state (state only) nor unresolved_use_skipped; no requirement covers what status reports as the enabling root (requirements gap).",
       "rust_item": "fn[status_reports_a_pluginless_dependency_only_when_used]"
     },
     {
@@ -2215,7 +2215,7 @@
           "role": "test"
         }
       ],
-      "determination": false,
+      "determination": true,
       "inputs": [
         {
           "rust_file": "tests/enablement.rs",
@@ -2278,7 +2278,7 @@
           ]
         }
       ],
-      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rationale": "Applicable set: read the whole test and searched md/design/requirements/*.md for status and disable texts (enablement.status_once, status_state; consent.disable_wins, dormant_inactive, use_wakes_dormant, decline_recorded). The test observes only workspace_status, so the status requirements apply; consent.* describe activation, which this test does not observe (as in status_reports_a_used_but_disabled_plugin_as_declined). Setup: the dormant-plugin0 registry plugin gateless-plugin (no dependency gate, no use entry) with `[plugins] disable = [gateless-plugin]`. Asserts status lists gateless-plugin exactly once (enablement.status_once: one line per plugin; this is the regression where the disable loop also listed it as Declined, now skipped when the disable name identifies a loaded registry/workspace plugin) and in state Dormant (enablement.status_state: the state activation gives it; disable_wins only reaches dependency plugins and used crates, so the plugin stays dormant per dormant_inactive rather than declined). Both observed results are accounted for by the two cited texts; requirements inputs cover both. Test passes. Citations are complete.",
       "rust_item": "fn[status_lists_a_disabled_registry_plugin_once]"
     }
   ],

@@ -1,5 +1,5 @@
 {
-  "determination": false,
+  "determination": true,
   "inputs": [
     {
       "rust_file": "tests/enablement.rs",
@@ -260,8 +260,76 @@
         "    Ok(())",
         "}"
       ]
+    },
+    {
+      "rust_file": "src/pm/mod.rs",
+      "rust_item": "impl[PmRegistry]/fn[search]",
+      "text": [
+        "    /// Search every instance for packages matching `query`, tagged with the",
+        "    /// instance's display name. A failing instance is skipped with a debug log",
+        "    /// rather than failing the union.",
+        "    pub async fn search(&self, query: &str) -> Vec<(String, PluginInfo)> {",
+        "        let mut out = Vec::new();",
+        "        for inst in self.instances() {",
+        "            match inst.pm.search(query).await {",
+        "                Ok(infos) => out.extend(infos.into_iter().map(|info| (inst.name.clone(), info))),",
+        "                Err(e) => {",
+        "                    tracing::debug!(instance = %inst.name, error = %e, \"search failed, skipping\");",
+        "                }",
+        "            }",
+        "        }",
+        "        out",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/plugins.rs",
+      "rust_item": "fn[entry_plugin]",
+      "text": [
+        "/// The unvalidated plugin for a registry entry at `root/subpath`: a `Symposium.toml`",
+        "/// manifest read as-is, or a bare `SKILL.md` synthesized into one",
+        "/// ([`standalone_skill_manifest`]). `None` when the directory is neither.",
+        "/// Called by [`PathPm`](crate::pm::PathPm).",
+        "///",
+        "/// Skill paths are displayed relative to the registry root, so an entry reads",
+        "/// as `path:<entry>/skills` rather than `path:skills`.",
+        "pub(crate) fn entry_plugin(",
+        "    root: &Path,",
+        "    subpath: &Path,",
+        "    source_name: &str,",
+        ") -> Option<Result<UnvalidatedPlugin>> {",
+        "    let dir = root.join(subpath);",
+        "    Some(match crate::pm::layout::classify(&dir)? {",
+        "        crate::pm::layout::EntryKind::Plugin(toml_path) => (|| -> Result<UnvalidatedPlugin> {",
+        "            let content = fs::read_to_string(&toml_path)?;",
+        "            let manifest = RawPluginManifest::parse(&content)?;",
+        "            let base = toml_path.parent().unwrap_or(&dir).to_path_buf();",
+        "            let name = manifest.name.clone().unwrap_or_default();",
+        "            Ok(UnvalidatedPlugin::new(",
+        "                PackageId::new(source_name, name, ANY_VERSION),",
+        "                base,",
+        "                manifest,",
+        "            )",
+        "            .with_label_root(root))",
+        "        })()",
+        "        .with_context(|| format!(\"loading plugin from `{}`\", toml_path.display())),",
+        "        crate::pm::layout::EntryKind::Skill(skill_md) => (|| -> Result<UnvalidatedPlugin> {",
+        "            let manifest = standalone_skill_manifest(&skill_md)?;",
+        "            let base = skill_md.parent().unwrap_or(&dir).to_path_buf();",
+        "            let name = manifest.name.clone().unwrap_or_default();",
+        "            Ok(UnvalidatedPlugin::new(",
+        "                PackageId::new(source_name, name, ANY_VERSION),",
+        "                base,",
+        "                manifest,",
+        "            )",
+        "            .with_label_root(root))",
+        "        })()",
+        "        .with_context(|| format!(\"loading skill from `{}`\", skill_md.display())),",
+        "    })",
+        "}"
+      ]
     }
   ],
-  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "rationale": "`cargo agents search <query>` dispatches to `search_command::search` (`cli.rs`, `Commands::Search`), which takes every hit from `find_matches`. Each `SearchMatch` has a required `origin` field, and both ways a hit is built set it:\n\n- **Loaded registry plugins** (first arm): `origin = parsed.canonical.pm`. `load_registry` loads only the trusted registry instances. `validate_plugin` sets `canonical` to the id that the package manager returned. That id comes from `entry_plugin`, which builds it as `PackageId::new(source_name, …)` for both a `Symposium.toml` entry and a bare `SKILL.md`. Here `source_name` is the `PathPm`'s name. A `GitPm` passes its configured registry name to its inner `PathPm`. So the tag is always the name of the configured registry the plugin was loaded from (`user-plugins`, `symposium-recommendations`, …).\n- **Package-manager hits** (second arm): `PmRegistry::search` pairs every `PluginInfo` with `inst.name`, and that name becomes `origin`. A registry instance's name is its configured name. The cargo transport is named `cargo` (`CARGO_PM`), and its search queries crates.io, so a crates.io hit is tagged `cargo`, which is the transport that searched crates.io. A failing instance contributes no hits, so no hit is left untagged.\n- The dedup steps (same origin and name, or a registry hit whose entry loads as an already listed plugin of the same registry) only drop duplicates of hits that are already tagged. They never create an untagged hit.\n\nRendering: `search` groups the matches by origin and prints a `from <origin>:` heading before each group. Each hit is emitted as a `ReportEvent::SearchMatch` that carries `origin`, so `--json` output has it on every hit. The human form leaves out the per-line origin because the heading already shows it.\n\nTests (all pass, re-run now):\n- `search_finds_registry_content_tagged_by_origin` asserts that a registry entry has `origin == \"user-plugins\"`.\n- `search_renders_grouped_by_origin` asserts the heading `info` event and a `search_match` event with `origin == \"user-plugins\"`.\n- `status_reports_dormant_registry_plugin` asserts that a dormant manifest plugin found by search has `origin == \"user-plugins\"`.\n\nLimits: no test covers the origin of a crates.io (`cargo`) hit or of a git-registry hit. Those cases are judged from code: `PmRegistry::search` tags them with the instance name, and `GitPm::new` gives its inner `PathPm` the registry name. A crates.io hit is tagged with the transport name `cargo`, not the literal string `crates.io`. That still names its source unambiguously, since `CargoPm::search` only queries crates.io.",
   "requirement": "`cargo agents search <query>` MUST tag each hit with the registry it comes from."
 }

@@ -1,5 +1,5 @@
 {
-  "determination": false,
+  "determination": true,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -167,6 +167,6 @@
       ]
     }
   ],
-  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "rationale": "A block by exit status is detected in `dispatch_plugin_hooks` (src/hook.rs): after a plugin hook runs, `match exit_code { None | Some(2) => return Err(child_out.stderr), ... }`. That arm sits before any format-specific handling, so it covers both symposium-format and native-format hooks, and both exit 2 and a missing exit status (killed by a signal). `execute_hook` maps that `Err(stderr)` to `blocked_response(handler, event, &stderr)`, where `handler` is the host agent's handler for the event (`agent_event(agent, event)`).\n\nIn `blocked_response`, when `event == HookEvent::PreToolUse` the reason (trimmed stderr, or `\"blocked by a plugin hook\"` if empty) becomes `OutputEvent::PreToolUse(PreToolUseOutput::deny(reason))`. It then goes through `handler.translate_output(..)` and `handler.respond(..)`, the same path a canonical deny takes, so each agent gets the denial in its own wire format:\n- Claude/Codex: `hookSpecificOutput.permissionDecision = \"deny\"` with `permissionDecisionReason`, exit 0.\n- Copilot: top-level `permissionDecision: \"deny\"` plus the reason, exit 0, since Copilot drops the reason on a non-zero exit.\n- Antigravity: `{\"decision\":\"deny\",\"reason\":..}`, exit 0, since Antigravity ignores exit codes.\n- Kiro: `respond` sees `decision == \"deny\"` and returns `HookResponse::blocked(reason)` (exit 2, reason on stderr, empty stdout). That is the only way Kiro blocks a tool.\n\nThese are the only agents with a `PreToolUse` hook; OpenCode and Goose are skills-only.\n\nTest: `plugin_exit_2_denies_the_tool_call_on_every_agent` (tests/hook_decisions.rs) runs a symposium-format `PreToolUse` hook that exits 2 (`block.sh`) against all five agents. It asserts the exact per-agent denial shape and exit code above, carrying the hook's stderr as the reason. It passes (`cargo test -q --test hook_decisions plugin_exit_2_denies`: 1 passed).\n\nLimits: the native-format exit-2 case and the no-exit-status (signal) case are untested. I judged them from code: they take the same `None | Some(2)` arm and the same `blocked_response` path. The test drives the in-process pipeline (`ctx.invoke_hook`), not the `cargo agents hook` process, but `run` only writes the `HookResponse` stdout/stderr and its exit code.",
   "requirement": "On `PreToolUse`, Symposium MUST deliver a block by exit status as a denial of the tool call in the host agent's own format."
 }

@@ -175,7 +175,7 @@
           "role": "impl"
         }
       ],
-      "determination": false,
+      "determination": true,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -260,7 +260,7 @@
           ]
         }
       ],
-      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rationale": "Applicable set: read the whole function and its callers/callees in `src/hook.rs`, then every `{req}` in md/design/requirements/hooks.md, consent.md, enablement.md, output.md and internal.md (the requirements input globs match every cited name). Only the three `hook_env_*` requirements describe environment variables, and the function's observable effect is exactly the env list it returns. Branches: an installation with a managed `base` gets `SYMPOSIUM_DIR_<env_safe(name)>` (`hook_env_dir_var`; `base` is `None` for source-less and global-cargo installations, which have no Symposium-managed cache). A `ResolvedScript`/`ResolvedExec` runnable gets `SYMPOSIUM_<name>` and contributes its parent dir to PATH only when `path.is_absolute()` (`hook_env_path_var` and `hook_env_path_prepend` both now say \"with an absolute path\"); a bare name such as `jq`, a `GlobalExec` runnable and an installation with no runnable get neither. The prefix list is reversed so the command, pushed last by `build_spawn_spec`, comes first (`hook_env_path_prepend`); among requirements the order is the reverse of declaration, which the text leaves open since it only fixes the command's position. With nothing to prepend no `PATH` entry is emitted, so the hook inherits the parent PATH unchanged. The empty-parent guard cannot fire for an absolute path with a parent. Tests pass: `build_env_sets_dir_and_name_vars`, `build_env_no_runnable_no_vars`, `build_env_global_cargo_skips_env_and_path`, `build_env_bare_executable_name_exposes_nothing`. No other requirement describes this function.",
       "rust_item": "fn[build_env]"
     },
     {
@@ -270,7 +270,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -305,7 +305,7 @@
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Prepends the given directories to the current `PATH` with the platform separator, dropping empty existing entries, and returns `None` for no directories. This is the mechanism of `hook_env_path_prepend`; the separator and empty-entry handling only keep `PATH` well-formed and add no other observable behavior. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Prepends the given directories to the current `PATH` with the platform separator, dropping empty existing entries, and returns `None` for no directories. This is the mechanism of `hook_env_path_prepend`; the separator and empty-entry handling only keep `PATH` well-formed and add no other observable behavior. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.\n\n**Refuted on review:** two observable branches go beyond `hook_env_path_prepend`. (a) `.filter(|dir| !dir.as_os_str().is_empty())` removes empty entries from the user's existing `PATH`; on Unix an empty entry (`/usr/bin::/bin`, a trailing `:`) means the current directory, so a hook that finds a bare-named program through it works when no runnable is absolute (PATH inherited) but fails once Symposium sets `PATH`. That changes the existing PATH rather than prepending, so 'adds no other observable behavior' is false. (b) When `std::env::join_paths` fails (a prepended directory containing the separator), `.ok()` yields `None`: no `PATH` is set and nothing is prepended, which the cited MUST does not allow and no requirement covers.",
       "rust_item": "fn[prepend_to_path]"
     },
     {
@@ -925,7 +925,7 @@
           ]
         }
       ],
-      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rationale": "Applicable set: read the whole function and its callers/callees in `src/hook.rs`, then every `{req}` in md/design/requirements/hooks.md, consent.md, enablement.md, output.md and internal.md (the requirements input globs match every cited name). MISSING CITATIONS (src/hook.rs not edited). The branches it does cite check out: unsupported event bails (`unsupported_event`), an unparsable payload propagates (`malformed_payload_fails`), a non-occurrence gets the neutral output and skips sync and dispatch (`non_occurrence_neutral`, `non_occurrence_no_dispatch`), `SessionStart` syncs before dispatch (`auto_sync_session_start`) and prewarms when auto-sync is on (`source_refresh_session_start`, reworded text still matches the `session_start && auto_sync` gate), the built-in output and its context go first into plugin dispatch (`merge_later_wins`, `joined_context`), a block becomes `blocked_response` (`exit_2_stops`, `block_*`), and sync failures do not stop the answer (`best_effort`). Applicable but uncited: (1) `design.requirements.hooks.native_input`: since 9000e47b this function threads the raw `input` string into `dispatch_plugin_hooks` as `original_input`, which is what makes a native hook's stdin the agent's payload byte for byte; (2) `design.requirements.hooks.auto_sync_gate`: the same `run_auto_sync`-before-dispatch call that justifies citing `auto_sync_session_start` realizes \"sync before dispatching\" for every other event (`session_start = false`); (3) `design.requirements.hooks.new_plugins_notice`: it routes `run_auto_sync`'s re-sync result into `dispatch_builtin` as `notify_about_possible_new_plugins`. Arguably also `canonical_input` (`payload.to_symposium()` builds the canonical event handed to symposium-format hooks). Add those `{impl}` citations, refresh the requirements input, then re-judge.\n\n**Refuted on review:** in addition to the missing citations listed above, `design.requirements.hooks.claude_reload_skills` applies and is uncited: for Claude `SessionStart`, `handler.translate_output(&builtin_sym_output)` goes through `ClaudeSessionStartOutput::from_symposium`, which sets `reloadSkills: true`, and that built-in output is the `prior_output` every plugin output merges over, so this function is where the Claude SessionStart response first gets `reloadSkills: true`.",
       "rust_item": "fn[execute_hook]"
     },
     {
@@ -1064,7 +1064,7 @@
           "role": "impl"
         }
       ],
-      "determination": false,
+      "determination": true,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -1185,7 +1185,7 @@
           ]
         }
       ],
-      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rationale": "Applicable set: read the whole function and its callers/callees in `src/hook.rs`, then every `{req}` in md/design/requirements/hooks.md, consent.md, enablement.md, output.md and internal.md (the requirements input globs match every cited name). Branches: stdin that cannot be read as a string (including non-UTF-8) returns `ExitCode::SUCCESS` before writing anything (`unreadable_payload_succeeds`). `execute_hook` errors only for an unsupported event (`bail!`) or an unparsable payload (`parse_input`'s `?`), and both return `ExitCode::FAILURE` with nothing on stdout (`unsupported_event`, `malformed_payload_fails`). On success it appends the trace line (`hook_trace`; a failed `execute_hook` is not an answered event, so no line), writes only the response's stdout bytes to stdout (`stdout_protocol`, inline citation; logs go through `tracing`), writes the response's stderr to stderr and exits with the response's code, which is how exit 2 with the reason on stderr reaches the agent (`block_other_exit_2`). Trace failures are swallowed (`best_effort`). The `unwrap()` on the stdout/stderr writes panics only when the agent has already closed the pipe, when nobody can receive an answer anyway; no requirement covers that and it introduces no answer the agent can observe. No other requirement describes this function.",
       "rust_item": "fn[run]"
     },
     {
@@ -1199,7 +1199,7 @@
           "role": "impl"
         }
       ],
-      "determination": false,
+      "determination": true,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -1265,7 +1265,7 @@
           ]
         }
       ],
-      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rationale": "Applicable set: read the whole function and its callers/callees in `src/hook.rs`, then every `{req}` in md/design/requirements/hooks.md, consent.md, enablement.md, output.md and internal.md (the requirements input globs match every cited name). Only `hook_trace` and `best_effort` apply. Unset `SYMPOSIUM_HOOK_TRACE` returns at once. Otherwise it appends one `\\n`-terminated JSON line with `event`, `agent`, `input`, `output`, `exit_code` and `stderr`. The reworded text says the output is recorded \"when it is JSON (otherwise `null`)\", which is exactly `from_slice(stdout).unwrap_or(Null)` (an empty stdout, e.g. an exit-2 block, records `null`). The input is recorded as parsed JSON; it is only reached after `parse_input` (`serde_json::from_str` for every agent) succeeded, so the `Null` fallback for the input cannot fire for an answered event. `stderr` is recorded lossily as UTF-8. Open and write failures are logged and ignored (`best_effort`: a failure writing logs must not stop the answer). No other requirement describes this function.",
       "rust_item": "fn[write_hook_trace]"
     },
     {
@@ -1403,7 +1403,7 @@
           ]
         }
       ],
-      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rationale": "Applicable set: read the whole function and its callers/callees in `src/hook.rs`, then every `{req}` in md/design/requirements/hooks.md, consent.md, enablement.md, output.md and internal.md (the requirements input globs match every cited name). Citations are complete (`auto_sync_session_start`, `auto_sync_gate`, `best_effort`, `new_plugins_notice`), but the reworded `auto_sync_gate` text does not account for the state's key. Behavior: auto-sync off returns false; on `SessionStart` it ignores recorded state, syncs at `UpdateLevel::Check` if the cwd is in a workspace and returns false (`auto_sync_session_start`); otherwise it skips and reuses the recorded workspace/deps when `WorkspaceState::fresh()` (non-empty inputs, all mtimes unchanged), else syncs at `None`; a sync error is logged and returns false without recording (`best_effort`), a success records the inputs and returns true (drives `new_plugins_notice`). MISMATCH 1: the state file is keyed on the hook's working directory (`deps.start()`, i.e. the payload `cwd`; `state_file_path` hashes it), not on the workspace, and that is deliberate (the recorded inputs include candidate manifests between the cwd and the root, which `tests/workspace_freshness.rs::creating_a_nested_workspace_invalidates_the_hook_workspace_cache` relies on). So after a sync from the workspace root, a `PostToolUse` whose cwd is a member subdirectory syncs although \"the workspace's last successful sync\" exists with unchanged inputs, against \"only when\". Suggested text: \"...an input recorded by the last successful sync from the hook's working directory has changed, or no such sync with recorded inputs exists\". MISMATCH 2 (minor): that same no-record sync returns true, so `PostToolUse`/`UserPromptSubmit` carries the new-plugins notice although no package-manager input changed; `new_plugins_notice` only names the input-changed case (its own evidence calls this extra but allowed). Either widen `new_plugins_notice` to \"right after auto-sync synced on that event\" or return true only when a recorded input changed. Re-judge after the text (or code) is settled.",
       "rust_item": "fn[run_auto_sync]"
     },
     {
@@ -1413,7 +1413,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -1447,7 +1447,7 @@
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Decides whether the crate graph must be resolved before gating: true when a plugin's hook gating names a concrete crate, a plugin has chained edges, or enablement entries exist. Its only observable consequence is that plugin and hook predicates are evaluated against the real dependency list whenever they could depend on it, which is `hook_gating`. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Decides whether the crate graph must be resolved before gating: true when a plugin's hook gating names a concrete crate, a plugin has chained edges, or enablement entries exist. Its only observable consequence is that plugin and hook predicates are evaluated against the real dependency list whenever they could depend on it, which is `hook_gating`. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.\n\n**Refuted on review:** the `|| sym.config.plugins.has_enablement_entries()` branch serves consent, not `hook_gating`. With `[plugins] auto-enable = [\"foo\"]` (foo a workspace dependency embedding a plugin with hooks), no registry hook gating naming a concrete crate and no `[[plugins]]` chains, dropping this branch leaves `dep_ids` empty; `discovery::enabled_dependencies` only walks `dep_ids` for `auto-enable`, so foo would never enter the active set and its hooks would neither fire nor be prewarmed. That observable result is `design.requirements.consent.consented_active` (uncited); the claim that the only consequence is predicate gating is wrong.",
       "rust_item": "fn[hook_dispatch_needs_deps]"
     },
     {
@@ -1676,7 +1676,7 @@
           ]
         }
       ],
-      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rationale": "Applicable set: read the whole function and its callers/callees in `src/hook.rs`, then every `{req}` in md/design/requirements/hooks.md, consent.md, enablement.md, output.md and internal.md (the requirements input globs match every cited name). It is called only on `SessionStart` with `auto-sync` on (`execute_hook`). It builds the active plugin set exactly as dispatch does, at `UpdateLevel::None` with the `use`-names context (consent: `unconsented_inactive`, `consented_active`, `dormant_inactive`, `use_wakes_dormant`, `offline_resolution`), and resolves the crate graph only when `hook_dispatch_needs_deps` says gating needs it. It keeps hooks whose plugin and hook predicates hold (`hook_gating`); event and matcher are deliberately not checked, since the refresh covers every hook the session could fire. For each kept hook it calls `refresh_installation_if_present` on every requirement and on the command (with the hook-level executable as hint), which checks upstream only for a source Symposium caches and has already installed and leaves a `global = true` cargo, source-less or never-installed one alone (`source_refresh_session_start`, reworded to \"that it caches and has already installed\"; `source_refresh_installed_only`). Running `install_commands` after an actual refresh is part of refreshing that installation. An unbuildable hook or a failed refresh is logged and skipped (`best_effort`). The scope limit of `[plugins] disable`/consent for crates reached through `[[plugins]]` chains lives in `plugins::active_plugins` and is tracked in the consent evidence, not here. No other requirement describes this function.\n\n**Refuted on review:** the consent citations are an incomplete subset of what the active set it refreshes realizes. (1) `[plugins] use = [\"foo\"]` plus `disable = [\"foo\"]`: foo's hook sources are not refreshed. `unconsented_inactive` permits activation because a `use` entry names it and `consented_active` is conditioned on disable not naming it, so only the uncited `design.requirements.consent.disable_wins` explains the exclusion. (2) An applicable `use` entry naming a crate the workspace does not depend on: that crate's hook sources are refreshed, which needs the uncited `design.requirements.consent.use_beyond_dependencies` (the cited consent texts cover only dependency-embedded plugins). Deferring the disable scope to `plugins::active_plugins` is inconsistent, since `consented_active` lives there too yet is cited here.",
       "rust_item": "fn[prewarm_hook_sources]"
     },
     {
@@ -1931,7 +1931,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -2057,7 +2057,7 @@
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Resolves the active plugin set at `UpdateLevel::None` (the consent requirements decide which plugins are active; `offline_resolution` for the level) and, only when some applicable subcommand exists, returns text telling the agent to run `cargo agents --help` (`discovery_hint`) and to use only the agents section unless the user asks (`discovery_hint_audience`). Otherwise `None`. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Resolves the active plugin set at `UpdateLevel::None` (the consent requirements decide which plugins are active; `offline_resolution` for the level) and, only when some applicable subcommand exists, returns text telling the agent to run `cargo agents --help` (`discovery_hint`) and to use only the agents section unless the user asks (`discovery_hint_audience`). Otherwise `None`. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.\n\n**Refuted on review:** same consent gap as prewarm and dispatch. It builds the active set (`used_plugins` plus `plugins::active_plugins`) but omits `design.requirements.consent.disable_wins` and `design.requirements.consent.use_beyond_dependencies`. (1) A crate named by both a `use` and a `[plugins] disable` entry that vends a subcommand is excluded and no hint is emitted, which only `disable_wins` explains. (2) A `use`d crate the workspace does not depend on that vends an applicable subcommand does produce the hint; the cited consent texts cover only dependency-embedded plugins.",
       "rust_item": "fn[discovery_hint]"
     },
     {
@@ -2836,7 +2836,7 @@
           ]
         }
       ],
-      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rationale": "Applicable set: read the whole function and its callers/callees in `src/hook.rs`, then every `{req}` in md/design/requirements/hooks.md, consent.md, enablement.md, output.md and internal.md (the requirements input globs match every cited name). Everything except the raw-JSON fallback and `reloadSkills` precedence checks out. Active set built at `UpdateLevel::None` with the `use` context (consent requirements, `offline_resolution`), hooks gated and selected via `dispatched_hooks_for_payload` (`hook_gating`). Per hook: a native-format hook now gets `original_input`, the agent's stdin byte for byte (`native_input`); a symposium-format hook gets the canonical event (`canonical_input`), written to stdin (`hook_stdin_payload`); serialization, spawn-spec, spawn and wait failures skip that hook (`best_effort`). Exit 2 or no exit code returns the stderr as a block (`exit_2_stops`); other non-zero exits and exit 0 with empty stdout contribute nothing. Exit 0: native output parsed as the host's (`native_output`), canonical output translated (`canonical_output`), unparsable output and (new, 2a129efa) JSON that is not an object are dropped with a warning (a failing single hook, `best_effort`; test `hook_context::non_object_output_does_not_replace_the_response` passes); merged later-wins (`merge_later_wins`), a canonical/native denial returns at once (`deny_final`), context joined (`joined_context`). WHY FALSE (known maintainer decisions): (1) a symposium-format JSON object that is not a canonical output event is merged untranslated (`raw_json_fallback`, a MAY), which contradicts `canonical_output`'s MUST; `hook_output` is `None` there, so an object that denies in host form (e.g. `{\"hookSpecificOutput\":{\"permissionDecision\":\"deny\"}}`) is not final and a later hook still runs, against `deny_final`; and `JoinedContext::add(None, ..)` rewrites the context field with the joined text, dropping the object's own context whenever earlier context exists, against `joined_context`. (2) `design.requirements.hooks.claude_reload_skills` applies but is not cited: on Claude `SessionStart` a native hook printing `\"reloadSkills\": false` is merged over the built-in `true`, and when no context exists `JoinedContext::add` does not re-merge it, so `false` reaches Claude (`merge_later_wins` vs `claude_reload_skills` precedence). Resolve both in the chapter (or code), add the citation, then re-judge.\n\n**Refuted on review:** in addition to the gaps above. (1) Consent citations are incomplete as in prewarm and discovery_hint: with `use = [\"foo\"]` and `disable = [\"foo\"]` foo's hooks do not fire (needs uncited `design.requirements.consent.disable_wins`), and a `use`d crate that is not a dependency does have its hooks fire (needs uncited `design.requirements.consent.use_beyond_dependencies`). (2) `None | Some(2) => return Err(child_out.stderr)` is where the hook's stderr is chosen as the block reason (`design.requirements.hooks.block_reason_stderr`, uncited here), and that early return discards the context already joined from the built-in output and earlier hooks on `SessionStart`, `UserPromptSubmit` and `PostToolUse`; `joined_context` says the response MUST carry every source's context, and neither `exit_2_stops` nor `block_other_exit_2` says it is dropped.",
       "rust_item": "fn[dispatch_plugin_hooks]"
     },
     {
@@ -2884,7 +2884,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -2943,7 +2943,7 @@
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Only on `SessionStart`, `UserPromptSubmit` and `PostToolUse`, appends a hook's context after the earlier ones and writes the joined text back into the merged output (`joined_context`, re-applying it with the same later-wins merge, `merge_later_wins`). Other events are untouched. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Only on `SessionStart`, `UserPromptSubmit` and `PostToolUse`, appends a hook's context after the earlier ones and writes the joined text back into the merged output (`joined_context`, re-applying it with the same later-wins merge, `merge_later_wins`). Other events are untouched. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.\n\n**Refuted on review:** two branches go beyond the cited texts. (1) With `hook_output == None` (the raw-JSON-object fallback) and earlier context present, it re-merges `OutputEvent::with_context(event, text)` over `output`, overwriting the raw object's own context field with the earlier joined text, so that source's context is dropped, against `joined_context`; the rationale only describes the `Some` case. (2) On Claude `SessionStart`, `handler.translate_output(&joined)` is `ClaudeSessionStartOutput::from_symposium`, which always sets `reloadSkills: true` (src/hook_schema/claude.rs), so whenever joined text exists `add` re-merges `reloadSkills: true` over a native hook's `\"reloadSkills\": false`. That governs the field of `design.requirements.hooks.claude_reload_skills`, which applies but is uncited.",
       "rust_item": "impl[JoinedContext]/fn[add]"
     },
     {
@@ -2996,7 +2996,7 @@
           "role": "impl"
         }
       ],
-      "determination": false,
+      "determination": true,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -3049,7 +3049,7 @@
           ]
         }
       ],
-      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rationale": "Applicable set: read the whole function and its callers/callees in `src/hook.rs`, then every `{req}` in md/design/requirements/hooks.md, consent.md, enablement.md, output.md and internal.md (the requirements input globs match every cited name). Only the two merge requirements describe it. Object into object: each key of the later value that is `null` is removed from the result (`merge_null_removes`, reworded to \"a field the later response sets to `null` MUST be removed\"), every other key is merged recursively, so at every depth the later value replaces the earlier (`merge_later_wins`), and keys the later value omits are left as they were. Any non-object pair, including arrays and a missing key (inserted as `null`, then replaced), takes the later value outright. Recursion means \"field\" is read at every depth: a nested object such as Claude's `hookSpecificOutput` keeps earlier sub-fields the later one omits, which is what keeps `hookEventName` when a hook only adds context; the source text \"keys from later hooks overwrite earlier keys\" supports that reading. Callers never pass a top-level non-object (non-object symposium-format output is now dropped before merging). The interaction with `claude_reload_skills` is a caller-level precedence question, attributed to `dispatch_plugin_hooks`. No other requirement describes this function.",
       "rust_item": "fn[merge]"
     },
     {
@@ -4251,7 +4251,7 @@
           "role": "test"
         }
       ],
-      "determination": false,
+      "determination": true,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -4299,7 +4299,7 @@
           ]
         }
       ],
-      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rationale": "Test function; found its citations by reading the test body and the three `hook_env_*` requirements in md/design/requirements/hooks.md. It builds one installation with no `base` and a relative `ResolvedExec` path `jq` and asserts `build_env` sets neither `SYMPOSIUM_jq` nor `PATH`: the \"with an absolute path\" condition of `hook_env_path_var` and `hook_env_path_prepend`, which it cites. It asserts nothing about `SYMPOSIUM_DIR_jq`, so not citing `hook_env_dir_var` is correct. Passes (`cargo test --lib hook::tests::build_env`). It exercises no other requirement.",
       "rust_item": "mod[tests]/fn[build_env_bare_executable_name_exposes_nothing]"
     }
   ],

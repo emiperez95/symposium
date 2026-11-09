@@ -1,5 +1,5 @@
 {
-  "determination": true,
+  "determination": false,
   "inputs": [
     {
       "rust_file": "src/output.rs",
@@ -18,6 +18,6 @@
       ]
     }
   ],
-  "rationale": "`output::display_path` strips `dirs::home_dir()` from the path and returns `~/{rest}` when the path is under home, else the path unchanged. Callers that show paths in human messages and report events use it (`src/sync.rs` skill install/removal/warning messages and the config path, and `src/agents/mcp_server_registration.rs` for MCP config files). As a SHOULD, other raw `path.display()` uses elsewhere are not violations.\n\nUntested: no test calls `display_path` directly. Judged from code.",
+  "rationale": "`output::display_path` strips `dirs::home_dir()` from the path and returns `~/{rest}` when the path is under home, else the path unchanged. Callers that show paths in human messages and report events use it (`src/sync.rs` skill install/removal/warning messages and the config path, and `src/agents/mcp_server_registration.rs` for MCP config files). As a SHOULD, other raw `path.display()` uses elsewhere are not violations.\n\nUntested: no test calls `display_path` directly. Judged from code.\n\n**Refuted on review:** `display_path` is correct, but Symposium does not use it consistently for human-facing paths under home, and nothing records a reason for the exceptions. Saying \"as a SHOULD, other uses are not violations\" only narrows the scope. With the default config directory `~/.symposium` (`src/dirs.rs`), `cargo agents telemetry status` always prints `data directory: /Users/<name>/.symposium/telemetry` (`src/telemetry/mod.rs`, `telemetry_dir(config_dir).display()`). When `config.toml` cannot be read, the warning in `src/config.rs` (`eprintln!(\"warning: failed to read {}...\", path.display())`) and the `save_config` refusal both print `~/.symposium/config.toml` as a full absolute path. Yet `sync` reports the same file, for the same error, as `~/...` through `display_path` (`src/sync.rs`). The `plugin validate` messages (`src/bin/cargo-agents.rs`) and the `crate-info` `Source:` line for a crate in `~/.cargo/registry` (`src/crate_command.rs`) also print raw paths under home.",
   "requirement": "Symposium SHOULD display a path under the user's home directory with the home prefix replaced by `~`."
 }

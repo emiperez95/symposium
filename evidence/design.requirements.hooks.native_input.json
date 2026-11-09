@@ -1,5 +1,5 @@
 {
-  "determination": false,
+  "determination": true,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -252,8 +252,46 @@
         "    pub model_name: Option<String>,",
         "}"
       ]
+    },
+    {
+      "rust_file": "tests/hook_context.rs",
+      "rust_item": "fn[native_hook_receives_the_payload_unchanged]",
+      "text": [
+        "/// A hook in the host agent's own format receives the agent's payload byte",
+        "/// for byte, including fields Symposium does not model.",
+        "#[tokio::test(flavor = \"multi_thread\")]",
+        "async fn native_hook_receives_the_payload_unchanged() {",
+        "    with_fixture(TestMode::SimulationOnly, &[\"native-input0\"], async |ctx| {",
+        "        let workspace = ctx.workspace_root.clone().unwrap();",
+        "        let handler =",
+        "            agent_event(HookAgent::Antigravity, HookStep::session_start().event()).unwrap();",
+        "        let mut payload: Value = serde_json::from_str(",
+        "            &handler",
+        "                .translate_input(",
+        "                    &HookStep::session_start().to_input_event(&workspace.display().to_string()),",
+        "                )",
+        "                .to_string()",
+        "                .unwrap(),",
+        "        )",
+        "        .unwrap();",
+        "        payload[\"unmodeledField\"] = Value::from(\"kept\");",
+        "        ctx.invoke_hook(",
+        "            HookAgent::Antigravity,",
+        "            HookStep::session_start().event(),",
+        "            &payload,",
+        "        )",
+        "        .await",
+        "        .unwrap();",
+        "        let received = std::fs::read_to_string(workspace.join(\"received.json\"))?;",
+        "        assert_eq!(received, serde_json::to_string(&payload)?);",
+        "        Ok(())",
+        "    })",
+        "    .await",
+        "    .unwrap();",
+        "}"
+      ]
     }
   ],
-  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "rationale": "Holds.\n\n**Implementation.** `hook::run` reads the agent's stdin into a `String` and passes it unchanged as `input` to `execute_hook`, which parses it only to obtain the canonical `sym_input` (for gating, auto-sync, and symposium-format hooks) and forwards the original `input` string as the `original_input` argument of `dispatch_plugin_hooks` (its only caller). In `dispatch_plugin_hooks`, for each selected hook, `hook.format.as_agent() == Some(host_agent)` (a hook declared in the host agent's format) sets `stdin_str = original_input.to_string()`. Only the `else` branch (symposium format) serializes the canonical `AgentHookInput`. `stdin_str.as_bytes()` is then written to the child's stdin. So the native hook gets the agent's raw payload, with no parse/re-serialize round trip. Fields Symposium does not model are no longer dropped (previously Antigravity's typed payload, e.g. `AntigravityCommon`, has no catch-all field and would have lost them).\n\n`dispatched_hooks_for_payload` selects a native-format hook ahead of a symposium-format one, and hooks in another agent's format never fire. So \"a plugin hook in the host agent's format\" always takes the pass-through branch.\n\n**Test.** `tests/hook_context.rs::native_hook_receives_the_payload_unchanged` (fixture `native-input0`) sends an Antigravity `SessionStart` payload carrying an extra `unmodeledField` through `execute_hook`. An Antigravity-format hook `cat`s its stdin to a file, and the test asserts the file equals the sent JSON string exactly. It passes (`cargo test -q --test hook_context native_hook`: 1 passed).\n\n**Limits.** The test covers one agent and event (Antigravity / SessionStart) and enters at `execute_hook`, not the stdin read in `run`. The other agents and events go through the same agent-independent branch, so they are judged from code. A non-UTF-8 stdin fails `read_to_string` in `run`, and no hook is dispatched at all. That is not an altered payload, and agent payloads are JSON (UTF-8). `AntigravityCommon` is only background: it is the typed shape that the old re-serialization went through, not the implementing path.",
   "requirement": "Symposium MUST give a plugin hook in the host agent's format the agent's own payload, unchanged."
 }

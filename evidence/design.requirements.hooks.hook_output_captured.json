@@ -1,5 +1,5 @@
 {
-  "determination": false,
+  "determination": true,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -293,8 +293,57 @@
         "    Ok(output)",
         "}"
       ]
+    },
+    {
+      "rust_file": "tests/hook_decisions.rs",
+      "rust_item": "fn[hook_command_exits_2_with_the_reason_on_stderr]",
+      "text": [
+        "/// The exit code and stderr are what the agent actually sees, so check them on",
+        "/// the real `cargo agents hook` process, not just the in-process pipeline.",
+        "#[tokio::test(flavor = \"multi_thread\")]",
+        "async fn hook_command_exits_2_with_the_reason_on_stderr() {",
+        "    with_fixture(",
+        "        TestMode::SimulationOnly,",
+        "        &[\"plugin-hook-decisions0\"],",
+        "        async |ctx| {",
+        "            let cwd = ctx.tempdir.display().to_string();",
+        "            let cases = [",
+        "                (",
+        "                    HookAgent::Kiro,",
+        "                    \"pre-tool-use\",",
+        "                    tool_call(\"DenyProbe\"),",
+        "                    DENY_REASON,",
+        "                ),",
+        "                (",
+        "                    HookAgent::Claude,",
+        "                    \"user-prompt-submit\",",
+        "                    HookStep::user_prompt(\"hello\"),",
+        "                    BLOCK_REASON,",
+        "                ),",
+        "            ];",
+        "            for (agent, event_arg, step, reason) in cases {",
+        "                let event = step.event();",
+        "                let payload = agent_event(agent, event)",
+        "                    .unwrap()",
+        "                    .translate_input(&step.to_input_event(&cwd))",
+        "                    .to_string()?;",
+        "                let output = run_hook_command(&ctx, agent, event_arg, &payload);",
+        "                assert_eq!(",
+        "                    output.status.code(),",
+        "                    Some(2),",
+        "                    \"{agent:?} {event:?} exit status\"",
+        "                );",
+        "                assert_eq!(String::from_utf8_lossy(&output.stderr), reason);",
+        "            }",
+        "            Ok(())",
+        "        },",
+        "    )",
+        "    .await",
+        "    .unwrap();",
+        "}"
+      ]
     }
   ],
-  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "rationale": "**Implementation.** Plugin hooks are spawned in exactly one place: `dispatch_plugin_hooks` (src/hook.rs) builds a `SpawnSpec` with `build_spawn_spec` and passes it to `spawn_from_spec`, the only caller (a grep of `src/` finds no other hook spawn site; `subcommand_dispatch.rs` spawns plugin *subcommands*, not hooks, and `installation.rs` runs install commands). Both arms of `spawn_from_spec` (`SpawnSpec::Script`, run as `sh <path>`, and `SpawnSpec::Exec`, run directly) set `.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())` before `.spawn()`, so a hook never inherits Symposium's stdout or stderr. `dispatch_plugin_hooks` then writes the payload to the piped stdin and collects both streams with `child.wait_with_output()`: stdout is parsed (native or symposium format) and merged into Symposium's own response, and stderr is returned as `Err(child_out.stderr)` on exit 2 / no exit code and otherwise dropped. A hook that fails to spawn produces no output at all.\n\n**Tests (both pass, run here).** Both run the real `cargo agents hook` binary with its stdout and stderr piped, so an inherited stream would show up in what they compare:\n- `tests/hook_stdout.rs::install_command_output_stays_off_hook_stdout`: the `noisy` fixture hook prints `{\"SessionStart\":{\"additionalContext\":\"noisy plugin context\"}}` on stdout. The test requires the binary's stdout to parse as a single JSON value equal to the translated Claude output (`hookSpecificOutput` with that context). If the hook's stdout were inherited, its raw line would precede that JSON and the parse/equality would fail, so this asserts stdout capture.\n- `tests/hook_decisions.rs::hook_command_exits_2_with_the_reason_on_stderr`: the fixture hook writes its reason to stderr and exits 2. The test asserts the binary's stderr equals exactly the reason (Kiro `pre-tool-use`, Claude `user-prompt-submit`). If the hook's stderr were inherited, the raw line would appear alongside Symposium's own copy (or its `\"blocked by a plugin hook\"` fallback), so this asserts stderr capture.\n\n**Limits.** The `Exec` arm and a hook writing to stderr while exiting 0 are not exercised by these tests; they are judged from the code, which sets the same piped stdio on both arms and reads stderr via the same `wait_with_output` regardless of exit status.",
   "requirement": "Symposium MUST capture a plugin hook's stdout and stderr rather than let the hook inherit its own."
 }

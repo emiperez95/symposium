@@ -1,5 +1,5 @@
 {
-  "determination": false,
+  "determination": true,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -278,6 +278,6 @@
       ]
     }
   ],
-  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "rationale": "The fallback is the symposium-format branch of `dispatch_plugin_hooks` (`src/hook.rs`). After format selection a hook is either native (`hook.format.as_agent() == Some(host_agent)`) or symposium format (a foreign-agent format never reaches dispatch), so every non-native hook takes the `else` branch. There, on exit 0 with non-empty stdout:\n\n- stdout is parsed as `serde_json::Value`; if it deserializes as a `symposium::OutputEvent` it is translated to the host format (the canonical path);\n- otherwise, `else if v.is_object()` yields `(v, None)`: the object itself becomes `host_json`, untranslated and unmodified;\n- non-object JSON (`\"not an object\"`, numbers, arrays) is warned about and skipped, and unparseable stdout is skipped too, so only JSON objects reach the fallback.\n\n`host_json` then goes straight into `merge(&mut output, host_json)`, the recursive object merge into the accumulated response (later fields win, `null` removes). So an object that is not a canonical output event is merged into the response unchanged, which is what the MAY permits.\n\nConsequences consistent with the chapter's note: with `hook_output = None`, `denies(...)` is never evaluated, so a raw object carrying a deny does not stop later hooks, and `JoinedContext::add(None, ...)` contributes no context of its own; on `SessionStart`/`UserPromptSubmit`/`PostToolUse` it re-writes the already-joined prior context (if any) through the host handler, so a context field the raw object set in the same place is replaced by the joined text, as any later write would. That is later processing of the response, not a change to what the fallback merges.\n\nTests: none exercises this branch. The `non-object-output0` fixture covers only the non-object skip (`\"not an object\"`), and every other symposium-format fixture prints a canonical `{\"<Event>\": {...}}` object. Untested — judged from code.",
   "requirement": "Symposium MAY merge the output of a symposium-format plugin hook that is a JSON object but not a canonical output event into the response unchanged."
 }

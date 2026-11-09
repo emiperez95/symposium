@@ -497,7 +497,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/discovery.rs",
@@ -572,7 +572,7 @@
           ]
         }
       ],
-      "rationale": "I read the whole function and the consent, enablement, hooks, output and internal requirement chapters. Returns the canonical ids of the plugins whose manifest name, under their own package manager's rule, is named by an applicable `use` entry (`is_used_in(..., workspace_root)`). This is the set that wakes dormant registry plugins (`use_wakes_dormant`) and, by exclusion, keeps unnamed dormant plugins off (`dormant_inactive`); the registry PM compares names exactly (`registry_name_exact`); only entries for this workspace or unscoped ones count (`scoped_use`). Pure computation, no output; no other requirement applies.",
+      "rationale": "I read the whole function and the consent, enablement, hooks, output and internal requirement chapters. Returns the canonical ids of the plugins whose manifest name, under their own package manager's rule, is named by an applicable `use` entry (`is_used_in(..., workspace_root)`). This is the set that wakes dormant registry plugins (`use_wakes_dormant`) and, by exclusion, keeps unnamed dormant plugins off (`dormant_inactive`); the registry PM compares names exactly (`registry_name_exact`); only entries for this workspace or unscoped ones count (`scoped_use`). Pure computation, no output; no other requirement applies.\n\n**Refuted on review:** `is_used_in` goes through `config::name_matches`, which returns true for any id when the entry is `\"*\"` (src/config.rs:198-199). So a hand-edited `[plugins] use = [\"*\"]` makes `used_plugins` return every plugin's canonical id and wakes every dormant registry plugin in every caller. No cited requirement accounts for this wildcard branch: `use_wakes_dormant` and `dormant_inactive` cover a `use` entry that names the plugin, `registry_name_exact` requires an exact name comparison (and `*` is not the plugin's name), the configuration reference documents `\"*\"` only for `auto-enable`, and `resolve_used` skips `\"*\"`, so the same entry enables no crate while it wakes every dormant plugin.",
       "rust_item": "fn[used_plugins]"
     },
     {
@@ -674,7 +674,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/discovery.rs",
@@ -762,7 +762,7 @@
           ]
         }
       ],
-      "rationale": "I read the whole function and the consent, enablement, hooks, output and internal requirement chapters. Covered: approvals are pushed onto `[plugins] auto-enable` (`approval_recorded`), declines onto `[plugins] disable` (`decline_recorded`), skipping a name already covered, then the config is saved (save failure surfaces as an error); empty input returns without writing, consistent with `deferral_records_nothing`.\n\nAfter saving, it reports the enabled names (\"enabled dependency plugins: ...\") and the declined names (\"declined dependency plugins (recorded in `[plugins] disable`): ...\") as `ReportEvent::Info` confirmations (`consent_confirmed`).",
+      "rationale": "I read the whole function and the consent, enablement, hooks, output and internal requirement chapters. Covered: approvals are pushed onto `[plugins] auto-enable` (`approval_recorded`), declines onto `[plugins] disable` (`decline_recorded`), skipping a name already covered, then the config is saved (save failure surfaces as an error); empty input returns without writing, consistent with `deferral_records_nothing`.\n\nAfter saving, it reports the enabled names (\"enabled dependency plugins: ...\") and the declined names (\"declined dependency plugins (recorded in `[plugins] disable`): ...\") as `ReportEvent::Info` confirmations (`consent_confirmed`).\n\n**Refuted on review:** `design.requirements.consent.deferral_records_nothing` applies but is not cited. The early return when both lists are empty is observable: `prompt_for_consent` takes it when every answer is \"Ask me later\" or Escape is pressed first, and it leaves the config file unwritten. With an unreadable config (`config_error` set), it returns Ok where `save_config` would otherwise fail. The rationale itself credits this branch to `deferral_records_nothing` but does not cite it, so the cited texts do not cover every observable branch.",
       "rust_item": "fn[apply_consent]"
     },
     {

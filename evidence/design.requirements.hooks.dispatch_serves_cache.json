@@ -235,8 +235,42 @@
         "    })",
         "}"
       ]
+    },
+    {
+      "rust_file": "symposium-install/src/lib.rs",
+      "rust_item": "fn[cached_cargo_version]",
+      "text": [
+        "/// Resolve a cargo binary cache from the recorded `current` version pointer,",
+        "/// without consulting crates.io. Returns the version's cache dir and the binary",
+        "/// name to run, or `None` when there's no usable cached version (so the caller",
+        "/// falls back to a registry query).",
+        "fn cached_cargo_version(",
+        "    registry_dir: &Path,",
+        "    pointer: &Path,",
+        "    executable_hint: Option<&str>,",
+        ") -> Option<(PathBuf, Option<String>)> {",
+        "    let version = std::fs::read_to_string(pointer).ok()?;",
+        "    let version = version.trim();",
+        "    if version.is_empty() {",
+        "        return None;",
+        "    }",
+        "    let cache_dir = registry_dir.join(version);",
+        "    let bin_dir = cache_dir.join(\"bin\");",
+        "    let resolved = match executable_hint {",
+        "        Some(name) => {",
+        "            if !bin_dir.join(platform_binary_exe(name)).exists() {",
+        "                return None;",
+        "            }",
+        "            Some(name.to_string())",
+        "        }",
+        "        // No hint: only safe to serve from cache when there's exactly one binary.",
+        "        None => Some(single_cached_binary(&bin_dir)?),",
+        "    };",
+        "    Some((cache_dir, resolved))",
+        "}"
+      ]
     }
   ],
-  "rationale": "**Does not hold for `global = true` cargo sources.** `build_spawn_spec` acquires every requirement and the command with `UpdateLevel::None`. In `symposium_install::acquire_cargo`:\n- crates.io (non-global): under `None`, `cached_cargo_version` serves the version in the `current` pointer with no crates.io query. Holds.\n- `cargo + git`: under `None` the remote HEAD is never resolved, and the cached binary is used when present. Holds.\n- `global = true`: the branch calls `install_cargo_crate` unconditionally, at every level. That runs `cargo binstall --no-confirm <crate>` (falling back to `cargo install <crate>`) with no `--root`, and both resolve the newest matching version against crates.io. So every dispatch of a hook with a global cargo source queries for a newer version, and may install one.\n\nThere is also no test of the no-query property for any source kind.\n\nTo resolve: make the global branch skip installation when the executable is already present, at `None`, or exclude global sources in the text. Then add a test, e.g. with a mock `SYMPOSIUM_CARGO` that records its invocations.\n",
+  "rationale": "**Does not hold for `global = true` cargo sources.**\n\n`src/hook.rs` `build_spawn_spec` acquires every hook requirement and the hook command with `UpdateLevel::None`; for a cargo source this reaches `symposium_install::acquire_cargo`, whose three branches behave as follows:\n\n- **Plain crates.io (non-global):** under `None`, `cached_cargo_version` reads the `current` pointer and serves that version's cached binary with no crates.io query. Holds once something is installed. When no pointer exists yet, or the hinted binary is missing, or there is no hint and the cached `bin/` holds several binaries, it falls through to `query_crate_binaries` (a crates.io query) and installs: there is no installed version to use in that case, so this is a first install rather than a check for a newer one.\n- **`cargo + git`:** under `None` the remote HEAD is never resolved (`remote_sha` stays `None`, so `sha_changed` is false); the cached binary is used when present and installed only when missing. Holds.\n- **`global = true`:** the branch calls `install_cargo_crate` unconditionally, ignoring `update`. That runs `cargo binstall --no-confirm <crate>[@<version>]` (falling back to `cargo install`) with no `--root`, and both resolve the newest matching version against crates.io. So every dispatch of a hook whose command or requirement has a global cargo source queries crates.io for a newer version and may install it. **Violates the requirement.** The chapter's note on `source_refresh_session_start` points here for global sources, but the requirement text does not carve them out.\n\nTests: the five `symposium-install` unit tests `cached_cargo_version_*` (pass) cover the pointer-serving helper (serves pointer with/without hint, `None` without pointer, missing binary, ambiguous binaries). No test exercises dispatch end to end or asserts that no crates.io query / `cargo install` happens at dispatch for any source kind; the git and global branches are judged from code.\n\nTo resolve: make the global branch skip installation under `None` when the executable is already on `PATH`/in `$CARGO_HOME/bin` (or exclude global sources in the text), and add a test, e.g. with a mock `SYMPOSIUM_CARGO` that records its invocations.\n",
   "requirement": "Dispatching a plugin hook MUST use the installed version of each cargo source it needs rather than querying for a newer one."
 }

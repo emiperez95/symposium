@@ -1,5 +1,5 @@
 {
-  "determination": false,
+  "determination": true,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -155,8 +155,53 @@
         "    .unwrap();",
         "}"
       ]
+    },
+    {
+      "rust_file": "src/hook_schema/antigravity.rs",
+      "rust_item": "impl[AntigravityInvocationInput/AgentHookInput]/fn[should_dispatch]",
+      "text": [
+        "    /// `PreInvocation` fires before every model call, several times in a turn",
+        "    /// that uses tools; only the first call of a turn is the prompt event.",
+        "    fn should_dispatch(&self) -> bool {",
+        "        self.invocation_num == 0",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/hook_schema/antigravity.rs",
+      "rust_item": "mod[tests]/fn[only_the_first_invocation_of_a_turn_is_a_prompt]",
+      "text": [
+        "    #[test]",
+        "    fn only_the_first_invocation_of_a_turn_is_a_prompt() {",
+        "        let parse = |s: &str| AntigravityInvocationInput::parse_input(s).unwrap();",
+        "        assert!(parse(r#\"{\"invocationNum\":0}\"#).should_dispatch());",
+        "        assert!(!parse(r#\"{\"invocationNum\":1}\"#).should_dispatch());",
+        "        assert!(!parse(r#\"{\"invocationNum\":7}\"#).should_dispatch());",
+        "        // A missing counter is invocation 0, so a wire change fires too often",
+        "        // rather than never.",
+        "        assert!(parse(r#\"{}\"#).should_dispatch());",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "symposium-sdk/src/hook.rs",
+      "rust_item": "impl[Output]/fn[empty_for]",
+      "text": [
+        "    /// Create an empty output for the given event type.",
+        "    pub fn empty_for(event: HookEvent) -> Self {",
+        "        match event {",
+        "            HookEvent::PreToolUse => Output::PreToolUse(PreToolUseOutput::default()),",
+        "            HookEvent::PostToolUse => Output::PostToolUse(PostToolUseOutput::default()),",
+        "            HookEvent::UserPromptSubmit => {",
+        "                Output::UserPromptSubmit(UserPromptSubmitOutput::default())",
+        "            }",
+        "            HookEvent::SessionStart => Output::SessionStart(SessionStartOutput::default()),",
+        "            HookEvent::Stop => Output::Stop(StopOutput::default()),",
+        "        }",
+        "    }"
+      ]
     }
   ],
-  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "rationale": "**Implementation.** In `execute_hook` (`src/hook.rs`), the agent's payload is parsed with `handler.parse_input` and, before anything else (no `to_symposium`, workspace resolution, auto-sync, builtin or plugin dispatch), `payload.should_dispatch()` is checked. When it is false the function returns `handler.respond(&handler.translate_output(&OutputEvent::empty_for(event)).to_hook_output())`: the empty canonical output for the event (`Output::empty_for` in `symposium-sdk/src/hook.rs`, a `Default` output for each of the five events) translated into the agent's wire format and serialized through the agent's own `respond`. That is the agent's neutral output, and `run` writes it to stdout with exit 0. Nothing earlier in the binary's hook path (`ensure_registries`, the auto-update check) can change the answer: both are non-fatal.\n\n**Where the condition arises.** `AgentHookInput::should_dispatch` defaults to `true` (`src/hook_schema.rs`); the only override is Antigravity's `AntigravityInvocationInput` (`PreInvocation` mapped to `UserPromptSubmit`), which returns `invocation_num == 0`. For every other agent and event no payload is a non-occurrence, so the requirement holds vacuously there; for Antigravity a later invocation gets `{\"injectSteps\":[]}` (an `AntigravityInjectStepsOutput` with no steps), the neutral answer.\n\n**Tests (pass).** `later_invocations_of_a_turn_reach_no_plugin_hook` (`tests/plugin_dispatch.rs`) sends Antigravity `UserPromptSubmit` with `invocationNum` 0, whose stdout carries the plugin hook's output, then `invocationNum` 1, whose stdout is exactly `{\"injectSteps\":[]}`. `only_the_first_invocation_of_a_turn_is_a_prompt` (unit test in `src/hook_schema/antigravity.rs`) checks `should_dispatch` is true for 0 and a missing counter, false for 1 and 7. Ran `cargo test -q --test plugin_dispatch later_invocations_of_a_turn_reach_no_plugin_hook` and `cargo test -q --lib hook_schema::antigravity`: all pass.\n\n**Limits.** The only non-occurrence case in the code is Antigravity `PreInvocation`, and that is the case tested; the generic early-return path covers any future override the same way (judged from code).",
   "requirement": "When an agent's payload is not an occurrence of the symposium event it maps to, Symposium MUST answer with the agent's neutral output."
 }

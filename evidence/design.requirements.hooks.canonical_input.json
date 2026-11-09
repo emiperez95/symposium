@@ -1,5 +1,5 @@
 {
-  "determination": false,
+  "determination": true,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -214,8 +214,17 @@
         "    Ok(output)",
         "}"
       ]
+    },
+    {
+      "rust_file": "src/hook_schema/symposium.rs",
+      "rust_item": "impl[InputEvent/super::AgentHookInput]/fn[to_string]",
+      "text": [
+        "    fn to_string(&self) -> anyhow::Result<String> {",
+        "        serde_json::to_string(self).map_err(Into::into)",
+        "    }"
+      ]
     }
   ],
-  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "rationale": "**Implementation.** `hook::run` parses the agent payload and converts it with `payload.to_symposium()` into the canonical `symposium::InputEvent` (`sym_input`), which it passes to `dispatch_plugin_hooks` alongside the raw `input` string. In `dispatch_plugin_hooks`, stdin for each selected hook is chosen by `hook.format.as_agent()`: `HookFormat::Symposium.as_agent()` is `None` (`symposium-sdk/src/manifest.rs`), so it can never equal `Some(host_agent)` and every symposium-format hook takes the `else` branch, receiving `AgentHookInput::to_string(sym_input)`. For `InputEvent` that is `serde_json::to_string(self)` (the added input in `src/hook_schema/symposium.rs`), i.e. the canonical SDK `Input` serialization that SDK hook handlers deserialize. Only a native-format hook (format equal to the host agent) gets `original_input` byte for byte; other-agent formats are never selected by `dispatched_hooks_for_payload`. The string is written to the child's stdin and the handle is dropped before `wait_with_output`, so the hook sees the whole event followed by EOF.\n\n**Failure branch.** If serialization fails the hook is logged and skipped rather than given another form. The canonical input structs contain only `String`, `Option<String>` and `serde_json::Value` fields with derived `Serialize`, so `serde_json::to_string` cannot fail for them in practice; this branch does not produce a non-canonical delivery.\n\n**Tests.** Untested for the delivered stdin content - judged from code. `tests/hook_format_priority.rs` (4 tests, pass) shows symposium-format hooks are selected and run on non-Claude agents, and many fixtures (`plugin-hooks0`, `context-merge0`, `plugin-hook-decisions0`, `cargo_plugin_scripts`) run symposium-format hooks, but their scripts discard stdin (`cat >/dev/null`); only the native-format fixture `native-input0` records what it receives (`tests/hook_context.rs`). No test asserts that a symposium-format hook's stdin parses as the canonical `Input`.",
   "requirement": "Symposium MUST give a symposium-format plugin hook the event in symposium canonical form."
 }

@@ -200,8 +200,50 @@
         "    .unwrap();",
         "}"
       ]
+    },
+    {
+      "rust_file": "src/workspace_state.rs",
+      "rust_item": "impl[WorkspaceState]/fn[fresh]",
+      "text": [
+        "    /// The workspace and dependencies the last sync found, if every input is",
+        "    /// as it was then. A file that appeared or disappeared counts as changed.",
+        "    /// A workspace with no inputs is never fresh, since nothing would tell",
+        "    /// that its dependencies had changed.",
+        "    pub fn fresh(&self) -> Option<(WorkspaceInfo, Vec<PackageId>)> {",
+        "        let last = self.last_sync.as_ref()?;",
+        "        let unchanged = !last.inputs.is_empty()",
+        "            && last",
+        "                .inputs",
+        "                .iter()",
+        "                .all(|(path, mtime)| crate::pm::file_mtime(path) == *mtime);",
+        "        unchanged.then(|| {",
+        "            let info = WorkspaceInfo {",
+        "                root: last.root.clone(),",
+        "                members: last.members.clone(),",
+        "                inputs: last.inputs.keys().cloned().collect(),",
+        "            };",
+        "            (info, last.deps.clone())",
+        "        })",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/workspace_state.rs",
+      "rust_item": "fn[state_file_path]",
+      "text": [
+        "fn state_file_path(sym: &Symposium, workspace_root: &Path) -> PathBuf {",
+        "    // Canonicalize so that symlink variants (e.g. /var vs /private/var on",
+        "    // macOS) hash to the same cache directory.",
+        "    let canonical =",
+        "        fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());",
+        "    sym.cache_dir()",
+        "        .join(\"workspaces\")",
+        "        .join(crate::pm::workspace_dir_name(&canonical))",
+        "        .join(\"state.json\")",
+        "}"
+      ]
     }
   ],
-  "rationale": "**Does not hold as written: the code also syncs when there is no previous sync to compare against.** In `run_auto_sync`, for a non-`SessionStart` event with `auto-sync` on, sync is skipped only when `WorkspaceState::fresh()` returns `Some`. `fresh()` returns `None`, so sync runs, not only when a recorded input's mtime changed, but also when no sync from this directory is recorded (`last_sync` is `None`), and when the recorded sync has no inputs (\"A workspace with no inputs is never fresh\"). A sync that fails is not recorded either, so the next event syncs again. The requirement says \"exactly when an input recorded by the previous sync has changed\", which excludes those cases. `tests/init_sync.rs::auto_sync_skips_when_cargo_lock_unchanged` itself relies on the first `PreToolUse` syncing with no prior record.\n\nWhat does hold (tests pass): `auto_sync_skips_when_cargo_lock_unchanged` (second `PreToolUse` with `Cargo.lock` unchanged leaves the skills dir untouched), `auto_sync_reruns_when_cargo_lock_changes` (a stale recorded mtime triggers a re-sync and refreshes the record), `tests/workspace_freshness.rs::creating_a_nested_workspace_invalidates_the_hook_workspace_cache` (passes).\n\nTo resolve: amend the text, e.g. \"...MUST sync before dispatching when no sync is recorded for the directory, the recorded sync has no inputs, or an input it recorded has changed, and MUST NOT sync otherwise\". Or record the no-record case as intended in some other way. Then re-judge.\n",
+  "rationale": "**Does not hold as written: the gate compares against the last sync from the hook's working directory, not the workspace's last successful sync.**\n\nHow the gate works (`src/hook.rs::run_auto_sync`): with `auto-sync` off it returns at once. Otherwise it loads `WorkspaceState::load(sym, &start)`, where `start` is `deps.start()`, the hook payload's `cwd` (`sym.workspace(&cwd)` in `execute_hook`). On a non-`SessionStart` event, if `WorkspaceState::fresh()` returns `Some`, it reuses the recorded workspace and deps and skips sync. `fresh()` returns `None`, so sync runs, when no sync is recorded, when the recorded sync has no inputs, or when any recorded input's mtime differs (including a file that appeared or disappeared). If `deps.info()` then finds no workspace, it does not sync. After `sync::sync` returns `Ok`, it records the inputs. On `Err` it records nothing, so the next event tries again. Within one directory's record this matches the requirement's two triggers (a changed recorded input, or no successful sync with recorded inputs), and nothing else causes a sync. That includes a sync where one package manager failed but `sync` still returned `Ok`: it counts as successful and is recorded.\n\nWhere it breaks: `state_file_path` keys the record on the canonicalized start directory, not on the workspace root (the module doc says so: \"Keyed on the directory a session starts in, not on the workspace root\"). Two directories in the same workspace keep separate records. Concrete case: a hook from directory A syncs at T1. `Cargo.lock` then changes, and a hook from directory B in the same workspace syncs at T2, which records the new mtime. A later `PreToolUse` from A compares against A's T1 record, sees `Cargo.lock` changed, and syncs again. But the workspace's last successful sync (T2) recorded inputs that have not changed since, so the requirement says it MUST NOT sync. In the same way, a non-`SessionStart` event from a directory with no record syncs even when the workspace already has a fresh recorded sync from another directory. In practice the cost is only an extra sync, since `SessionStart` from a directory records first, but the requirement's \"only when\" is violated. Separately, `cargo agents sync` and `use` never call `record_sync`, so a manual sync never updates the gate. Whether that counts depends on how \"with recorded inputs\" is read.\n\nTests (all pass): `tests/init_sync.rs::auto_sync_skips_when_cargo_lock_unchanged` (the first `PreToolUse` syncs with no record and records `Cargo.lock`'s mtime; a second one leaves the skills dir untouched), `auto_sync_reruns_when_cargo_lock_changes` (a stale recorded mtime triggers a re-sync and refreshes the record), `tests/workspace_freshness.rs::creating_a_nested_workspace_invalidates_the_hook_workspace_cache`, and the `workspace_state` unit tests (`never_synced_is_stale`, `a_workspace_without_inputs_is_never_fresh`, `fresh_until_an_input_changes`, `an_input_that_appears_or_disappears_is_a_change`). No test exercises two directories of one workspace, the `auto-sync = false` branch, or a failed sync not being recorded. Those are judged from the code.\n\nTo resolve, either key the record on the workspace (which needs the root, the very lookup the gate exists to avoid) or reword the text to say the record is per directory, e.g. \"...when, and only when, an input recorded by the last successful sync from the hook's working directory has changed or no such sync with recorded inputs exists\".\n",
   "requirement": "On events other than `SessionStart`, when `auto-sync` is enabled, Symposium MUST sync before dispatching when, and only when, an input recorded by the workspace's last successful sync has changed or no successful sync with recorded inputs exists for it."
 }

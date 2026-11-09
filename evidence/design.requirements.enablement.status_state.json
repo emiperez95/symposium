@@ -626,8 +626,49 @@
         "    .unwrap();",
         "}"
       ]
+    },
+    {
+      "rust_file": "src/plugins.rs",
+      "rust_item": "fn[record_active]",
+      "text": [
+        "/// Gate `plugin` and, if it passes, record it into `active` and enqueue its",
+        "/// `[[plugins]]` chained references (evaluated against this plugin's provenance)",
+        "/// onto `worklist`.",
+        "fn record_active(",
+        "    plugin: Plugin,",
+        "    ctx: &mut crate::predicate::PredicateContext<'_>,",
+        "    active: &mut Vec<Plugin>,",
+        "    worklist: &mut Vec<crate::pm::PackageId>,",
+        ") {",
+        "    if !plugin.applies(ctx) {",
+        "        tracing::debug!(",
+        "            report = %crate::report::ReportEvent::PluginConsidered {",
+        "                plugin: plugin.manifest.name.clone(),",
+        "                matched: false,",
+        "                reason: Some(\"plugin-level predicates not satisfied\".into()),",
+        "            },",
+        "        );",
+        "        return;",
+        "    }",
+        "    tracing::debug!(",
+        "        report = %crate::report::ReportEvent::PluginConsidered {",
+        "            plugin: plugin.manifest.name.clone(),",
+        "            matched: true,",
+        "            reason: None,",
+        "        },",
+        "    );",
+        "    warn_undispatched_crate_features(&plugin);",
+        "    for edge in &plugin.manifest.chained {",
+        "        ctx.set_workspace_member(plugin.workspace_member);",
+        "        if edge.predicates.evaluate(ctx) {",
+        "            worklist.push(crate::pm::CargoPm::id_for(&edge.name, None));",
+        "        }",
+        "    }",
+        "    active.push(plugin);",
+        "}"
+      ]
     }
   ],
-  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "rationale": "**Not met.** `status` and activation reach their answers by different paths. For several plugin kinds they disagree.\n\n**What holds (tested, all passing):**\n- **Registry and workspace plugins.** `workspace_status` (src/status_command.rs) evaluates `Plugin::applies` with the same `used_plugins` context activation uses. It reports `Active` when that holds and `Dormant` otherwise. A dormant plugin gets the \"awaiting `cargo agents use`\" root. `disable` is skipped for trusted plugins. This matches `record_active` (src/plugins.rs), which gates each trust-root plugin on `applies` and ignores `disable`. Tests: `status_reports_dormant_registry_plugin` and `status_lists_a_disabled_registry_plugin_once`.\n- **Dependency-embedded plugins.** `discover` asks the untrusted cargo instance for its `active_plugins`. `decide` then classifies each one: disable first → `Declined`, then use → `Used`, then auto-enable → `AutoEnabled`, otherwise `Candidate`. `entry_for` maps these to active, declined and candidate. This agrees with `enabled_dependencies`, which also prunes `disable` before honouring `auto-enable`/`use`. Tests: `undecided_dependency_plugin_is_a_candidate` (lib), `status_reports_candidate_then_used`, `status_reports_a_used_but_disabled_plugin_as_declined` and `status_lists_each_declined_name_once`.\n- **Other `use` and `disable` entries.** A `use`d dependency that offers no plugin is `Dormant`. Undiscovered `disable` names are `Declined`. Test: `status_reports_a_pluginless_dependency_only_when_used`.\n\n**Where it fails (judged from code, untested):**\n1. **Dependency plugins whose predicates don't hold.** `entry_for` reports a `Used`/`AutoEnabled` dependency plugin as `Active` without evaluating its plugin-level predicates. Neither `discover` nor `CargoPm::active_plugins` evaluates them either. Activation does: `record_active` drops any plugin whose `applies` fails. Example: a consented crate whose own manifest has `predicates = [\"env(UNSET)\"]`. `status` says active, but it never runs. The reference table defines `active` as \"Enabled and its predicates hold here\" and lists unmet predicates under `dormant`.\n2. **Crates reached through a `[[plugins]] source.cargo` chain.** `record_active` enqueues these, and `active_plugins` loads them without consulting `[plugins]`. Suppose such a crate is also a dependency that embeds plugin content. `status` reports it `Candidate`, or `Declined` when `disable` names it, but activation runs it. This is the known `consent.disable_wins` gap.\n3. **`use`d crates that aren't dependencies.** `status` shows these as `Active` (\"not a dependency\") without loading them or evaluating their predicates. Activation loads them cache-only through `pms.load_plugin`. A crate that isn't cached, or whose plugin predicates fail, does not become active.\n\nDetermination stays false until `status` derives each discovered or `use`d crate's state from the same gate as activation (`Plugin::applies` plus chain reachability).",
   "requirement": "`cargo agents status` MUST give each plugin the state that activation gives it: active, dormant, candidate (awaiting consent), or declined."
 }

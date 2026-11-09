@@ -1,5 +1,5 @@
 {
-  "determination": false,
+  "determination": true,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -266,8 +266,30 @@
         "    .unwrap();",
         "}"
       ]
+    },
+    {
+      "rust_file": "src/plugins.rs",
+      "rust_item": "fn[ensure_registries]",
+      "text": [
+        "/// Fetch/update git-based registries.",
+        "///",
+        "/// `update` controls freshness checking behavior (see `UpdateLevel`).",
+        "/// Only refreshes registries with `auto-update = true` (unless `update` is",
+        "/// `Fetch`). Path-based registries are skipped (no fetching needed).",
+        "pub async fn ensure_registries(sym: &Symposium, update: UpdateLevel) {",
+        "    // `Fetch` forces even auto-update-disabled registries; otherwise each",
+        "    // registry's `refresh` honors its own auto-update flag (and a path registry",
+        "    // is a no-op).",
+        "    let force = matches!(update, UpdateLevel::Fetch);",
+        "    for inst in sym.registry_instances() {",
+        "        if let Err(e) = inst.pm.refresh(update, force).await {",
+        "            tracing::warn!(registry = %inst.name, error = %e, \"failed to refresh registry\");",
+        "        }",
+        "    }",
+        "}"
+      ]
     }
   ],
-  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "rationale": "Holds for every case the text covers.\n\n**Implementing path.** `execute_hook` (src/hook.rs) parses the payload, builds one `Workspace` from the payload `cwd` (`sym.workspace(&cwd)`, so `deps.start()` is always set), sets `session_start = event == HookEvent::SessionStart` and calls `run_auto_sync(sym, &deps, session_start)` *before* `dispatch_builtin` and `dispatch_plugin_hooks` — so the sync precedes all dispatch. The only earlier exit is a payload that is not an occurrence of the event (`should_dispatch() == false`, e.g. an Antigravity invocation after the first), which is not a `SessionStart` occurrence and is governed by `non_occurrence_no_dispatch`.\n\n**`run_auto_sync` branches on `SessionStart`.** `auto-sync` off → returns without syncing (outside the requirement's condition). With `session_start = true` the `WorkspaceState::fresh()` freshness gate is skipped entirely (`!session_start && ...`), so a recorded, unchanged state never suppresses the sync. `deps.info()` is `None` (cwd not in a workspace) → returns (outside the condition). Otherwise it calls `crate::sync::sync(sym, deps, UpdateLevel::Check)`, i.e. with `Check` rather than the `None` used on other events.\n\n**Checking upstream sources.** Inside `sync::sync`, the `Check` level is threaded into `resolve_custom_predicate_entries` and `skills::collect_skills` (where `source.git` skill groups are re-resolved against the remote), and `plugins::active_plugins` is always called with `UpdateLevel::Check`. Git registries are refreshed one step earlier, in the binary's entry point (`src/bin/cargo-agents.rs`): for `Commands::Hook` with `event == SessionStart` it calls `plugins::ensure_registries(&sym, UpdateLevel::Check)` before the hook pipeline runs, and `ensure_registries` calls each registry instance's `refresh(update, force=false)` (a `GitPm` pulls, honoring its `auto-update` flag; path registries are no-ops). Crate plugins resolve against the workspace's pinned/extracted sources, so they have no separate upstream to check.\n\n**Failure.** A sync error (including `sync` refusing because `config.toml` is unreadable) is logged and the hook continues (`best_effort`); the attempt is still made before dispatch.\n\n**Tests (both pass, run this session).** `tests/init_sync.rs::auto_sync_always_runs_on_session_start` is the direct one: it makes the freshness gate fresh with a `PreToolUse`, deletes the installed `serde-guidance` skill, fires `SessionStart`, and asserts the skill is reinstalled — showing the gate is bypassed and sync runs on `SessionStart`. `tests/hook_stdout.rs::rejected_skill_warning_stays_off_hook_stdout` additionally shows a `SessionStart` hook installs the workspace skill `ws-hello`. Limits: no test asserts the `Check` level or that remote git sources/registries are actually re-queried on `SessionStart` (simulation mode, no network); that part is judged from code (the `UpdateLevel::Check` selection in `run_auto_sync` and the binary entry point).",
   "requirement": "On `SessionStart`, when `auto-sync` is enabled and the hook's working directory is in a workspace, Symposium MUST sync skills before dispatching, checking upstream sources for changes."
 }
