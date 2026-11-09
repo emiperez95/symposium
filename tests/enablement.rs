@@ -626,6 +626,39 @@ async fn status_reports_candidate_then_used() {
     .unwrap();
 }
 
+/// `disable` does not reach a registry plugin, so status lists it once, in the
+/// state activation gives it, not also as declined.
+// {test}`design.requirements.enablement.status_once`
+// {test}`design.requirements.enablement.status_state`
+#[tokio::test]
+async fn status_lists_a_disabled_registry_plugin_once() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["dormant-plugin0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let workspace_root = ctx.workspace_root.clone().unwrap();
+            ctx.sym
+                .config
+                .plugins
+                .disable
+                .push("gateless-plugin".to_string());
+
+            let deps = ctx.sym.workspace(&workspace_root);
+            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+            let listed: Vec<_> = entries
+                .iter()
+                .filter(|e| e.name == "gateless-plugin")
+                .collect();
+            assert_eq!(listed.len(), 1, "{entries:#?}");
+            assert_eq!(listed[0].state, StatusState::Dormant);
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// A registry plugin nothing gates is reported dormant until `use` names it.
 // {test}`design.requirements.enablement.status_state`
 // {test}`design.requirements.enablement.search_origin`
