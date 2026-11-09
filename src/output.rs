@@ -47,10 +47,6 @@ impl Output {
             .clone()
     }
 
-    pub fn is_quiet(&self) -> bool {
-        self.quiet
-    }
-
     /// May we block on stdin to ask the user a question?
     ///
     /// Only a non-quiet, non-capturing output attached to a terminal on both
