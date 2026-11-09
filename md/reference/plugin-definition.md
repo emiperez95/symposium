@@ -433,7 +433,7 @@ Not every agent delivers every event, and agents name them differently. See [Age
 - **Exit codes**:
 	- `0` — success: the hook's stdout is parsed as JSON and merged into the overall hook result.
 	- `2` (or no reported exit code): block. The action is blocked, dispatch stops, and the hook's stderr becomes the reason the agent is given. See [exit codes](./hook-events.md#exit-codes) for how each agent receives the block.
-	- any other non-zero code — treated as success for dispatching purposes; stdout is still parsed and merged when possible.
+	- any other non-zero code — logged as a warning; the hook's output is discarded and dispatch continues with the next hook.
 
 - **Stdout handling**: Hooks should write a JSON object to stdout to contribute structured data back to the caller. Valid JSON objects are merged together across successful hooks; keys from later hooks overwrite earlier keys. The exception is `additionalContext` on `SessionStart`, `UserPromptSubmit` and `PostToolUse`: symposium's own context and every hook's are joined, in order, so none replaces another.
 

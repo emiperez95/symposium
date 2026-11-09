@@ -163,3 +163,24 @@ jobs:
 
       - name: Check agent-eval tasks
         run: cargo xtask agent-eval --check-tasks
+
+  book:
+    name: Build book
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same tools as deploy-book.yml, so a broken requirement block or
+      # preprocessor error fails the PR instead of the deploy after merge.
+      - name: Install mdbook and preprocessors
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sSL https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          # Keep habeas at the version pinned in Cargo.toml.
+          cargo binstall --no-confirm mdbook mdbook-mermaid habeas@0.2.0
+
+      - name: Build book
+        run: mdbook build

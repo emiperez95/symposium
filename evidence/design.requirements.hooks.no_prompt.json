@@ -2,38 +2,6 @@
   "determination": true,
   "inputs": [
     {
-      "rust_file": "src/output.rs",
-      "rust_item": "impl[Output]/fn[is_interactive]",
-      "text": [
-        "    /// May we block on stdin to ask the user a question?",
-        "    ///",
-        "    /// Only a non-quiet, non-capturing output attached to a terminal on both",
-        "    /// ends qualifies. Hook dispatch and the library test harness both use",
-        "    /// quiet/capturing outputs, so neither can ever reach a prompt — the TTY",
-        "    /// check alone would not guarantee that, since `cargo test` inherits the",
-        "    /// developer's terminal.",
-        "    pub fn is_interactive(&self) -> bool {",
-        "        // {impl}`design.requirements.hooks.no_prompt`",
-        "        use std::io::IsTerminal;",
-        "        !self.quiet",
-        "            && self.capture.is_none()",
-        "            && std::io::stdin().is_terminal()",
-        "            && std::io::stdout().is_terminal()",
-        "    }"
-      ]
-    },
-    {
-      "rust_file": "src/init.rs",
-      "rust_item": "fn[interactive]",
-      "text": [
-        "/// Whether we can prompt the user interactively.",
-        "fn interactive(out: &Output) -> bool {",
-        "    // {impl}`design.requirements.hooks.no_prompt`",
-        "    out.is_interactive()",
-        "}"
-      ]
-    },
-    {
       "matches": [
         "design.requirements.hooks.pending_consent"
       ],
@@ -79,6 +47,11 @@
         "/// Only explicit answers are recorded — the default (\"ask me later\") leaves",
         "/// the dependency undecided, so reflexively hitting Enter never permanently",
         "/// declines anything, and Escape leaves the remaining offers undecided too.",
+        "// {impl}`design.requirements.consent.prompt_once_per_candidate`",
+        "// {impl}`design.requirements.consent.prompt_describes_extensions`",
+        "// {impl}`design.requirements.consent.approval_recorded`",
+        "// {impl}`design.requirements.consent.decline_recorded`",
+        "// {impl}`design.requirements.consent.deferral_records_nothing`",
         "pub async fn prompt_for_consent(",
         "    sym: &mut Symposium,",
         "    deps: &Arc<Workspace>,",
@@ -123,6 +96,94 @@
       ]
     },
     {
+      "rust_file": "src/hook.rs",
+      "rust_item": "fn[consent_hint]",
+      "text": [
+        "/// Surface dependency plugins awaiting consent. A hook runs on the agent's",
+        "/// behalf, so it must never block on stdin — the candidates are reported as",
+        "/// context, with a pointer at the interactive command that can actually ask.",
+        "/// `None` when nothing is pending.",
+        "// {impl}`design.requirements.hooks.consent_hint_names`",
+        "// {impl}`design.requirements.hooks.consent_hint_defers`",
+        "// {impl}`design.requirements.hooks.no_prompt`",
+        "async fn consent_hint(sym: &Symposium, deps: &Arc<Workspace>) -> Option<String> {",
+        "    let names = crate::discovery::pending_candidates(sym, deps).await;",
+        "    if names.is_empty() {",
+        "        return None;",
+        "    }",
+        "    Some(format!(",
+        "        \"These dependencies ship agent plugins that are not enabled yet: {}. \\",
+        "         They stay off until the user consents — tell the user to run \\",
+        "         `cargo agents sync` (which asks about each one) or \\",
+        "         `cargo agents use <name>`. Do not enable them yourself.\",",
+        "        names.join(\", \")",
+        "    ))",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "src/init.rs",
+      "rust_item": "fn[interactive]",
+      "text": [
+        "/// Whether we can prompt the user interactively.",
+        "fn interactive(out: &Output) -> bool {",
+        "    // {impl}`design.requirements.hooks.no_prompt`",
+        "    out.is_interactive()",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[quiet]",
+      "text": [
+        "    // {impl}`design.requirements.output.quiet`",
+        "    // {impl}`design.requirements.hooks.no_prompt`",
+        "    pub fn quiet() -> Self {",
+        "        Self {",
+        "            quiet: true,",
+        "            capture: None,",
+        "        }",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[capturing]",
+      "text": [
+        "    /// Create an output that captures all messages into a buffer",
+        "    /// instead of printing them.",
+        "    // {impl}`design.requirements.output.capture`",
+        "    // {impl}`design.requirements.hooks.no_prompt`",
+        "    pub fn capturing() -> Self {",
+        "        Self {",
+        "            quiet: false,",
+        "            capture: Some(Arc::new(Mutex::new(Vec::new()))),",
+        "        }",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[is_interactive]",
+      "text": [
+        "    /// May we block on stdin to ask the user a question?",
+        "    ///",
+        "    /// Only a non-quiet, non-capturing output attached to a terminal on both",
+        "    /// ends qualifies. Hook dispatch and the library test harness both use",
+        "    /// quiet/capturing outputs, so neither can ever reach a prompt — the TTY",
+        "    /// check alone would not guarantee that, since `cargo test` inherits the",
+        "    /// developer's terminal.",
+        "    pub fn is_interactive(&self) -> bool {",
+        "        // {impl}`design.requirements.hooks.no_prompt`",
+        "        use std::io::IsTerminal;",
+        "        !self.quiet",
+        "            && self.capture.is_none()",
+        "            && std::io::stdin().is_terminal()",
+        "            && std::io::stdout().is_terminal()",
+        "    }"
+      ]
+    },
+    {
       "rust_file": "tests/enablement.rs",
       "rust_item": "fn[consent_prompt_never_fires_non_interactively]",
       "text": [
@@ -132,6 +193,7 @@
         "/// inherits the developer's terminal, so a stdin-only check would make this",
         "/// test hang on an interactive machine. Quiet and capturing outputs — the",
         "/// ones hook dispatch and the library harness use — are never interactive.",
+        "// {test}`design.requirements.consent.unconsented_inactive`",
         "// {test}`design.requirements.hooks.no_prompt`",
         "#[tokio::test]",
         "async fn consent_prompt_never_fires_non_interactively() {",
@@ -185,6 +247,6 @@
       ]
     }
   ],
-  "rationale": "Every prompt in Symposium is a `dialoguer` call, and each one is behind `Output::is_interactive`: `prompt_for_consent` returns before discovery when the output is not interactive, and every `init` prompt (agents, hook scope, auto-update, telemetry) is reached only through `should_prompt`, which requires `interactive(out)`. `is_interactive` is false for a quiet or capturing output and otherwise requires both stdin and stdout to be terminals, which is the second sentence of the requirement. `command_output` returns a quiet `Output` for every `hook` command, so nothing on the hook path can prompt. The only other stdin read, in `hook::run`, reads the agent's hook payload rather than asking the user anything. `consent_prompt_never_fires_non_interactively` asserts that quiet and capturing outputs are not interactive, calls `prompt_for_consent` with a pending candidate and a quiet output, runs `sync` through the capturing harness, and checks that no decision was recorded and the candidate is still pending; it passes.",
+  "rationale": "**Holds.** Every interactive prompt in Symposium is gated on `Output::is_interactive`, which returns true only for an output that is neither quiet nor capturing with both stdin and stdout attached to terminals (`src/output.rs`). The prompt sites are `discovery::prompt_for_consent` (returns early when `!out.is_interactive()`, before any `dialoguer` call) and `init.rs` (`interactive(out)` delegates to `is_interactive`, and every `dialoguer` prompt in `init` sits behind `should_prompt`). A search of `src/` for `stdin()`, `dialoguer` and `read_line` finds no other prompt site; the only other stdin read is `hook::run` reading the hook payload, which is not a question to the user.\n\nA hook process can never satisfy the gate: the binary's `command_output` returns `Output::quiet()` whenever the command is `hook`, and `hook::run` never passes an `Output` to anything that prompts (the consent question becomes `consent_hint` context instead). Plugin hooks it spawns get a piped stdin (`spawn_from_spec`), not the terminal.\n\n**Tests:** `tests/enablement.rs::consent_prompt_never_fires_non_interactively` asserts quiet and capturing outputs are never interactive, then calls `prompt_for_consent` with a quiet output and runs `sync` through the capturing harness while a candidate is pending; nothing is recorded and the test does not block although `cargo test` inherits the terminal. Passes. The real-binary `tests/hook_stdout.rs::sync_progress_stays_off_hook_stdout` (via the `pending_consent` example) runs `cargo agents hook <agent> session-start` with a pending candidate and completes. Passes. The terminal half (both ends TTY) is judged from code; no test drives a real TTY.\n",
   "requirement": "A `cargo agents` process started by an agent hook MUST NOT read from stdin to ask the user a question. Symposium MUST prompt only when its output is neither quiet nor capturing and both stdin and stdout are terminals."
 }

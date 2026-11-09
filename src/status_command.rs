@@ -209,6 +209,13 @@ pub async fn workspace_status(
         .iter()
         .map(|d| pms.identity(&d.id))
         .collect();
+    // `disable` does not reach registry or workspace plugins (they are trust
+    // roots), and those are already listed above with the state they have.
+    let trusted: std::collections::HashSet<crate::pm::PackageId> = registry
+        .plugins
+        .iter()
+        .map(|p| pms.identity(&p.canonical))
+        .collect();
     let mut unknown = std::collections::HashSet::new();
     for name in &sym.config.plugins.disable {
         if name == "*" {
@@ -218,6 +225,7 @@ pub async fn workspace_status(
             .identify(&registry.plugins, name, UpdateLevel::None)
             .await
         {
+            Ok(id) if trusted.contains(&id) => continue,
             Ok(id) => declined.insert(id),
             Err(_) => unknown.insert(name.as_str()),
         };

@@ -1,0 +1,463 @@
+{
+  "functions": [
+    {
+      "citations": [
+        {
+          "name": "design.requirements.hooks.consent_hint_names",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.pending_consent",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.stdout_protocol",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "test"
+        }
+      ],
+      "determination": false,
+      "inputs": [
+        {
+          "rust_file": "tests/hook_stdout.rs",
+          "rust_item": "fn[sync_progress_stays_off_hook_stdout]",
+          "text": [
+            "/// A `SessionStart` that syncs (so sync reports progress) still answers every",
+            "/// agent with nothing but its own output: here, the consent hint for `crate-a`.",
+            "// {test}`design.requirements.hooks.stdout_protocol`",
+            "// {test}`design.requirements.hooks.pending_consent`",
+            "// {test}`design.requirements.hooks.consent_hint_names`",
+            "// {test}`design.requirements.output.quiet`",
+            "#[tokio::test(flavor = \"multi_thread\")]",
+            "async fn sync_progress_stays_off_hook_stdout() {",
+            "    with_fixture(TestMode::SimulationOnly, &[\"auto-enable0\"], async |ctx| {",
+            "        let workspace = ctx.workspace_root.clone().unwrap();",
+            "        for agent in [",
+            "            HookAgent::Claude,",
+            "            HookAgent::Codex,",
+            "            HookAgent::Copilot,",
+            "            HookAgent::Antigravity,",
+            "            HookAgent::Kiro,",
+            "        ] {",
+            "            let output = run_session_start(&ctx, agent, &workspace);",
+            "            let stdout = String::from_utf8_lossy(&output.stdout);",
+            "            assert!(output.status.success(), \"{agent:?} exit status\");",
+            "            assert!(",
+            "                stdout.contains(\"crate-a\"),",
+            "                \"{agent:?} should carry the consent hint, got: {stdout}\"",
+            "            );",
+            "            if agent == HookAgent::Kiro {",
+            "                // Kiro takes plain text, all of which becomes context.",
+            "                assert!(!stdout.contains(\"scanning\"), \"Kiro stdout: {stdout}\");",
+            "            } else {",
+            "                serde_json::from_slice::<Value>(&output.stdout)",
+            "                    .unwrap_or_else(|e| panic!(\"{agent:?} stdout is not JSON ({e}): {stdout}\"));",
+            "            }",
+            "        }",
+            "        Ok(())",
+            "    })",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.consent_hint_names"
+          ],
+          "requirements": "design.requirements.hooks.consent_hint_names",
+          "text": [
+            ":::{req} consent_hint_names",
+            "On `SessionStart`, when workspace dependencies ship plugins the user has neither enabled nor declined, Symposium MUST add context naming each of those dependencies once.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.pending_consent"
+          ],
+          "requirements": "design.requirements.hooks.pending_consent",
+          "text": [
+            ":::{example} pending_consent",
+            "A workspace depends on a crate that ships a plugin the user has not enabled or declined. When an agent starts a session, the `SessionStart` hook names that crate in the agent's context instead of asking, and for every agent that takes JSON its stdout parses as JSON. {cite}`design.requirements.hooks.no_prompt` {cite}`design.requirements.hooks.stdout_protocol`",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.stdout_protocol"
+          ],
+          "requirements": "design.requirements.hooks.stdout_protocol",
+          "text": [
+            ":::{req} stdout_protocol",
+            "A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST NOT reach stdout; Symposium MAY drop them, log them, or write them to stderr.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "I reviewed the whole test and the definitions matched by `design.requirements.hooks.*` and `design.requirements.output.*`. It runs a real `cargo agents hook <agent> session-start` for Claude, Codex, Copilot, Antigravity and Kiro in the auto-enable0 workspace, where dependency crate-a ships a plugin nobody has enabled or declined. For every agent it asserts a successful exit and that stdout names `crate-a`: that is the consent hint, cited as `consent_hint_names` and as the `pending_consent` example it is written for. For Kiro it asserts the sync's progress text (`scanning`) is absent from the plain-text stdout, and for the other four that the whole of stdout parses as JSON, which is `stdout_protocol` (nothing but the agent's response on stdout). The progress text can only be absent because the hook runs with a quiet `Output`, so `output.quiet` is cited too. Not cited, because not asserted: `consent_hint_defers` (the hint's pointer to `cargo agents sync`/`use` is never checked), `no_prompt` (stdin is a pipe and nothing checks that no question is asked, beyond the process finishing), `auto_sync_session_start` (the sync runs but its result is not examined), `discovery_hint`, `joined_context` (no plugin hook context) and the other output requirements (`capture`, `messages_stdout`, `warnings_stderr`, `display_path`). The Rust-item input snapshots the function with its comments and attributes, and the two glob inputs record the reviewed families so a change in either needs reassessment. **Refuted on review:** the `design.requirements.output.quiet` citation does not hold. The progress text the Kiro branch checks for (\"scanning N workspace dependencies\", src/sync.rs) is a tracing `ReportEvent::Info`, not an `Output` message; it stays off hook stdout because `prints_reports(is_hook, verbose)` in src/bin/cargo-agents.rs leaves the ReportLayer out for hook commands. The `Output` from `command_output` is never passed to `hook::run`, and the auto-sync path's own `Output::quiet()` (src/sync.rs) carries nothing this test observes. Breaking `Output::quiet` would not fail this test, so it is not a test of `output.quiet`; what it does observe is covered by `hooks.stdout_protocol`, `pending_consent` and `consent_hint_names`.",
+      "rust_item": "fn[sync_progress_stays_off_hook_stdout]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.hooks.canonical_output",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.claude_reload_skills",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.hook_output_captured",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.joined_context",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.stdout_protocol",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/hook_stdout.rs",
+          "rust_item": "fn[install_command_output_stays_off_hook_stdout]",
+          "text": [
+            "/// A plugin's install commands run on every dispatch of the hook that needs",
+            "/// them; what they print must not reach the agent's stdout.",
+            "// {test}`design.requirements.hooks.stdout_protocol`",
+            "// {test}`design.requirements.hooks.hook_output_captured`",
+            "// {test}`design.requirements.hooks.canonical_output`",
+            "// {test}`design.requirements.hooks.joined_context`",
+            "#[tokio::test(flavor = \"multi_thread\")]",
+            "// {test}`design.requirements.hooks.claude_reload_skills`",
+            "async fn install_command_output_stays_off_hook_stdout() {",
+            "    with_fixture(TestMode::SimulationOnly, &[\"install-noise0\"], async |ctx| {",
+            "        let output = run_session_start(&ctx, HookAgent::Claude, &ctx.tempdir);",
+            "        assert!(output.status.success());",
+            "        let stdout: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {",
+            "            panic!(",
+            "                \"stdout is not JSON ({e}): {}\",",
+            "                String::from_utf8_lossy(&output.stdout)",
+            "            )",
+            "        });",
+            "        assert_eq!(",
+            "            stdout,",
+            "            json!({",
+            "                \"hookSpecificOutput\": {",
+            "                    \"hookEventName\": \"SessionStart\",",
+            "                    \"additionalContext\": \"noisy plugin context\",",
+            "                    \"reloadSkills\": true,",
+            "                }",
+            "            })",
+            "        );",
+            "        assert!(String::from_utf8_lossy(&output.stderr).contains(\"installing noisy tool\"));",
+            "        Ok(())",
+            "    })",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.canonical_output"
+          ],
+          "requirements": "design.requirements.hooks.canonical_output",
+          "text": [
+            ":::{req} canonical_output",
+            "Symposium MUST translate a symposium-format plugin hook's output to the host agent's wire format.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.claude_reload_skills"
+          ],
+          "requirements": "design.requirements.hooks.claude_reload_skills",
+          "text": [
+            ":::{req} claude_reload_skills",
+            "Symposium's `SessionStart` response to Claude Code MUST set `reloadSkills` to `true`.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.hook_output_captured"
+          ],
+          "requirements": "design.requirements.hooks.hook_output_captured",
+          "text": [
+            ":::{req} hook_output_captured",
+            "Symposium MUST capture a plugin hook's stdout and stderr rather than let the hook inherit its own.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.joined_context"
+          ],
+          "requirements": "design.requirements.hooks.joined_context",
+          "text": [
+            ":::{req} joined_context",
+            "On `SessionStart`, `UserPromptSubmit` and `PostToolUse`, the response MUST carry the context of every source that supplied one, the built-in context first and then each plugin hook's in dispatch order.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.stdout_protocol"
+          ],
+          "requirements": "design.requirements.hooks.stdout_protocol",
+          "text": [
+            ":::{req} stdout_protocol",
+            "A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST NOT reach stdout; Symposium MAY drop them, log them, or write them to stderr.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "I reviewed the whole test and the definitions matched by `design.requirements.hooks.*`. The install-noise0 plugin has a symposium-format SessionStart hook whose installation requirement runs `echo installing noisy tool`, and whose script prints canonical `{\"SessionStart\":{\"additionalContext\":\"noisy plugin context\"}}`. The test asserts a successful exit, that stdout parses as JSON and equals exactly Claude's `hookSpecificOutput` object, and that the install command's text appears on stderr. `stdout_protocol`: the install command's output is not on stdout (an extra line would break the JSON parse and the exact equality) and went to stderr, which the requirement allows. `hook_output_captured`: the hook's own stdout is read by Symposium and delivered as context instead of being inherited. `canonical_output`: the canonical-form output of a symposium-format hook arrives in Claude's wire format. `joined_context`: the plugin hook's context is carried in the response. Hook gating, script spawning and the requirement's installation are setup, not asserted individually, so `hook_spawn_runnable`, `hook_stdin_payload` and `best_effort` are not cited.\n\n`claude_reload_skills`: the exact-equality check on Claude's output pins `\"reloadSkills\": true` in the `SessionStart` response.",
+      "rust_item": "fn[install_command_output_stays_off_hook_stdout]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.hooks.best_effort",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.stdout_protocol",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/hook_stdout.rs",
+          "rust_item": "fn[hook_runs_when_the_logs_dir_is_unwritable]",
+          "text": [
+            "// {test}`design.requirements.hooks.best_effort`",
+            "// {test}`design.requirements.hooks.stdout_protocol`",
+            "#[cfg(unix)]",
+            "#[tokio::test(flavor = \"multi_thread\")]",
+            "async fn hook_runs_when_the_logs_dir_is_unwritable() {",
+            "    use std::os::unix::fs::PermissionsExt;",
+            "",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"plugins0\", \"workspace0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let workspace = ctx.workspace_root.clone().unwrap();",
+            "            let logs = ctx.sym.config_dir().join(\"logs\");",
+            "            std::fs::create_dir_all(&logs)?;",
+            "            std::fs::set_permissions(&logs, std::fs::Permissions::from_mode(0o500))?;",
+            "            let permissions_enforced = std::fs::write(logs.join(\"probe\"), \"\").is_err();",
+            "            let output = run_session_start(&ctx, HookAgent::Claude, &workspace);",
+            "            std::fs::set_permissions(&logs, std::fs::Permissions::from_mode(0o700))?;",
+            "            if !permissions_enforced {",
+            "                return Ok(());",
+            "            }",
+            "",
+            "            let stderr = String::from_utf8_lossy(&output.stderr);",
+            "            assert!(output.status.success(), \"stderr: {stderr}\");",
+            "            assert!(!stderr.contains(\"panicked\"), \"stderr: {stderr}\");",
+            "            serde_json::from_slice::<Value>(&output.stdout).unwrap_or_else(|e| {",
+            "                panic!(",
+            "                    \"stdout is not JSON ({e}): {}\",",
+            "                    String::from_utf8_lossy(&output.stdout)",
+            "                )",
+            "            });",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.best_effort"
+          ],
+          "requirements": "design.requirements.hooks.best_effort",
+          "text": [
+            ":::{req} best_effort",
+            "Apart from a plugin hook that blocks, a failure while auto-syncing, writing logs, acquiring or refreshing a hook's sources, or running a single plugin hook MUST NOT stop `cargo agents hook` from answering the agent.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.stdout_protocol"
+          ],
+          "requirements": "design.requirements.hooks.stdout_protocol",
+          "text": [
+            ":::{req} stdout_protocol",
+            "A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST NOT reach stdout; Symposium MAY drop them, log them, or write them to stderr.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "I reviewed the whole test and the definitions matched by `design.requirements.hooks.*`. On Unix it runs `init`, makes the config's `logs` directory read-only (0o500), confirms by a probe write that the permission is enforced (otherwise it returns early, e.g. when run as root), runs a real SessionStart hook, restores the mode, and asserts a successful exit, no `panicked` on stderr and stdout that parses as JSON. `best_effort`: a failure while writing logs must not stop the hook answering the agent; the successful exit with a JSON response is exactly that. `stdout_protocol`: the log failure must not leak onto stdout, which the JSON parse of all of stdout checks. Everything else the hook does (auto-sync, consent hint) is incidental to this fixture and not asserted, so no other hook requirement is cited. The Rust-item input snapshots the function and the hooks glob input records the reviewed family.",
+      "rust_item": "fn[hook_runs_when_the_logs_dir_is_unwritable]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.hooks.auto_sync_session_start",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.stdout_protocol",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/hook_stdout.rs",
+          "rust_item": "fn[rejected_skill_warning_stays_off_hook_stdout]",
+          "text": [
+            "// {test}`design.requirements.hooks.stdout_protocol`",
+            "// {test}`design.requirements.hooks.auto_sync_session_start`",
+            "#[tokio::test(flavor = \"multi_thread\")]",
+            "async fn rejected_skill_warning_stays_off_hook_stdout() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"workspace-plugin0\"],",
+            "        async |mut ctx| {",
+            "            let workspace = ctx.workspace_root.clone().unwrap();",
+            "            let bad = workspace.join(\"skills/bad\");",
+            "            std::fs::create_dir_all(&bad)?;",
+            "            std::fs::write(",
+            "                bad.join(\"SKILL.md\"),",
+            "                \"---\\nname: \\\"a/b\\\"\\ndescription: An unsafe name.\\n---\\n\",",
+            "            )?;",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "",
+            "            let output = run_session_start(&ctx, HookAgent::Claude, &workspace);",
+            "            assert!(output.status.success());",
+            "            let stdout = String::from_utf8_lossy(&output.stdout);",
+            "            assert!(!stdout.contains(\"plain directory name\"), \"stdout: {stdout}\");",
+            "            serde_json::from_slice::<Value>(&output.stdout)",
+            "                .unwrap_or_else(|e| panic!(\"stdout is not JSON ({e}): {stdout}\"));",
+            "            assert!(workspace.join(\".claude/skills/ws-hello\").is_dir());",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.auto_sync_session_start"
+          ],
+          "requirements": "design.requirements.hooks.auto_sync_session_start",
+          "text": [
+            ":::{req} auto_sync_session_start",
+            "On `SessionStart`, when `auto-sync` is enabled and the hook's working directory is in a workspace, Symposium MUST sync skills before dispatching, checking upstream sources for changes.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.stdout_protocol"
+          ],
+          "requirements": "design.requirements.hooks.stdout_protocol",
+          "text": [
+            ":::{req} stdout_protocol",
+            "A `cargo agents hook` process MUST write nothing to stdout except the agent's hook response. Progress messages and the output of plugin install commands MUST NOT reach stdout; Symposium MAY drop them, log them, or write them to stderr.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "I reviewed the whole test and the definitions matched by `design.requirements.hooks.*`. It adds a workspace skill whose frontmatter name is `a/b` (unsafe, so rejected with a `plain directory name` warning) next to the valid `ws-hello` skill, runs `init`, then a real SessionStart hook for Claude. It asserts a successful exit, that the warning text is not on stdout, that stdout parses as JSON, and that `.claude/skills/ws-hello` was installed. `stdout_protocol`: the warning about the rejected skill is a progress/diagnostic message and must stay off stdout. `auto_sync_session_start`: the SessionStart hook in a workspace synced skills before answering, shown by the installed `ws-hello` directory (the rejection of the bad skill does not stop the sync). `best_effort` is not cited because a rejected skill is reported as a warning rather than a failed sync, and nothing else is asserted about the answer. The Rust-item input snapshots the function and the hooks glob input records the reviewed family.",
+      "rust_item": "fn[rejected_skill_warning_stays_off_hook_stdout]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.internal.internal_detail",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/hook_stdout.rs",
+          "rust_item": "fn[run_session_start]",
+          "text": [
+            "/// Run `cargo agents hook <agent> session-start` as the agent would, from `cwd`.",
+            "// {impl}`design.requirements.internal.internal_detail`",
+            "fn run_session_start(",
+            "    ctx: &TestContext,",
+            "    agent: HookAgent,",
+            "    cwd: &std::path::Path,",
+            ") -> std::process::Output {",
+            "    use std::io::Write;",
+            "",
+            "    let step = HookStep::session_start();",
+            "    let payload = agent_event(agent, step.event())",
+            "        .unwrap()",
+            "        .translate_input(&step.to_input_event(&cwd.display().to_string()))",
+            "        .to_string()",
+            "        .unwrap();",
+            "",
+            "    let binary = std::env::var(\"CARGO_BIN_EXE_cargo-agents\").expect(\"must run via cargo test\");",
+            "    let mut child = std::process::Command::new(binary)",
+            "        .args([\"hook\", agent.as_str(), \"session-start\"])",
+            "        .env(\"SYMPOSIUM_HOME\", ctx.sym.config_dir())",
+            "        .current_dir(cwd)",
+            "        .stdin(std::process::Stdio::piped())",
+            "        .stdout(std::process::Stdio::piped())",
+            "        .stderr(std::process::Stdio::piped())",
+            "        .spawn()",
+            "        .expect(\"spawn cargo-agents\");",
+            "    child",
+            "        .stdin",
+            "        .take()",
+            "        .unwrap()",
+            "        .write_all(payload.as_bytes())",
+            "        .unwrap();",
+            "    child.wait_with_output().unwrap()",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.internal.internal_detail"
+          ],
+          "requirements": "design.requirements.internal.internal_detail",
+          "text": [
+            ":::{req} internal_detail",
+            "A function cited with this requirement MUST NOT introduce end-user-observable behavior beyond the requirements its callers cite.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "I reviewed the whole helper and the single definition matched by `design.requirements.internal.*`. It builds the agent's SessionStart payload from the test harness step, translates it to the agent's wire format, spawns the built `cargo-agents hook <agent> session-start` with `SYMPOSIUM_HOME` set to the test config dir and the given cwd, writes the payload on stdin and returns the captured output. It reproduces how an agent invokes the hook and adds no behavior of its own: every observable result belongs to the process under test and is asserted by the callers, which cite the hook requirements. So `internal_detail` is the only applicable requirement and no end-user-observable behavior is introduced here.",
+      "rust_item": "fn[run_session_start]"
+    }
+  ],
+  "rust_file": "tests/hook_stdout.rs"
+}

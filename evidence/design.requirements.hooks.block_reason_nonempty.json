@@ -1,0 +1,43 @@
+{
+  "determination": true,
+  "inputs": [
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "fn[blocked_response]",
+      "text": [
+        "/// The response for a plugin hook that exited 2, which the plugin contract",
+        "/// defines as \"block, with stderr as the reason\". A tool call is denied",
+        "/// through the canonical decision, so each agent receives the denial in the",
+        "/// form it honors (Antigravity ignores exit codes, Copilot drops the reason",
+        "/// on a non-zero exit). Every other event passes exit 2 and the reason",
+        "/// through, for the agent to apply its own blocking semantics.",
+        "// {impl}`design.requirements.hooks.block_reason_stderr`",
+        "// {impl}`design.requirements.hooks.block_pre_tool_use_deny`",
+        "// {impl}`design.requirements.hooks.block_other_exit_2`",
+        "// {impl}`design.requirements.hooks.block_reason_nonempty`",
+        "fn blocked_response(",
+        "    handler: &dyn crate::hook_schema::ErasedAgentHookEvent,",
+        "    event: HookEvent,",
+        "    stderr: &[u8],",
+        ") -> HookResponse {",
+        "    let reason = String::from_utf8_lossy(stderr).trim().to_string();",
+        "    let reason = if reason.is_empty() {",
+        "        \"blocked by a plugin hook\".to_string()",
+        "    } else {",
+        "        reason",
+        "    };",
+        "    tracing::info!(?event, %reason, \"plugin hook blocked\");",
+        "",
+        "    if event == HookEvent::PreToolUse {",
+        "        let deny = OutputEvent::PreToolUse(symposium::PreToolUseOutput::deny(reason));",
+        "        handler.respond(&handler.translate_output(&deny).to_hook_output())",
+        "    } else {",
+        "        HookResponse::blocked(&reason)",
+        "    }",
+        "}"
+      ]
+    }
+  ],
+  "rationale": "**Implementation.** `blocked_response` trims the decoded stderr and substitutes `\"blocked by a plugin hook\"` when it is empty, so both the `PreToolUse` denial reason and the stderr of `HookResponse::blocked` are non-empty. Kiro's `respond` has the same fallback for a deny without a reason.\n\n**Tests.** Untested (every blocking fixture writes stderr). Judged from code.",
+  "requirement": "When a blocking plugin hook writes nothing to stderr, Symposium MUST give the agent a non-empty generic block reason."
+}

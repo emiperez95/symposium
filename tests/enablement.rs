@@ -10,6 +10,7 @@ use symposium_testlib::{HookStep, TestContext, TestMode, with_fixture};
 
 /// Every installed skill directory under `parent` named `<skill_name>` or
 /// `<skill_name>-<hash>`.
+// {impl}`design.requirements.internal.internal_detail`
 fn find_installed_skills(parent: &Path, skill_name: &str) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(parent) else {
         return Vec::new();
@@ -32,6 +33,7 @@ fn find_installed_skills(parent: &Path, skill_name: &str) -> Vec<PathBuf> {
 }
 
 /// The unique installed skill directory with this name. Panics on 0 or >1.
+// {impl}`design.requirements.internal.internal_detail`
 fn find_installed_skill(parent: &Path, skill_name: &str) -> PathBuf {
     let mut hits = find_installed_skills(parent, skill_name);
     assert_eq!(
@@ -43,11 +45,13 @@ fn find_installed_skill(parent: &Path, skill_name: &str) -> PathBuf {
     hits.pop().unwrap()
 }
 
+// {impl}`design.requirements.internal.internal_detail`
 fn read_config(ctx: &TestContext) -> String {
     std::fs::read_to_string(ctx.sym.config_dir().join("config.toml")).unwrap()
 }
 
 /// Run `f` with a JSON report layer installed and return the drained events.
+// {impl}`design.requirements.internal.internal_detail`
 async fn with_report<F>(f: F) -> Vec<serde_json::Value>
 where
     F: AsyncFnOnce(),
@@ -69,6 +73,12 @@ where
 /// `use <dep>` records a workspace-scoped entry and installs the
 /// dependency's embedded skills right away; running it again changes
 /// nothing.
+// {test}`design.requirements.consent.unconsented_inactive`
+// {test}`design.requirements.consent.consented_active`
+// {test}`design.requirements.consent.crate_name_matching`
+// {test}`design.requirements.enablement.use_scope`
+// {test}`design.requirements.enablement.use_idempotent`
+// {test}`design.requirements.enablement.use_syncs`
 #[tokio::test]
 async fn use_records_workspace_entry_and_installs() {
     with_fixture(
@@ -108,6 +118,9 @@ async fn use_records_workspace_entry_and_installs() {
 }
 
 /// `--global` records a plain-string entry with no workspace scope.
+// {test}`design.requirements.consent.crate_name_matching`
+// {test}`design.requirements.enablement.use_scope`
+// {test}`design.requirements.enablement.use_idempotent`
 #[tokio::test]
 async fn use_global_records_unscoped_entry() {
     with_fixture(
@@ -137,6 +150,7 @@ async fn use_global_records_unscoped_entry() {
 
 /// A name that is neither a workspace dependency nor a registry hit is
 /// rejected instead of recorded.
+// {test}`design.requirements.enablement.use_unknown_rejected`
 #[tokio::test]
 async fn use_unknown_name_errors() {
     with_fixture(
@@ -166,6 +180,7 @@ async fn use_unknown_name_errors() {
 
 /// A registry is a trust root, so `use`-ing something it already offers is a
 /// no-op rather than a recorded entry.
+// {test}`design.requirements.enablement.use_registry_noop`
 #[tokio::test]
 async fn use_registry_content_is_a_noop() {
     with_fixture(TestMode::SimulationOnly, &["plugins0"], async |mut ctx| {
@@ -182,6 +197,8 @@ async fn use_registry_content_is_a_noop() {
     .unwrap();
 }
 
+// {test}`design.requirements.consent.registry_name_exact`
+// {test}`design.requirements.enablement.use_unknown_rejected`
 #[tokio::test]
 async fn use_matches_registry_plugin_names_exactly() {
     with_fixture(
@@ -208,6 +225,9 @@ async fn use_matches_registry_plugin_names_exactly() {
 
 /// A crate name matches the way cargo matches it, so `crate_a` names the
 /// dependency `crate-a` in `auto-enable`, `use` and `disable` alike.
+// {test}`design.requirements.consent.crate_name_matching`
+// {test}`design.requirements.consent.consented_active`
+// {test}`design.requirements.consent.disable_wins`
 #[tokio::test]
 async fn plugins_entries_match_crate_names_like_cargo() {
     with_fixture(
@@ -243,6 +263,12 @@ async fn plugins_entries_match_crate_names_like_cargo() {
 /// neither wakes the dormant `gateless-plugin` nor is taken for a crate, and
 /// `disable = ["gateless_plugin"]` does not block it. `auto-enable` is consent
 /// for dependencies, so it wakes no registry plugin whatever the spelling.
+// {test}`design.requirements.consent.registry_name_exact`
+// {test}`design.requirements.consent.auto_enable_dependencies_only`
+// {test}`design.requirements.consent.dormant_inactive`
+// {test}`design.requirements.consent.use_wakes_dormant`
+// {test}`design.requirements.consent.unresolved_use_skipped`
+// {test}`design.requirements.enablement.use_disabled_rejected`
 #[tokio::test]
 async fn plugins_entries_match_registry_plugin_names_exactly() {
     with_fixture(
@@ -282,6 +308,9 @@ async fn plugins_entries_match_registry_plugin_names_exactly() {
 
 /// `use` wakes a dormant registry plugin (one no dependency gates), and
 /// `--remove` puts it back to sleep, reaping its skills.
+// {test}`design.requirements.consent.dormant_inactive`
+// {test}`design.requirements.consent.use_wakes_dormant`
+// {test}`design.requirements.enablement.use_syncs`
 #[tokio::test]
 async fn use_wakes_and_remove_sleeps_a_dormant_plugin() {
     with_fixture(
@@ -310,6 +339,8 @@ async fn use_wakes_and_remove_sleeps_a_dormant_plugin() {
 
 /// `--remove` drops the entry, reaps the installed skills, and errors when
 /// there is nothing left to remove.
+// {test}`design.requirements.enablement.use_syncs`
+// {test}`design.requirements.enablement.remove_requires_entry`
 #[tokio::test]
 async fn use_remove_reaps_and_then_errors() {
     with_fixture(
@@ -347,6 +378,8 @@ async fn use_remove_reaps_and_then_errors() {
 
 /// `--remove --global` targets only the global entry, leaving a
 /// workspace-scoped one alone.
+// {test}`design.requirements.enablement.use_scope`
+// {test}`design.requirements.enablement.remove_requires_entry`
 #[tokio::test]
 async fn use_remove_respects_scope() {
     with_fixture(
@@ -376,6 +409,8 @@ async fn use_remove_respects_scope() {
 
 /// Search finds both a registry's standalone skills and its plugin entries,
 /// tagged with the instance they came from.
+// {test}`design.requirements.enablement.search_matches`
+// {test}`design.requirements.enablement.search_origin`
 #[tokio::test]
 async fn search_finds_registry_content_tagged_by_origin() {
     with_fixture(TestMode::SimulationOnly, &["plugins0"], async |mut ctx| {
@@ -415,6 +450,7 @@ async fn search_finds_registry_content_tagged_by_origin() {
     .unwrap();
 }
 
+// {test}`design.requirements.enablement.search_once`
 #[tokio::test]
 async fn search_lists_a_registry_entry_once() {
     with_fixture(TestMode::SimulationOnly, &["plugins0"], async |ctx| {
@@ -430,6 +466,20 @@ async fn search_lists_a_registry_entry_once() {
             .filter(|m| m.origin == "user-plugins" && m.name == "tokio-guidance")
             .collect();
         assert_eq!(hits.len(), 1, "{matches:#?}");
+
+        // A plugin named differently from its entry directory is still one hit.
+        let entry = ctx.sym.config_dir().join("plugins/foo-tools");
+        std::fs::create_dir_all(&entry)?;
+        std::fs::write(
+            entry.join("Symposium.toml"),
+            "name = \"foo\"\ndepends-on = [\"*\"]\n",
+        )?;
+        let matches = symposium::search_command::find_matches(&ctx.sym, "foo").await;
+        let hits: Vec<_> = matches
+            .iter()
+            .filter(|m| m.origin == "user-plugins" && (m.name == "foo" || m.name == "foo-tools"))
+            .collect();
+        assert_eq!(hits.len(), 1, "{matches:#?}");
         Ok(())
     })
     .await
@@ -438,6 +488,8 @@ async fn search_lists_a_registry_entry_once() {
 
 /// The rendered report groups hits under their origin and carries the
 /// per-hit detail.
+// {test}`design.requirements.enablement.search_matches`
+// {test}`design.requirements.enablement.search_origin`
 #[tokio::test]
 async fn search_renders_grouped_by_origin() {
     with_fixture(TestMode::SimulationOnly, &["plugins0"], async |ctx| {
@@ -484,6 +536,7 @@ async fn search_renders_grouped_by_origin() {
 /// `disable` is the last word, so `use` on a declined plugin is refused
 /// rather than recorded. Recording it would report success and then install
 /// nothing, since activation refuses the plugin too.
+// {test}`design.requirements.enablement.use_disabled_rejected`
 #[tokio::test]
 async fn use_on_a_disabled_plugin_errors() {
     with_fixture(
@@ -514,6 +567,7 @@ async fn use_on_a_disabled_plugin_errors() {
 
 /// `status` reports an undecided dependency plugin as a candidate, then as
 /// active with its `use` root once enabled — and names declined entries.
+// {test}`design.requirements.enablement.status_state`
 #[tokio::test]
 async fn status_reports_candidate_then_used() {
     with_fixture(
@@ -572,7 +626,42 @@ async fn status_reports_candidate_then_used() {
     .unwrap();
 }
 
+/// `disable` does not reach a registry plugin, so status lists it once, in the
+/// state activation gives it, not also as declined.
+// {test}`design.requirements.enablement.status_once`
+// {test}`design.requirements.enablement.status_state`
+#[tokio::test]
+async fn status_lists_a_disabled_registry_plugin_once() {
+    with_fixture(
+        TestMode::SimulationOnly,
+        &["dormant-plugin0"],
+        async |mut ctx| {
+            ctx.symposium(&["init", "--add-agent", "claude"]).await?;
+            let workspace_root = ctx.workspace_root.clone().unwrap();
+            ctx.sym
+                .config
+                .plugins
+                .disable
+                .push("gateless-plugin".to_string());
+
+            let deps = ctx.sym.workspace(&workspace_root);
+            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;
+            let listed: Vec<_> = entries
+                .iter()
+                .filter(|e| e.name == "gateless-plugin")
+                .collect();
+            assert_eq!(listed.len(), 1, "{entries:#?}");
+            assert_eq!(listed[0].state, StatusState::Dormant);
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+}
+
 /// A registry plugin nothing gates is reported dormant until `use` names it.
+// {test}`design.requirements.enablement.status_state`
+// {test}`design.requirements.enablement.search_origin`
 #[tokio::test]
 async fn status_reports_dormant_registry_plugin() {
     with_fixture(
@@ -630,6 +719,7 @@ async fn status_reports_dormant_registry_plugin() {
 /// inherits the developer's terminal, so a stdin-only check would make this
 /// test hang on an interactive machine. Quiet and capturing outputs — the
 /// ones hook dispatch and the library harness use — are never interactive.
+// {test}`design.requirements.consent.unconsented_inactive`
 // {test}`design.requirements.hooks.no_prompt`
 #[tokio::test]
 async fn consent_prompt_never_fires_non_interactively() {
@@ -683,6 +773,9 @@ async fn consent_prompt_never_fires_non_interactively() {
 
 /// Recorded consent is durable in both directions: approval enables and the
 /// candidate stops being offered; a decline is remembered too.
+// {test}`design.requirements.consent.consented_active`
+// {test}`design.requirements.consent.approval_recorded`
+// {test}`design.requirements.consent.decline_recorded`
 #[tokio::test]
 async fn apply_consent_records_both_answers() {
     with_fixture(
@@ -717,6 +810,9 @@ async fn apply_consent_records_both_answers() {
 
 /// Non-interactively, pending candidates surface as `SessionStart` context
 /// rather than a prompt — and the agent is told not to act on them itself.
+// {test}`design.requirements.hooks.consent_hint_names`
+// {test}`design.requirements.hooks.consent_hint_defers`
+// {test}`design.requirements.hooks.pending_consent`
 #[tokio::test]
 async fn session_start_hints_pending_candidates() {
     with_fixture(
@@ -764,6 +860,7 @@ async fn session_start_hints_pending_candidates() {
 /// A plugin named by both `use` and `disable` is reported declined, matching
 /// what activation does with it. The two must agree, or `status` says a
 /// plugin is active while it never runs.
+// {test}`design.requirements.enablement.status_state`
 #[tokio::test]
 async fn status_reports_a_used_but_disabled_plugin_as_declined() {
     with_fixture(
@@ -792,6 +889,9 @@ async fn status_reports_a_used_but_disabled_plugin_as_declined() {
     .unwrap();
 }
 
+// {test}`design.requirements.consent.crate_name_matching`
+// {test}`design.requirements.enablement.status_once`
+// {test}`design.requirements.enablement.status_state`
 #[tokio::test]
 async fn status_lists_each_declined_name_once() {
     with_fixture(
@@ -830,6 +930,8 @@ async fn status_lists_each_declined_name_once() {
     .unwrap();
 }
 
+// {test}`design.requirements.consent.unresolved_use_skipped`
+// {test}`design.requirements.enablement.status_state`
 #[tokio::test]
 async fn status_reports_a_pluginless_dependency_only_when_used() {
     with_fixture(
@@ -884,6 +986,8 @@ async fn status_reports_a_pluginless_dependency_only_when_used() {
 // A registry plugin wins name resolution over a same-named dependency.
 // Choosing it must not also grant consent to the dependency's embedded plugin.
 
+// {test}`design.requirements.consent.use_resolves_registry_first`
+// {test}`design.requirements.consent.registry_use_not_dependency_consent`
 #[tokio::test]
 async fn choosing_registry_plugin_does_not_enable_same_named_dependency() {
     with_fixture(TestMode::SimulationOnly, &["auto-enable0"], async |mut ctx| {

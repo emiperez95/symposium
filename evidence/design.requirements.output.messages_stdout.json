@@ -1,0 +1,131 @@
+{
+  "determination": true,
+  "inputs": [
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[normal]",
+      "text": [
+        "    // {impl}`design.requirements.output.messages_stdout`",
+        "    // {impl}`design.requirements.output.warnings_stderr`",
+        "    pub fn normal() -> Self {",
+        "        Self {",
+        "            quiet: false,",
+        "            capture: None,",
+        "        }",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[emit]",
+      "text": [
+        "    // {impl}`design.requirements.output.quiet`",
+        "    // {impl}`design.requirements.output.capture`",
+        "    // {impl}`design.requirements.output.messages_stdout`",
+        "    fn emit(&self, msg: String) {",
+        "        if self.quiet {",
+        "            return;",
+        "        }",
+        "        if let Some(buf) = &self.capture {",
+        "            buf.lock().unwrap().push(msg);",
+        "        } else {",
+        "            println!(\"{msg}\");",
+        "        }",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[already_ok]",
+      "text": [
+        "    /// Something was already in place, no action needed.",
+        "    // {impl}`design.requirements.output.quiet`",
+        "    // {impl}`design.requirements.output.capture`",
+        "    // {impl}`design.requirements.output.messages_stdout`",
+        "    pub fn already_ok(&self, msg: impl std::fmt::Display) {",
+        "        self.emit(format!(\"🟢 {msg}\"));",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[done]",
+      "text": [
+        "    /// An action was taken successfully (created, added, wrote).",
+        "    // {impl}`design.requirements.output.quiet`",
+        "    // {impl}`design.requirements.output.capture`",
+        "    // {impl}`design.requirements.output.messages_stdout`",
+        "    pub fn done(&self, msg: impl std::fmt::Display) {",
+        "        self.emit(format!(\"✅ {msg}\"));",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[added]",
+      "text": [
+        "    /// A new item was discovered or added.",
+        "    // {impl}`design.requirements.output.quiet`",
+        "    // {impl}`design.requirements.output.capture`",
+        "    // {impl}`design.requirements.output.messages_stdout`",
+        "    pub fn added(&self, msg: impl std::fmt::Display) {",
+        "        self.emit(format!(\"➕ {msg}\"));",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[removed]",
+      "text": [
+        "    /// An item was removed.",
+        "    // {impl}`design.requirements.output.quiet`",
+        "    // {impl}`design.requirements.output.capture`",
+        "    // {impl}`design.requirements.output.messages_stdout`",
+        "    pub fn removed(&self, msg: impl std::fmt::Display) {",
+        "        self.emit(format!(\"➖ {msg}\"));",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[info]",
+      "text": [
+        "    /// Informational status (not an action).",
+        "    // {impl}`design.requirements.output.quiet`",
+        "    // {impl}`design.requirements.output.capture`",
+        "    // {impl}`design.requirements.output.messages_stdout`",
+        "    pub fn info(&self, msg: impl std::fmt::Display) {",
+        "        self.emit(format!(\"ℹ️  {msg}\"));",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[blank]",
+      "text": [
+        "    /// Print a blank line for spacing.",
+        "    // {impl}`design.requirements.output.quiet`",
+        "    // {impl}`design.requirements.output.capture`",
+        "    // {impl}`design.requirements.output.messages_stdout`",
+        "    pub fn blank(&self) {",
+        "        self.emit(String::new());",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[println]",
+      "text": [
+        "    /// Print arbitrary text (for prompts, headers, etc.).",
+        "    // {impl}`design.requirements.output.quiet`",
+        "    // {impl}`design.requirements.output.capture`",
+        "    // {impl}`design.requirements.output.messages_stdout`",
+        "    pub fn println(&self, msg: impl std::fmt::Display) {",
+        "        self.emit(format!(\"{msg}\"));",
+        "    }"
+      ]
+    }
+  ],
+  "rationale": "`Output::normal()` sets `quiet: false, capture: None`. Every non-warning helper (`already_ok`, `done`, `added`, `removed`, `info`, `blank`, `println`) calls `emit`, which, not quiet and not capturing, calls `println!` (stdout). Only `warn` uses `emit_err`/stderr.\n\nUntested: no test runs a normal `Output` and inspects stdout. Judged from code.",
+  "requirement": "A normal `Output` MUST print every message other than a warning to stdout."
+}
