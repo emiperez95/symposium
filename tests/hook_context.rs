@@ -86,3 +86,36 @@ async fn post_tool_use_keeps_every_plugin_context() {
     .await
     .unwrap();
 }
+
+/// A hook in the host agent's own format receives the agent's payload byte
+/// for byte, including fields Symposium does not model.
+#[tokio::test(flavor = "multi_thread")]
+async fn native_hook_receives_the_payload_unchanged() {
+    with_fixture(TestMode::SimulationOnly, &["native-input0"], async |ctx| {
+        let workspace = ctx.workspace_root.clone().unwrap();
+        let handler =
+            agent_event(HookAgent::Antigravity, HookStep::session_start().event()).unwrap();
+        let mut payload: Value = serde_json::from_str(
+            &handler
+                .translate_input(
+                    &HookStep::session_start().to_input_event(&workspace.display().to_string()),
+                )
+                .to_string()
+                .unwrap(),
+        )
+        .unwrap();
+        payload["unmodeledField"] = Value::from("kept");
+        ctx.invoke_hook(
+            HookAgent::Antigravity,
+            HookStep::session_start().event(),
+            &payload,
+        )
+        .await
+        .unwrap();
+        let received = std::fs::read_to_string(workspace.join("received.json"))?;
+        assert_eq!(received, serde_json::to_string(&payload)?);
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
