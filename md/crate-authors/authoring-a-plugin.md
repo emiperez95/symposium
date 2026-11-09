@@ -24,7 +24,7 @@ See the [plugin definition reference](../reference/plugin-definition.md) for the
 
 ### Will users get every crate from all their dependencies by default?
 
-No, the default is that Symposium makes users away when there are suggested plugin for their workspace, but users must explicitly run `cargo agents sync` and then agree for those plugins to be enabled. However, once a plugin has been enabled in one workspace, it will automatically be enabled in other workspaces.
+No, the default is that Symposium makes users aware when there are suggested plugin for their workspace, but users must explicitly run `cargo agents sync` and then agree for those plugins to be enabled. Approving a plugin in that prompt records it in the global `auto-enable` list, so it is enabled in your other workspaces too; `cargo agents use` enables it only for the current workspace unless you pass `--global`.
 
 NB: Plugins in the [recommendations repository][rr] are reviewed before they are merged so they do not require explicit confirmation.
 
