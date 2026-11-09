@@ -1,5 +1,5 @@
 {
-  "determination": true,
+  "determination": false,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -78,6 +78,7 @@
         "        if let Some(",
         "            AcquiredRunnable::ResolvedScript { path, .. } | AcquiredRunnable::ResolvedExec { path },",
         "        ) = &a.runnable",
+        "            && path.is_absolute()",
         "        {",
         "            env.push((format!(\"SYMPOSIUM_{key}\"), path.display().to_string()));",
         "            if let Some(parent) = path.parent() {",
@@ -393,6 +394,6 @@
       ]
     }
   ],
-  "rationale": "**Implementation.** `build_env` sets `SYMPOSIUM_DIR_<env_safe(name)>` to `base` for each acquired installation (requirements plus command, from `build_spawn_spec`). `acquire_installation` takes `base` from the acquired source, which is `Some` only for a Symposium-managed cache/clone (scoped cargo, github) and `None` for source-less installations and global cargo (`AcquiredInstallation::base` doc). A requirement that fails to acquire contributes nothing (best-effort). `spawn_from_spec` applies the env.\n\n**Tests (pass).** `src/hook.rs` `build_env_sets_dir_and_name_vars` (`SYMPOSIUM_DIR_rtk` set, none for a source-less install), `build_env_no_runnable_no_vars` (set even without a runnable), `build_env_global_cargo_skips_env_and_path` (none for global cargo), `env_safe_sanitizes_punctuation`. `cargo test -q --lib hook`: 205 passed. The real cache path through `acquire_installation` is not exercised end to end; judged from code.",
+  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
   "requirement": "Symposium MUST run a plugin hook with `SYMPOSIUM_DIR_<name>` set to the directory of each of its installations that has a Symposium-managed cache, with `<name>` formed as for `SYMPOSIUM_<name>`."
 }

@@ -175,7 +175,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -202,6 +202,7 @@
             "        if let Some(",
             "            AcquiredRunnable::ResolvedScript { path, .. } | AcquiredRunnable::ResolvedExec { path },",
             "        ) = &a.runnable",
+            "            && path.is_absolute()",
             "        {",
             "            env.push((format!(\"SYMPOSIUM_{key}\"), path.display().to_string()));",
             "            if let Some(parent) = path.parent() {",
@@ -259,7 +260,7 @@
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Emits `SYMPOSIUM_DIR_<name>` for each installation with a managed base (`hook_env_dir_var`), `SYMPOSIUM_<name>` for each absolute resolved runnable (`hook_env_path_var`; a `GlobalExec` path-lookup runnable is not absolute and gets none), and prepends their parent dirs to `PATH` in reverse order so the command (pushed last) comes first (`hook_env_path_prepend`). No PATH entry is emitted when there is nothing to prepend. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
       "rust_item": "fn[build_env]"
     },
     {
@@ -674,7 +675,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -757,7 +758,7 @@
             "            agent,",
             "            event,",
             "            &sym_input,",
-            "            payload.as_ref(),",
+            "            input,",
             "            prior_output,",
             "            builtin_sym_output.additional_context().map(String::from),",
             "            &deps,",
@@ -908,7 +909,7 @@
           "requirements": "design.requirements.hooks.source_refresh_session_start",
           "text": [
             ":::{req} source_refresh_session_start",
-            "On `SessionStart`, when `auto-sync` is enabled, Symposium MUST check upstream for a newer version of each applicable plugin hook source that is already installed.",
+            "On `SessionStart`, when `auto-sync` is enabled, Symposium MUST check upstream for a newer version of each applicable plugin hook source that it caches and has already installed.",
             ":::"
           ]
         },
@@ -924,7 +925,7 @@
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Covered branches: an event the agent does not support bails (`unsupported_event`); a payload that is not an occurrence answers with the agent's neutral output and skips sync and dispatch (`non_occurrence_neutral`, `non_occurrence_no_dispatch`); otherwise it runs auto-sync (`auto_sync_session_start`, non-fatal per `best_effort`), the `SessionStart` source prewarm when auto-sync is on (`source_refresh_session_start`), the builtin and then plugin dispatch with the builtin output and context first (`merge_later_wins`, `joined_context`), and converts a block (`exit_2_stops`) into `blocked_response` (`block_reason_stderr`, `block_pre_tool_use_deny`, `block_other_exit_2`).\n\nA malformed or unparsable payload for a supported event makes `handler.parse_input` fail; the error propagates and `run` exits with a failure status without writing to stdout (`malformed_payload_fails`). No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
       "rust_item": "fn[execute_hook]"
     },
     {
@@ -1063,7 +1064,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -1135,7 +1136,7 @@
           "requirements": "design.requirements.hooks.hook_trace",
           "text": [
             ":::{req} hook_trace",
-            "When `SYMPOSIUM_HOOK_TRACE` names a file, `cargo agents hook` MUST append one JSON line per answered event recording the agent, the event, the input, the output, the exit code and stderr.",
+            "When `SYMPOSIUM_HOOK_TRACE` names a file, `cargo agents hook` MUST append one JSON line per answered event recording the agent, the event, the input, the output when it is JSON (otherwise `null`), the exit code and stderr.",
             ":::"
           ]
         },
@@ -1184,7 +1185,7 @@
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Writes only the response's stdout to stdout (`stdout_protocol`, existing inline citation) and its stderr to stderr, exits with the response's exit code (which carries exit 2 for `block_other_exit_2`), appends the trace line first (`hook_trace`), and exits with failure when `execute_hook` errors (`unsupported_event`).\n\nWhen reading stdin fails, `run` returns `ExitCode::SUCCESS` before writing anything (`unreadable_payload_succeeds`). When `execute_hook` errors, whether for an unsupported event (`unsupported_event`) or a malformed payload (`malformed_payload_fails`), `run` returns `ExitCode::FAILURE` and writes nothing to stdout. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
       "rust_item": "fn[run]"
     },
     {
@@ -1198,7 +1199,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -1259,12 +1260,12 @@
           "requirements": "design.requirements.hooks.hook_trace",
           "text": [
             ":::{req} hook_trace",
-            "When `SYMPOSIUM_HOOK_TRACE` names a file, `cargo agents hook` MUST append one JSON line per answered event recording the agent, the event, the input, the output, the exit code and stderr.",
+            "When `SYMPOSIUM_HOOK_TRACE` names a file, `cargo agents hook` MUST append one JSON line per answered event recording the agent, the event, the input, the output when it is JSON (otherwise `null`), the exit code and stderr.",
             ":::"
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Does nothing unless `SYMPOSIUM_HOOK_TRACE` is set; otherwise appends one JSON line with event, agent, input, output, exit code and stderr (`hook_trace`; unparsable input/output are recorded as `null`). Open/write failures are only logged (`best_effort`: writing logs must not stop the answer). No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
       "rust_item": "fn[write_hook_trace]"
     },
     {
@@ -1286,7 +1287,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -1364,7 +1365,7 @@
           "requirements": "design.requirements.hooks.auto_sync_gate",
           "text": [
             ":::{req} auto_sync_gate",
-            "On events other than `SessionStart`, when `auto-sync` is enabled, Symposium MUST sync before dispatching exactly when an input recorded by the previous sync has changed.",
+            "On events other than `SessionStart`, when `auto-sync` is enabled, Symposium MUST sync before dispatching when, and only when, an input recorded by the workspace's last successful sync has changed or no successful sync with recorded inputs exists for it.",
             ":::"
           ]
         },
@@ -1402,7 +1403,7 @@
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Does nothing when `auto-sync` is off or there is no workspace. On `SessionStart` syncs unconditionally at `UpdateLevel::Check` (`auto_sync_session_start`); on other events skips when the recorded inputs are fresh and otherwise syncs at `None` (`auto_sync_gate`). A sync failure is logged and returns false (`best_effort`). Returns true exactly after a mid-session re-sync, which drives the notice (`new_plugins_notice`). Recording state is the mechanism of the gate. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
       "rust_item": "fn[run_auto_sync]"
     },
     {
@@ -1488,7 +1489,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -1670,12 +1671,12 @@
           "requirements": "design.requirements.hooks.source_refresh_session_start",
           "text": [
             ":::{req} source_refresh_session_start",
-            "On `SessionStart`, when `auto-sync` is enabled, Symposium MUST check upstream for a newer version of each applicable plugin hook source that is already installed.",
+            "On `SessionStart`, when `auto-sync` is enabled, Symposium MUST check upstream for a newer version of each applicable plugin hook source that it caches and has already installed.",
             ":::"
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Builds the active plugin set at `UpdateLevel::None` (consent: `unconsented_inactive`, `consented_active`, `dormant_inactive`, `use_wakes_dormant`, `offline_resolution`), keeps hooks whose plugin and hook predicates hold (`hook_gating`), and refreshes each requirement and command source only if present (`source_refresh_session_start`, `source_refresh_installed_only`). Unbuildable hooks and refresh failures are logged and skipped (`best_effort`). The caller gates it on `SessionStart` and auto-sync. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
       "rust_item": "fn[prewarm_hook_sources]"
     },
     {
@@ -2431,7 +2432,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -2469,7 +2470,7 @@
             "    host_agent: HookAgent,",
             "    event: HookEvent,",
             "    sym_input: &symposium::InputEvent,",
-            "    original_input: &dyn AgentHookInput,",
+            "    original_input: &str,",
             "    prior_output: serde_json::Value,",
             "    prior_context: Option<String>,",
             "    deps: &Arc<Workspace>,",
@@ -2519,19 +2520,18 @@
             "",
             "        // Determine stdin for the plugin based on its declared format.",
             "        // After format selection, the only two cases are:",
-            "        // - native (matches host agent) → pass through original input",
+            "        // - native (matches host agent) → the agent's own payload, byte for byte",
             "        // - symposium → deliver canonical format",
             "        let hook_agent = hook.format.as_agent();",
-            "        let hook_input: &dyn AgentHookInput = if hook_agent == Some(host_agent) {",
-            "            original_input",
+            "        let stdin_str = if hook_agent == Some(host_agent) {",
+            "            original_input.to_string()",
             "        } else {",
-            "            sym_input",
-            "        };",
-            "        let stdin_str = match hook_input.to_string() {",
-            "            Ok(s) => s,",
-            "            Err(e) => {",
-            "                tracing::error!(plugin = %hook.plugin_name, hook = %hook.hook_name, error = %e, \"failed to serialize hook input\");",
-            "                continue;",
+            "            match AgentHookInput::to_string(sym_input) {",
+            "                Ok(s) => s,",
+            "                Err(e) => {",
+            "                    tracing::error!(plugin = %hook.plugin_name, hook = %hook.hook_name, error = %e, \"failed to serialize hook input\");",
+            "                    continue;",
+            "                }",
             "            }",
             "        };",
             "",
@@ -2595,8 +2595,13 @@
             "                                    {",
             "                                        let host_out = host_h.translate_output(&sym_out);",
             "                                        (host_out.to_hook_output(), Some(sym_out))",
-            "                                    } else {",
+            "                                    } else if v.is_object() {",
             "                                        (v, None)",
+            "                                    } else {",
+            "                                        tracing::warn!(",
+            "                                            \"hook output is neither an output event nor a JSON object\"",
+            "                                        );",
+            "                                        continue;",
             "                                    }",
             "                                }",
             "                                Err(e) => {",
@@ -2831,7 +2836,7 @@
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Builds the active set at `UpdateLevel::None` (consent requirements, `offline_resolution`) and gates/selects hooks (`hook_gating`). Per hook: native-format hooks get the agent's payload unchanged (`native_input`), symposium-format hooks the canonical event (`canonical_input`), written to stdin (`hook_stdin_payload`). Exit 2 or no exit code blocks and stops (`exit_2_stops`); exit 0 with output is parsed as the host's output (`native_output`) or canonical output translated to the host (`canonical_output`), or a non-canonical JSON object merged raw (`raw_json_fallback`); results merge later-wins (`merge_later_wins`), a denial returns immediately (`deny_final`), and context is joined (`joined_context`). Serialization, spawn, wait and parse failures and other non-zero exits are logged and the next hook runs (`best_effort`). Exit 0 with empty stdout contributes nothing. No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
       "rust_item": "fn[dispatch_plugin_hooks]"
     },
     {
@@ -2991,7 +2996,7 @@
           "role": "impl"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "src/hook.rs",
@@ -3039,12 +3044,12 @@
           "requirements": "design.requirements.hooks.merge_null_removes",
           "text": [
             ":::{req} merge_null_removes",
-            "When Symposium combines responses, a `null` field in a later response MUST remove that field.",
+            "When Symposium merges a later response into an earlier one, a field the later response sets to `null` MUST be removed from the result.",
             ":::"
           ]
         }
       ],
-      "rationale": "Found the applicable set by reading the whole function, the `src/hook.rs` function map in `.habeas-pilot/final-requirements.md`, and every requirement in the hooks chapter (and the consent chapter where the active plugin set is involved); the requirements input glob(s) match every cited definition. Recursively merges JSON objects with the later value replacing the earlier one (`merge_later_wins`), a `null` removing the field (`merge_null_removes`), and absent fields left unchanged; non-objects are replaced outright (later wins). No other requirement in the hooks, consent, enablement, output or internal chapters describes behavior of this function.",
+      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
       "rust_item": "fn[merge]"
     },
     {
@@ -4234,6 +4239,68 @@
       ],
       "rationale": "Test function or test helper; found its citations by reading the test body and the hooks chapter. Asserts a plugin gated on `depends-on(serde)` fires only when serde is a dependency (`hook_gating`). It exercises no behavior of another requirement.",
       "rust_item": "mod[tests]/fn[dispatch_respects_plugin_crate_gate]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.hooks.hook_env_path_prepend",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.hook_env_path_var",
+          "role": "test"
+        }
+      ],
+      "determination": false,
+      "inputs": [
+        {
+          "rust_file": "src/hook.rs",
+          "rust_item": "mod[tests]/fn[build_env_bare_executable_name_exposes_nothing]",
+          "text": [
+            "    #[test]",
+            "    // {test}`design.requirements.hooks.hook_env_path_var`",
+            "    // {test}`design.requirements.hooks.hook_env_path_prepend`",
+            "    fn build_env_bare_executable_name_exposes_nothing() {",
+            "        // A source-less installation naming `jq` resolves to that bare name,",
+            "        // found on the user's PATH: there is no absolute path to expose.",
+            "        let acquired = vec![AcquiredInstallation {",
+            "            name: \"jq\".to_string(),",
+            "            base: None,",
+            "            runnable: Some(AcquiredRunnable::ResolvedExec {",
+            "                path: PathBuf::from(\"jq\"),",
+            "            }),",
+            "        }];",
+            "        let env: std::collections::HashMap<_, _> = build_env(&acquired).into_iter().collect();",
+            "        assert!(!env.contains_key(\"SYMPOSIUM_jq\"));",
+            "        assert!(!env.contains_key(\"PATH\"));",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.hook_env_path_prepend"
+          ],
+          "requirements": "design.requirements.hooks.hook_env_path_prepend",
+          "text": [
+            ":::{req} hook_env_path_prepend",
+            "Symposium MUST prepend to a plugin hook's `PATH` the parent directory of each installation runnable with an absolute path, with the hook command's own directory first.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.hook_env_path_var"
+          ],
+          "requirements": "design.requirements.hooks.hook_env_path_var",
+          "text": [
+            ":::{req} hook_env_path_var",
+            "Symposium MUST run a plugin hook with `SYMPOSIUM_<name>` set to the absolute path of each of its installations that resolves to a runnable with an absolute path, where `<name>` is the installation name with every character that is not an ASCII letter or digit replaced by `_`.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rust_item": "mod[tests]/fn[build_env_bare_executable_name_exposes_nothing]"
     }
   ],
   "rust_file": "src/hook.rs"

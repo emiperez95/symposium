@@ -1,5 +1,5 @@
 {
-  "determination": true,
+  "determination": false,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -63,6 +63,7 @@
         "        if let Some(",
         "            AcquiredRunnable::ResolvedScript { path, .. } | AcquiredRunnable::ResolvedExec { path },",
         "        ) = &a.runnable",
+        "            && path.is_absolute()",
         "        {",
         "            env.push((format!(\"SYMPOSIUM_{key}\"), path.display().to_string()));",
         "            if let Some(parent) = path.parent() {",
@@ -402,8 +403,31 @@
         "    })",
         "}"
       ]
+    },
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "mod[tests]/fn[build_env_bare_executable_name_exposes_nothing]",
+      "text": [
+        "    #[test]",
+        "    // {test}`design.requirements.hooks.hook_env_path_var`",
+        "    // {test}`design.requirements.hooks.hook_env_path_prepend`",
+        "    fn build_env_bare_executable_name_exposes_nothing() {",
+        "        // A source-less installation naming `jq` resolves to that bare name,",
+        "        // found on the user's PATH: there is no absolute path to expose.",
+        "        let acquired = vec![AcquiredInstallation {",
+        "            name: \"jq\".to_string(),",
+        "            base: None,",
+        "            runnable: Some(AcquiredRunnable::ResolvedExec {",
+        "                path: PathBuf::from(\"jq\"),",
+        "            }),",
+        "        }];",
+        "        let env: std::collections::HashMap<_, _> = build_env(&acquired).into_iter().collect();",
+        "        assert!(!env.contains_key(\"SYMPOSIUM_jq\"));",
+        "        assert!(!env.contains_key(\"PATH\"));",
+        "    }"
+      ]
     }
   ],
-  "rationale": "**Implementation.** `build_env` pushes the parent directory of each `ResolvedExec`/`ResolvedScript` path in acquisition order (requirements first, command last, per `build_spawn_spec`), skipping an empty parent (a bare `$PATH` name, which has no absolute path), then reverses the list so the command's directory comes first; `prepend_to_path` puts those directories ahead of the current `PATH` using the platform separator; `spawn_from_spec` sets it. `GlobalExec` and no-runnable installations contribute nothing.\n\n**Tests (pass).** `src/hook.rs` `build_env_sets_dir_and_name_vars` (command dir first, requirement dir present), `prepend_to_path_uses_platform_separator`, `build_env_no_runnable_no_vars`, `build_env_global_cargo_skips_env_and_path` (no `PATH` override).",
+  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
   "requirement": "Symposium MUST prepend to a plugin hook's `PATH` the parent directory of each installation runnable with an absolute path, with the hook command's own directory first."
 }

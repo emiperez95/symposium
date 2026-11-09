@@ -78,6 +78,7 @@
         "        if let Some(",
         "            AcquiredRunnable::ResolvedScript { path, .. } | AcquiredRunnable::ResolvedExec { path },",
         "        ) = &a.runnable",
+        "            && path.is_absolute()",
         "        {",
         "            env.push((format!(\"SYMPOSIUM_{key}\"), path.display().to_string()));",
         "            if let Some(parent) = path.parent() {",
@@ -433,8 +434,31 @@
         "    })",
         "}"
       ]
+    },
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "mod[tests]/fn[build_env_bare_executable_name_exposes_nothing]",
+      "text": [
+        "    #[test]",
+        "    // {test}`design.requirements.hooks.hook_env_path_var`",
+        "    // {test}`design.requirements.hooks.hook_env_path_prepend`",
+        "    fn build_env_bare_executable_name_exposes_nothing() {",
+        "        // A source-less installation naming `jq` resolves to that bare name,",
+        "        // found on the user's PATH: there is no absolute path to expose.",
+        "        let acquired = vec![AcquiredInstallation {",
+        "            name: \"jq\".to_string(),",
+        "            base: None,",
+        "            runnable: Some(AcquiredRunnable::ResolvedExec {",
+        "                path: PathBuf::from(\"jq\"),",
+        "            }),",
+        "        }];",
+        "        let env: std::collections::HashMap<_, _> = build_env(&acquired).into_iter().collect();",
+        "        assert!(!env.contains_key(\"SYMPOSIUM_jq\"));",
+        "        assert!(!env.contains_key(\"PATH\"));",
+        "    }"
+      ]
     }
   ],
-  "rationale": "**Holds for absolute runnables.** `build_env` sets `SYMPOSIUM_<env_safe(name)>` to the path of every acquired installation (the hook's requirements plus its command, built in `build_spawn_spec`) whose runnable is `ResolvedExec`/`ResolvedScript`; `env_safe` replaces every non-ASCII-alphanumeric character with `_`; `spawn_from_spec` applies the env. `GlobalExec` and no-runnable installations get nothing. Tests (pass): `src/hook.rs` `env_safe_sanitizes_punctuation`, `build_env_sets_dir_and_name_vars`, `build_env_no_runnable_no_vars`, `build_env_global_cargo_skips_env_and_path`; `tests/plugin_dispatch.rs` `helper_env_var_is_set_for_hook`.\n\n**Why false.** `ResolvedExec` is not always absolute. For a source-less installation with a bare `executable` name (e.g. `executable = \"jq\"`), `resolve_runnable_path` in `src/plugins.rs` leaves the bare name unresolved and `acquire_installation` returns `ResolvedExec { path: \"jq\" }` (\"No source: an absolute path, or a bare name on `$PATH`\"). `build_env` then exports `SYMPOSIUM_<name>=jq`, a non-absolute value that neither this requirement nor `md/reference/plugin-definition.md:410` (\"Installation resolves to a runnable with an absolute path\") allows. Fix: export only when `path.is_absolute()`, or document the bare-name case. Untested either way.",
+  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
   "requirement": "Symposium MUST run a plugin hook with `SYMPOSIUM_<name>` set to the absolute path of each of its installations that resolves to a runnable with an absolute path, where `<name>` is the installation name with every character that is not an ASCII letter or digit replaced by `_`."
 }

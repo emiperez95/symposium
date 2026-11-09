@@ -1,5 +1,5 @@
 {
-  "determination": true,
+  "determination": false,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -82,7 +82,7 @@
         "            agent,",
         "            event,",
         "            &sym_input,",
-        "            payload.as_ref(),",
+        "            input,",
         "            prior_output,",
         "            builtin_sym_output.additional_context().map(String::from),",
         "            &deps,",
@@ -157,6 +157,6 @@
       ]
     }
   ],
-  "rationale": "**Holds.** The `!payload.should_dispatch()` branch in `execute_hook` returns before `run_auto_sync`, `prewarm_hook_sources`, `dispatch_builtin` and `dispatch_plugin_hooks` are reached, so neither auto-sync nor any plugin hook runs.\n\n**Test:** `tests/plugin_dispatch.rs::later_invocations_of_a_turn_reach_no_plugin_hook` (fixture `prompt-hook0`, a prompt hook that prints `prompt-hook-ran`): the first Antigravity invocation of a turn runs the hook, the second's stdout is exactly `{\"injectSteps\":[]}`, so the hook did not run. Passes. The \"no auto-sync\" half is judged from code (the early return); the test does not observe sync.\n",
+  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
   "requirement": "When an agent's payload is not an occurrence of the symposium event it maps to, Symposium MUST NOT run auto-sync or any plugin hook."
 }

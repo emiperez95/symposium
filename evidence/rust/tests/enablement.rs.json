@@ -1180,7 +1180,7 @@
           "role": "test"
         }
       ],
-      "determination": true,
+      "determination": false,
       "inputs": [
         {
           "rust_file": "tests/enablement.rs",
@@ -1202,6 +1202,20 @@
             "            .filter(|m| m.origin == \"user-plugins\" && m.name == \"tokio-guidance\")",
             "            .collect();",
             "        assert_eq!(hits.len(), 1, \"{matches:#?}\");",
+            "",
+            "        // A plugin named differently from its entry directory is still one hit.",
+            "        let entry = ctx.sym.config_dir().join(\"plugins/foo-tools\");",
+            "        std::fs::create_dir_all(&entry)?;",
+            "        std::fs::write(",
+            "            entry.join(\"Symposium.toml\"),",
+            "            \"name = \\\"foo\\\"\\ndepends-on = [\\\"*\\\"]\\n\",",
+            "        )?;",
+            "        let matches = symposium::search_command::find_matches(&ctx.sym, \"foo\").await;",
+            "        let hits: Vec<_> = matches",
+            "            .iter()",
+            "            .filter(|m| m.origin == \"user-plugins\" && (m.name == \"foo\" || m.name == \"foo-tools\"))",
+            "            .collect();",
+            "        assert_eq!(hits.len(), 1, \"{matches:#?}\");",
             "        Ok(())",
             "    })",
             "    .await",
@@ -1221,7 +1235,7 @@
           ]
         }
       ],
-      "rationale": "Adds a bare-skill registry entry tokio-guidance and asserts find_matches returns exactly one user-plugins hit for it: enablement.search_once. Citation is complete.",
+      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
       "rust_item": "fn[search_lists_a_registry_entry_once]"
     },
     {
@@ -2189,6 +2203,83 @@
       ],
       "rationale": "Adds a dormant registry plugin named crate-a beside dependency crate-a, runs `use crate-a`, and asserts the dependency's a-guidance skill is not installed. Had the name resolved to the crate it would install, so this checks the name resolves to the registry plugin (consent.use_resolves_registry_first) and that the use does not consent to the dependency's embedded plugin (consent.registry_use_not_dependency_consent). Citations are complete.",
       "rust_item": "fn[choosing_registry_plugin_does_not_enable_same_named_dependency]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.status_once",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.status_state",
+          "role": "test"
+        }
+      ],
+      "determination": false,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[status_lists_a_disabled_registry_plugin_once]",
+          "text": [
+            "/// `disable` does not reach a registry plugin, so status lists it once, in the",
+            "/// state activation gives it, not also as declined.",
+            "// {test}`design.requirements.enablement.status_once`",
+            "// {test}`design.requirements.enablement.status_state`",
+            "#[tokio::test]",
+            "async fn status_lists_a_disabled_registry_plugin_once() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"dormant-plugin0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let workspace_root = ctx.workspace_root.clone().unwrap();",
+            "            ctx.sym",
+            "                .config",
+            "                .plugins",
+            "                .disable",
+            "                .push(\"gateless-plugin\".to_string());",
+            "",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;",
+            "            let listed: Vec<_> = entries",
+            "                .iter()",
+            "                .filter(|e| e.name == \"gateless-plugin\")",
+            "                .collect();",
+            "            assert_eq!(listed.len(), 1, \"{entries:#?}\");",
+            "            assert_eq!(listed[0].state, StatusState::Dormant);",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.status_once"
+          ],
+          "requirements": "design.requirements.enablement.status_once",
+          "text": [
+            ":::{req} status_once",
+            "`cargo agents status` MUST list each plugin it reports on one line.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.status_state"
+          ],
+          "requirements": "design.requirements.enablement.status_state",
+          "text": [
+            ":::{req} status_state",
+            "`cargo agents status` MUST give each plugin the state that activation gives it: active, dormant, candidate (awaiting consent), or declined.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+      "rust_item": "fn[status_lists_a_disabled_registry_plugin_once]"
     }
   ],
   "rust_file": "tests/enablement.rs"

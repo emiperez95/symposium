@@ -31,5 +31,5 @@
     }
   ],
   "rationale": "**`merge` itself does it.** `merge` removes key `k` from the accumulated object when the later value is `null`, at any depth.\n\n**Why false.** A `null` in a hook's output usually never reaches `merge`. Native outputs are parsed into the agent's typed output (`host_h.parse_output`) and re-serialized with `to_hook_output()`; typed fields are `Option` with `skip_serializing_if = \"Option::is_none\"`, so `\"systemMessage\": null` or `\"additionalContext\": null` becomes absent rather than `null`, and the earlier value stays. Canonical outputs are translated, which drops nulls the same way. Only keys in an output type's flattened `rest` map and the raw-JSON fallback keep `null`. So a later response's `null` field does not reliably remove the field. Untested. The chapter note already suggests this may be incidental (candidate for `internal_detail`).",
-  "requirement": "When Symposium combines responses, a `null` field in a later response MUST remove that field."
+  "requirement": "When Symposium merges a later response into an earlier one, a field the later response sets to `null` MUST be removed from the result."
 }

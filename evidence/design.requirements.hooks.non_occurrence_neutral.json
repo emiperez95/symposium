@@ -1,5 +1,5 @@
 {
-  "determination": true,
+  "determination": false,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -82,7 +82,7 @@
         "            agent,",
         "            event,",
         "            &sym_input,",
-        "            payload.as_ref(),",
+        "            input,",
         "            prior_output,",
         "            builtin_sym_output.additional_context().map(String::from),",
         "            &deps,",
@@ -157,6 +157,6 @@
       ]
     }
   ],
-  "rationale": "**Holds.** In `execute_hook`, right after parsing, `if !payload.should_dispatch()` returns `handler.respond(&handler.translate_output(&OutputEvent::empty_for(event)).to_hook_output())`: the agent's own translation of the empty canonical output for that event, i.e. its neutral output. `should_dispatch` defaults to true and is overridden where an agent's native event is broader than the canonical one (Antigravity's `PreInvocation` for `user-prompt-submit`).\n\n**Test:** `tests/plugin_dispatch.rs::later_invocations_of_a_turn_reach_no_plugin_hook` sends Antigravity `UserPromptSubmit` payloads with `invocationNum` 0 and 1 and asserts the second stdout is exactly `{\"injectSteps\":[]}`, Antigravity's neutral output. Passes.\n",
+  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
   "requirement": "When an agent's payload is not an occurrence of the symposium event it maps to, Symposium MUST answer with the agent's neutral output."
 }

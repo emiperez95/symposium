@@ -1,5 +1,5 @@
 {
-  "determination": true,
+  "determination": false,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -82,7 +82,7 @@
         "            agent,",
         "            event,",
         "            &sym_input,",
-        "            payload.as_ref(),",
+        "            input,",
         "            prior_output,",
         "            builtin_sym_output.additional_context().map(String::from),",
         "            &deps,",
@@ -273,6 +273,6 @@
       ]
     }
   ],
-  "rationale": "**Implementation.** `blocked_response` returns `HookResponse::blocked(&reason)` for every event other than `PreToolUse`: empty stdout, the reason as stderr, `exit_code: 2`. `run` writes the response's stderr and returns `ExitCode::from(response.exit_code)`, i.e. 2.\n\n**Tests (pass).** `tests/hook_decisions.rs` `plugin_exit_2_on_a_prompt_passes_through` (in-process: exit 2, empty stdout, reason on stderr, for all five agents) and `hook_command_exits_2_with_the_reason_on_stderr` (real binary: Claude `user-prompt-submit` exits 2 with the reason on stderr).",
+  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
   "requirement": "On events other than `PreToolUse`, Symposium MUST deliver a block by exit status by exiting 2 with the reason on stderr."
 }

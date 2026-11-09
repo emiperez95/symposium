@@ -82,7 +82,7 @@
         "            agent,",
         "            event,",
         "            &sym_input,",
-        "            payload.as_ref(),",
+        "            input,",
         "            prior_output,",
         "            builtin_sym_output.additional_context().map(String::from),",
         "            &deps,",
@@ -283,6 +283,6 @@
       ]
     }
   ],
-  "rationale": "**Does not hold for every installed source: `global = true` cargo sources are never refreshed.** `execute_hook` runs `prewarm_hook_sources` on `SessionStart` when `auto-sync` is on. It walks every active plugin whose predicates hold and every hook whose predicates hold, and calls `installation::refresh_installation_if_present` for the hook's requirements and command. That calls `symposium_install::refresh_source_if_present`, which runs `acquire_source(..., UpdateLevel::Check)` only when `source_is_cached` is true. That covers crates.io cargo sources (version pointer plus binary present), `cargo + git` sources (binary in the commit-keyed dir), and GitHub sources (cache path exists). `source_is_cached` returns `false` for `Source::Cargo` with `global = true` (\"we don't manage it\"), so an installed global cargo tool is never checked upstream on `SessionStart`. The requirement says \"each applicable plugin hook source that is already installed\".\n\nTests: there is no hook-level test of the refresh. `symposium-install` unit tests `source_is_cached_*` and `refresh_source_if_present_skips_absent_source` pass but only cover the presence probe.\n\nTo resolve: narrow the text to Symposium-managed (cached) sources, matching module-structure.md (\"each installation's already-cached source\"), or refresh global installs too. Add a hook-level test either way.\n",
-  "requirement": "On `SessionStart`, when `auto-sync` is enabled, Symposium MUST check upstream for a newer version of each applicable plugin hook source that is already installed."
+  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
+  "requirement": "On `SessionStart`, when `auto-sync` is enabled, Symposium MUST check upstream for a newer version of each applicable plugin hook source that it caches and has already installed."
 }

@@ -49,7 +49,7 @@ On `SessionStart`, when `auto-sync` is enabled and the hook's working directory 
 *Source:* Documented in md/design/hook-flow.md:13 "it bypasses the freshness gate ... and passes `UpdateLevel::Check`".
 
 :::{req} auto_sync_gate
-On events other than `SessionStart`, when `auto-sync` is enabled, Symposium MUST sync before dispatching exactly when an input recorded by the previous sync has changed.
+On events other than `SessionStart`, when `auto-sync` is enabled, Symposium MUST sync before dispatching when, and only when, an input recorded by the workspace's last successful sync has changed or no successful sync with recorded inputs exists for it.
 :::
 
 *Source:* Documented in md/design/hook-flow.md:13 "Every other event keeps the cheap path, gated on the package managers' recorded inputs".
@@ -61,10 +61,12 @@ Apart from a plugin hook that blocks, a failure while auto-syncing, writing logs
 *Source:* Documented in md/design/hook-flow.md:9 "Runs quietly and non-fatally — failures are logged but don't block hook dispatch"; md/reference/plugin-definition.md:401 "Requirement installation is best-effort: failures are logged and dispatch continues."; md/design/module-structure.md:203 "`prewarm_hook_sources` (best-effort, ...)".
 
 :::{req} source_refresh_session_start
-On `SessionStart`, when `auto-sync` is enabled, Symposium MUST check upstream for a newer version of each applicable plugin hook source that is already installed.
+On `SessionStart`, when `auto-sync` is enabled, Symposium MUST check upstream for a newer version of each applicable plugin hook source that it caches and has already installed.
 :::
 
 *Source:* Documented in md/design/module-structure.md:203 "it walks every applicable plugin's hooks and *refreshes* each installation's already-cached source via `refresh_installation_if_present` (`UpdateLevel::Check`)".
+
+*Note:* A `global = true` cargo installation is not cached by Symposium, so it is not refreshed here; see `dispatch_serves_cache` for how it is acquired.
 
 :::{req} source_refresh_installed_only
 The `SessionStart` source refresh MUST NOT install a plugin hook source that was never installed.
@@ -215,10 +217,12 @@ When Symposium combines the built-in response and each plugin hook's response, a
 *Source:* Documented in md/reference/plugin-definition.md:438 "Valid JSON objects are merged together across successful hooks; keys from later hooks overwrite earlier keys.".
 
 :::{req} merge_null_removes
-When Symposium combines responses, a `null` field in a later response MUST remove that field.
+When Symposium merges a later response into an earlier one, a field the later response sets to `null` MUST be removed from the result.
 :::
 
 *Source:* Documented in src/hook.rs:955 (doc comment on `merge`) "Fields with null values in `b` will delete the corresponding field in `a`.".
+
+*Note:* Native and canonical hook outputs are parsed into typed structs that omit empty fields, so a hook rarely gets a `null` this far; a raw JSON object passed through `raw_json_fallback` can.
 
 *Note:* whether any hook relies on this is unknown. Possibly incidental. It is a candidate to downgrade to `internal_detail` if maintainers say so.
 
@@ -259,7 +263,7 @@ On events other than `PreToolUse`, Symposium MUST deliver a block by exit status
 *Source:* Documented in md/reference/hook-events.md:232 "On other events `cargo agents hook` exits 2 with the reason on stderr".
 
 :::{req} hook_trace
-When `SYMPOSIUM_HOOK_TRACE` names a file, `cargo agents hook` MUST append one JSON line per answered event recording the agent, the event, the input, the output, the exit code and stderr.
+When `SYMPOSIUM_HOOK_TRACE` names a file, `cargo agents hook` MUST append one JSON line per answered event recording the agent, the event, the input, the output when it is JSON (otherwise `null`), the exit code and stderr.
 :::
 
 *Source:* Documented in src/hook.rs:372-373 (doc comment) "If `SYMPOSIUM_HOOK_TRACE` is set to a file path, append a JSONL entry. Used for integration testing".

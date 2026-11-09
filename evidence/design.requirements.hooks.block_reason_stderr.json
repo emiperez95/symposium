@@ -1,5 +1,5 @@
 {
-  "determination": true,
+  "determination": false,
   "inputs": [
     {
       "rust_file": "src/hook.rs",
@@ -82,7 +82,7 @@
         "            agent,",
         "            event,",
         "            &sym_input,",
-        "            payload.as_ref(),",
+        "            input,",
         "            prior_output,",
         "            builtin_sym_output.additional_context().map(String::from),",
         "            &deps,",
@@ -216,6 +216,6 @@
       ]
     }
   ],
-  "rationale": "**Implementation.** The exit-2/no-code arm returns the hook's captured stderr; `blocked_response` decodes it (lossy UTF-8, trimmed of surrounding whitespace) as the reason, falling back to a generic text only when empty (`block_reason_nonempty`). On `PreToolUse` it becomes the canonical deny's reason, translated per agent; on other events it is the stderr of `HookResponse::blocked`.\n\n**Tests (pass).** `tests/hook_decisions.rs` `plugin_exit_2_denies_the_tool_call_on_every_agent` asserts the fixture's stderr text is the denial reason for Claude, Codex, Copilot, Antigravity (in JSON) and Kiro (stderr); `hook_command_exits_2_with_the_reason_on_stderr` checks the real `cargo agents hook` process's stderr for Claude `UserPromptSubmit`. The trimming of the trailing newline is what these exact-match assertions exercise.",
+  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
   "requirement": "When a plugin hook blocks by its exit status, Symposium MUST give the agent the hook's stderr as the reason."
 }

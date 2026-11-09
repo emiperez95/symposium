@@ -1,5 +1,5 @@
 {
-  "determination": true,
+  "determination": false,
   "inputs": [
     {
       "rust_file": "tests/enablement.rs",
@@ -120,8 +120,12 @@
         "    let mut matches = Vec::new();",
         "",
         "    let registry = crate::plugins::load_registry(sym).await;",
+        "    // Plugins already listed, by (registry, plugin name). A registry's search",
+        "    // hit names an entry directory, which can differ from the plugin's name.",
+        "    let mut listed = std::collections::HashSet::new();",
         "    for parsed in &registry.plugins {",
         "        if name_matches(&parsed.manifest.name, query) {",
+        "            listed.insert((parsed.canonical.pm.clone(), parsed.canonical.name.clone()));",
         "            matches.push(SearchMatch {",
         "                origin: parsed.canonical.pm.clone(),",
         "                name: parsed.manifest.name.clone(),",
@@ -134,12 +138,25 @@
         "        }",
         "    }",
         "    // Search is workspace-independent; a detached resolver stands in.",
-        "    for (instance, info) in sym.detached_managers().search(query).await {",
+        "    let pms = sym.detached_managers();",
+        "    for (instance, info) in pms.search(query).await {",
         "        if matches",
         "            .iter()",
         "            .any(|m| m.origin == instance && m.name == info.id.name)",
         "        {",
         "            continue;",
+        "        }",
+        "        // A hit from a registry that already supplied a listed plugin may be",
+        "        // that plugin's entry under its directory name. Loading the entry is a",
+        "        // local read; other instances' hits are never loaded here.",
+        "        if listed.iter().any(|(pm, _)| *pm == instance) {",
+        "            let entry = pms.load_plugin(&info.id, UpdateLevel::None).await;",
+        "            if entry",
+        "                .iter()",
+        "                .any(|p| listed.contains(&(p.canonical.pm.clone(), p.canonical.name.clone())))",
+        "            {",
+        "                continue;",
+        "            }",
         "        }",
         "        matches.push(SearchMatch {",
         "            origin: instance,",
@@ -154,6 +171,6 @@
       ]
     }
   ],
-  "rationale": "`cli::run` routes `Commands::Search` to `search_command::search`, which reports `find_matches`. The first arm of `find_matches` iterates every plugin in `plugins::load_registry(sym)` (all configured registries, including the builtin `user-plugins` and recommendations registries; bare skills are synthesized plugins) and pushes a hit when `name_matches(&manifest.name, query)`, i.e. `name.to_lowercase().contains(&query.to_lowercase())`. No filter other than the name applies (dormant plugins are listed with a hint). A registry that cannot be read contributes no plugins, which is out of scope here.\n\nTests (pass): `search_finds_registry_content_tagged_by_origin` asserts `SERDE-gui` finds `serde-guidance`, and `my-skill` / `MY-SKILL` find the `user-plugins` entry `my-skill`, and a non-matching query finds nothing; `search_renders_grouped_by_origin` asserts the rendered report includes the `serde-guidance` hit for `serde`.",
+  "rationale": "Review pending: reassess the changed input, all applicable definitions and citations, and the behavior they jointly specify.",
   "requirement": "`cargo agents search <query>` MUST list every configured-registry plugin whose name contains `<query>`, ignoring case."
 }
