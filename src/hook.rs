@@ -98,6 +98,7 @@ fn build_env(acquired: &[AcquiredInstallation]) -> Vec<(String, String)> {
         if let Some(
             AcquiredRunnable::ResolvedScript { path, .. } | AcquiredRunnable::ResolvedExec { path },
         ) = &a.runnable
+            && path.is_absolute()
         {
             env.push((format!("SYMPOSIUM_{key}"), path.display().to_string()));
             if let Some(parent) = path.parent() {
@@ -1190,6 +1191,22 @@ mod tests {
         let env: std::collections::HashMap<_, _> = build_env(&acquired).into_iter().collect();
         assert!(!env.contains_key("SYMPOSIUM_DIR_rg"));
         assert!(!env.contains_key("SYMPOSIUM_rg"));
+        assert!(!env.contains_key("PATH"));
+    }
+
+    #[test]
+    fn build_env_bare_executable_name_exposes_nothing() {
+        // A source-less installation naming `jq` resolves to that bare name,
+        // found on the user's PATH: there is no absolute path to expose.
+        let acquired = vec![AcquiredInstallation {
+            name: "jq".to_string(),
+            base: None,
+            runnable: Some(AcquiredRunnable::ResolvedExec {
+                path: PathBuf::from("jq"),
+            }),
+        }];
+        let env: std::collections::HashMap<_, _> = build_env(&acquired).into_iter().collect();
+        assert!(!env.contains_key("SYMPOSIUM_jq"));
         assert!(!env.contains_key("PATH"));
     }
 
