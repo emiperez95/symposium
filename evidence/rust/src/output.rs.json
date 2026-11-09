@@ -1,0 +1,973 @@
+{
+  "functions": [
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.messages_stdout",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.warnings_stderr",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[normal]",
+          "text": [
+            "    // {impl}`design.requirements.output.messages_stdout`",
+            "    // {impl}`design.requirements.output.warnings_stderr`",
+            "    pub fn normal() -> Self {",
+            "        Self {",
+            "            quiet: false,",
+            "            capture: None,",
+            "        }",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.messages_stdout"
+          ],
+          "requirements": "design.requirements.output.messages_stdout",
+          "text": [
+            ":::{req} messages_stdout",
+            "A normal `Output` MUST print every message other than a warning to stdout.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.warnings_stderr"
+          ],
+          "requirements": "design.requirements.output.warnings_stderr",
+          "text": [
+            ":::{req} warnings_stderr",
+            "A normal `Output` MUST print warnings to stderr.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `normal` builds an Output that is neither quiet nor capturing; the only observable consequence is where later messages go: non-warnings to stdout (output.messages_stdout) and warnings to stderr (output.warnings_stderr), both via emit/emit_err. quiet and capture describe the other modes, which this constructor does not create. It does not itself make is_interactive true (that also needs terminals), so hooks.no_prompt is carried by is_interactive. display_path does not apply.",
+      "rust_item": "impl[Output]/fn[normal]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.hooks.no_prompt",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[quiet]",
+          "text": [
+            "    // {impl}`design.requirements.output.quiet`",
+            "    // {impl}`design.requirements.hooks.no_prompt`",
+            "    pub fn quiet() -> Self {",
+            "        Self {",
+            "            quiet: true,",
+            "            capture: None,",
+            "        }",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.no_prompt"
+          ],
+          "requirements": "design.requirements.hooks.no_prompt",
+          "text": [
+            ":::{req} no_prompt",
+            "A `cargo agents` process started by an agent hook MUST NOT read from stdin to ask the user a question. Symposium MUST prompt only when its output is neither quiet nor capturing and both stdin and stdout are terminals.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `quiet` builds an Output with quiet=true: every emit/emit_err then returns before printing or capturing (output.quiet), and is_interactive returns false for it, which is how hook dispatch is guaranteed never to prompt (hooks.no_prompt). capture/messages_stdout/warnings_stderr describe other modes. hooks.stdout_protocol is about the hook process as a whole and is cited where the hook entry point selects this constructor, not by the constructor. display_path does not apply.",
+      "rust_item": "impl[Output]/fn[quiet]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.hooks.no_prompt",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[capturing]",
+          "text": [
+            "    /// Create an output that captures all messages into a buffer",
+            "    /// instead of printing them.",
+            "    // {impl}`design.requirements.output.capture`",
+            "    // {impl}`design.requirements.hooks.no_prompt`",
+            "    pub fn capturing() -> Self {",
+            "        Self {",
+            "            quiet: false,",
+            "            capture: Some(Arc::new(Mutex::new(Vec::new()))),",
+            "        }",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.no_prompt"
+          ],
+          "requirements": "design.requirements.hooks.no_prompt",
+          "text": [
+            ":::{req} no_prompt",
+            "A `cargo agents` process started by an agent hook MUST NOT read from stdin to ask the user a question. Symposium MUST prompt only when its output is neither quiet nor capturing and both stdin and stdout are terminals.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `capturing` builds a non-quiet Output with a buffer: every message, warnings included, is pushed to that buffer in order instead of printed (output.capture), and is_interactive returns false because capture is set, which keeps the library test harness from prompting even when cargo test inherits a terminal (hooks.no_prompt). Other output requirements describe other modes; display_path does not apply.",
+      "rust_item": "impl[Output]/fn[capturing]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[captured]",
+          "text": [
+            "    /// Return all captured messages. Panics if not in capturing mode.",
+            "    // {impl}`design.requirements.output.capture`",
+            "    pub fn captured(&self) -> Vec<String> {",
+            "        self.capture",
+            "            .as_ref()",
+            "            .expect(\"not in capturing mode\")",
+            "            .lock()",
+            "            .unwrap()",
+            "            .clone()",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `captured` returns a clone of the recorded messages in order, which is how a capturing Output's record is observed (output.capture). Its panic outside capturing mode is a caller-contract assertion, not end-user behavior. No other output or hooks requirement concerns reading the buffer.",
+      "rust_item": "impl[Output]/fn[captured]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.hooks.no_prompt",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[is_interactive]",
+          "text": [
+            "    /// May we block on stdin to ask the user a question?",
+            "    ///",
+            "    /// Only a non-quiet, non-capturing output attached to a terminal on both",
+            "    /// ends qualifies. Hook dispatch and the library test harness both use",
+            "    /// quiet/capturing outputs, so neither can ever reach a prompt — the TTY",
+            "    /// check alone would not guarantee that, since `cargo test` inherits the",
+            "    /// developer's terminal.",
+            "    pub fn is_interactive(&self) -> bool {",
+            "        // {impl}`design.requirements.hooks.no_prompt`",
+            "        use std::io::IsTerminal;",
+            "        !self.quiet",
+            "            && self.capture.is_none()",
+            "            && std::io::stdin().is_terminal()",
+            "            && std::io::stdout().is_terminal()",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.no_prompt"
+          ],
+          "requirements": "design.requirements.hooks.no_prompt",
+          "text": [
+            ":::{req} no_prompt",
+            "A `cargo agents` process started by an agent hook MUST NOT read from stdin to ask the user a question. Symposium MUST prompt only when its output is neither quiet nor capturing and both stdin and stdout are terminals.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `is_interactive` returns true only when the Output is not quiet, not capturing, and both stdin and stdout are terminals; that is word-for-word the condition hooks.no_prompt allows prompting under, and all four false branches are the cases where it forbids it. It prints nothing, so no output requirement applies.",
+      "rust_item": "impl[Output]/fn[is_interactive]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.messages_stdout",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[emit]",
+          "text": [
+            "    // {impl}`design.requirements.output.quiet`",
+            "    // {impl}`design.requirements.output.capture`",
+            "    // {impl}`design.requirements.output.messages_stdout`",
+            "    fn emit(&self, msg: String) {",
+            "        if self.quiet {",
+            "            return;",
+            "        }",
+            "        if let Some(buf) = &self.capture {",
+            "            buf.lock().unwrap().push(msg);",
+            "        } else {",
+            "            println!(\"{msg}\");",
+            "        }",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.messages_stdout"
+          ],
+          "requirements": "design.requirements.output.messages_stdout",
+          "text": [
+            ":::{req} messages_stdout",
+            "A normal `Output` MUST print every message other than a warning to stdout.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `emit` has three branches: quiet returns without printing (output.quiet); capturing pushes the message to the buffer, preserving call order (output.capture); otherwise println! writes it to stdout (output.messages_stdout). It is used for every non-warning message. warnings_stderr is emit_err's job; display_path and hooks requirements do not apply.",
+      "rust_item": "impl[Output]/fn[emit]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.warnings_stderr",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[emit_err]",
+          "text": [
+            "    // {impl}`design.requirements.output.quiet`",
+            "    // {impl}`design.requirements.output.capture`",
+            "    // {impl}`design.requirements.output.warnings_stderr`",
+            "    fn emit_err(&self, msg: String) {",
+            "        if self.quiet {",
+            "            return;",
+            "        }",
+            "        if let Some(buf) = &self.capture {",
+            "            buf.lock().unwrap().push(msg);",
+            "        } else {",
+            "            eprintln!(\"{msg}\");",
+            "        }",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.warnings_stderr"
+          ],
+          "requirements": "design.requirements.output.warnings_stderr",
+          "text": [
+            ":::{req} warnings_stderr",
+            "A normal `Output` MUST print warnings to stderr.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `emit_err` has three branches: quiet returns without printing (output.quiet); capturing pushes the message to the same buffer as emit, so warnings are recorded in order with other messages (output.capture); otherwise eprintln! writes it to stderr (output.warnings_stderr). It is used only for warnings. display_path and hooks requirements do not apply.",
+      "rust_item": "impl[Output]/fn[emit_err]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.messages_stdout",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[already_ok]",
+          "text": [
+            "    /// Something was already in place, no action needed.",
+            "    // {impl}`design.requirements.output.quiet`",
+            "    // {impl}`design.requirements.output.capture`",
+            "    // {impl}`design.requirements.output.messages_stdout`",
+            "    pub fn already_ok(&self, msg: impl std::fmt::Display) {",
+            "        self.emit(format!(\"🟢 {msg}\"));",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.messages_stdout"
+          ],
+          "requirements": "design.requirements.output.messages_stdout",
+          "text": [
+            ":::{req} messages_stdout",
+            "A normal `Output` MUST print every message other than a warning to stdout.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `already_ok` formats one message and passes it to `emit`, so its observable behavior is exactly that path's three branches: quiet drops it (output.quiet), capturing records it in the buffer in call order (output.capture), otherwise it is printed to stdout (output.messages_stdout). The emoji prefix is presentation not constrained by any requirement. display_path does not apply (no path handling); hooks.no_prompt does not apply (no stdin read or interactivity decision); hooks.stdout_protocol is satisfied by the hook entry point choosing a quiet Output and is cited there, not by this formatter.",
+      "rust_item": "impl[Output]/fn[already_ok]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.messages_stdout",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[done]",
+          "text": [
+            "    /// An action was taken successfully (created, added, wrote).",
+            "    // {impl}`design.requirements.output.quiet`",
+            "    // {impl}`design.requirements.output.capture`",
+            "    // {impl}`design.requirements.output.messages_stdout`",
+            "    pub fn done(&self, msg: impl std::fmt::Display) {",
+            "        self.emit(format!(\"✅ {msg}\"));",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.messages_stdout"
+          ],
+          "requirements": "design.requirements.output.messages_stdout",
+          "text": [
+            ":::{req} messages_stdout",
+            "A normal `Output` MUST print every message other than a warning to stdout.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `done` formats one message and passes it to `emit`, so its observable behavior is exactly that path's three branches: quiet drops it (output.quiet), capturing records it in the buffer in call order (output.capture), otherwise it is printed to stdout (output.messages_stdout). The emoji prefix is presentation not constrained by any requirement. display_path does not apply (no path handling); hooks.no_prompt does not apply (no stdin read or interactivity decision); hooks.stdout_protocol is satisfied by the hook entry point choosing a quiet Output and is cited there, not by this formatter.",
+      "rust_item": "impl[Output]/fn[done]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.messages_stdout",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[added]",
+          "text": [
+            "    /// A new item was discovered or added.",
+            "    // {impl}`design.requirements.output.quiet`",
+            "    // {impl}`design.requirements.output.capture`",
+            "    // {impl}`design.requirements.output.messages_stdout`",
+            "    pub fn added(&self, msg: impl std::fmt::Display) {",
+            "        self.emit(format!(\"➕ {msg}\"));",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.messages_stdout"
+          ],
+          "requirements": "design.requirements.output.messages_stdout",
+          "text": [
+            ":::{req} messages_stdout",
+            "A normal `Output` MUST print every message other than a warning to stdout.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `added` formats one message and passes it to `emit`, so its observable behavior is exactly that path's three branches: quiet drops it (output.quiet), capturing records it in the buffer in call order (output.capture), otherwise it is printed to stdout (output.messages_stdout). The emoji prefix is presentation not constrained by any requirement. display_path does not apply (no path handling); hooks.no_prompt does not apply (no stdin read or interactivity decision); hooks.stdout_protocol is satisfied by the hook entry point choosing a quiet Output and is cited there, not by this formatter.",
+      "rust_item": "impl[Output]/fn[added]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.messages_stdout",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[removed]",
+          "text": [
+            "    /// An item was removed.",
+            "    // {impl}`design.requirements.output.quiet`",
+            "    // {impl}`design.requirements.output.capture`",
+            "    // {impl}`design.requirements.output.messages_stdout`",
+            "    pub fn removed(&self, msg: impl std::fmt::Display) {",
+            "        self.emit(format!(\"➖ {msg}\"));",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.messages_stdout"
+          ],
+          "requirements": "design.requirements.output.messages_stdout",
+          "text": [
+            ":::{req} messages_stdout",
+            "A normal `Output` MUST print every message other than a warning to stdout.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `removed` formats one message and passes it to `emit`, so its observable behavior is exactly that path's three branches: quiet drops it (output.quiet), capturing records it in the buffer in call order (output.capture), otherwise it is printed to stdout (output.messages_stdout). The emoji prefix is presentation not constrained by any requirement. display_path does not apply (no path handling); hooks.no_prompt does not apply (no stdin read or interactivity decision); hooks.stdout_protocol is satisfied by the hook entry point choosing a quiet Output and is cited there, not by this formatter.",
+      "rust_item": "impl[Output]/fn[removed]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.messages_stdout",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[info]",
+          "text": [
+            "    /// Informational status (not an action).",
+            "    // {impl}`design.requirements.output.quiet`",
+            "    // {impl}`design.requirements.output.capture`",
+            "    // {impl}`design.requirements.output.messages_stdout`",
+            "    pub fn info(&self, msg: impl std::fmt::Display) {",
+            "        self.emit(format!(\"ℹ️  {msg}\"));",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.messages_stdout"
+          ],
+          "requirements": "design.requirements.output.messages_stdout",
+          "text": [
+            ":::{req} messages_stdout",
+            "A normal `Output` MUST print every message other than a warning to stdout.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `info` formats one message and passes it to `emit`, so its observable behavior is exactly that path's three branches: quiet drops it (output.quiet), capturing records it in the buffer in call order (output.capture), otherwise it is printed to stdout (output.messages_stdout). The emoji prefix is presentation not constrained by any requirement. display_path does not apply (no path handling); hooks.no_prompt does not apply (no stdin read or interactivity decision); hooks.stdout_protocol is satisfied by the hook entry point choosing a quiet Output and is cited there, not by this formatter.",
+      "rust_item": "impl[Output]/fn[info]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.warnings_stderr",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[warn]",
+          "text": [
+            "    /// A warning (something went wrong but not fatal).",
+            "    // {impl}`design.requirements.output.quiet`",
+            "    // {impl}`design.requirements.output.capture`",
+            "    // {impl}`design.requirements.output.warnings_stderr`",
+            "    pub fn warn(&self, msg: impl std::fmt::Display) {",
+            "        self.emit_err(format!(\"⚠️  {msg}\"));",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.warnings_stderr"
+          ],
+          "requirements": "design.requirements.output.warnings_stderr",
+          "text": [
+            ":::{req} warnings_stderr",
+            "A normal `Output` MUST print warnings to stderr.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `warn` formats one message and passes it to `emit_err`, so its observable behavior is exactly that path's three branches: quiet drops it (output.quiet), capturing records it in the buffer in call order (output.capture), otherwise it is printed to stderr (output.warnings_stderr). The emoji prefix is presentation not constrained by any requirement. display_path does not apply (no path handling); hooks.no_prompt does not apply (no stdin read or interactivity decision); hooks.stdout_protocol is satisfied by the hook entry point choosing a quiet Output and is cited there, not by this formatter.",
+      "rust_item": "impl[Output]/fn[warn]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.messages_stdout",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[blank]",
+          "text": [
+            "    /// Print a blank line for spacing.",
+            "    // {impl}`design.requirements.output.quiet`",
+            "    // {impl}`design.requirements.output.capture`",
+            "    // {impl}`design.requirements.output.messages_stdout`",
+            "    pub fn blank(&self) {",
+            "        self.emit(String::new());",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.messages_stdout"
+          ],
+          "requirements": "design.requirements.output.messages_stdout",
+          "text": [
+            ":::{req} messages_stdout",
+            "A normal `Output` MUST print every message other than a warning to stdout.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `blank` formats one message and passes it to `emit`, so its observable behavior is exactly that path's three branches: quiet drops it (output.quiet), capturing records it in the buffer in call order (output.capture), otherwise it is printed to stdout (output.messages_stdout). The emoji prefix is presentation not constrained by any requirement. display_path does not apply (no path handling); hooks.no_prompt does not apply (no stdin read or interactivity decision); hooks.stdout_protocol is satisfied by the hook entry point choosing a quiet Output and is cited there, not by this formatter.",
+      "rust_item": "impl[Output]/fn[blank]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.capture",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.messages_stdout",
+          "role": "impl"
+        },
+        {
+          "name": "design.requirements.output.quiet",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "impl[Output]/fn[println]",
+          "text": [
+            "    /// Print arbitrary text (for prompts, headers, etc.).",
+            "    // {impl}`design.requirements.output.quiet`",
+            "    // {impl}`design.requirements.output.capture`",
+            "    // {impl}`design.requirements.output.messages_stdout`",
+            "    pub fn println(&self, msg: impl std::fmt::Display) {",
+            "        self.emit(format!(\"{msg}\"));",
+            "    }"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.capture"
+          ],
+          "requirements": "design.requirements.output.capture",
+          "text": [
+            ":::{req} capture",
+            "A capturing `Output` MUST record every message, warnings included, in order, instead of printing it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.messages_stdout"
+          ],
+          "requirements": "design.requirements.output.messages_stdout",
+          "text": [
+            ":::{req} messages_stdout",
+            "A normal `Output` MUST print every message other than a warning to stdout.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.quiet"
+          ],
+          "requirements": "design.requirements.output.quiet",
+          "text": [
+            ":::{req} quiet",
+            "A quiet `Output` MUST NOT print any message.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `println` formats one message and passes it to `emit`, so its observable behavior is exactly that path's three branches: quiet drops it (output.quiet), capturing records it in the buffer in call order (output.capture), otherwise it is printed to stdout (output.messages_stdout). The emoji prefix is presentation not constrained by any requirement. display_path does not apply (no path handling); hooks.no_prompt does not apply (no stdin read or interactivity decision); hooks.stdout_protocol is satisfied by the hook entry point choosing a quiet Output and is cited there, not by this formatter.",
+      "rust_item": "impl[Output]/fn[println]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.output.display_path",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "src/output.rs",
+          "rust_item": "fn[display_path]",
+          "text": [
+            "/// Replace the home directory prefix with `~` for display.",
+            "// {impl}`design.requirements.output.display_path`",
+            "pub fn display_path(path: &Path) -> String {",
+            "    if let Some(home) = dirs::home_dir()",
+            "        && let Ok(rest) = path.strip_prefix(&home)",
+            "    {",
+            "        return format!(\"~/{}\", rest.display());",
+            "    }",
+            "    path.display().to_string()",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.output.display_path"
+          ],
+          "requirements": "design.requirements.output.display_path",
+          "text": [
+            ":::{req} display_path",
+            "Symposium SHOULD display a path under the user's home directory with the home prefix replaced by `~`.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Applicable set found by reading the function and every output and hooks requirement (output.md has five; hooks.md checked for no_prompt, stdout_protocol, builtin_quiet, hook_output_captured). `display_path` returns `~/<rest>` when the path is under the home directory and the path unchanged otherwise (including when no home directory is known); output.display_path specifies the first branch and the second is the absence of a home prefix it describes. It emits nothing, so the other output requirements do not apply, and no hooks requirement concerns path display.",
+      "rust_item": "fn[display_path]"
+    }
+  ],
+  "rust_file": "src/output.rs"
+}

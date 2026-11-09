@@ -14,6 +14,8 @@ pub struct Output {
 }
 
 impl Output {
+    // {impl}`design.requirements.output.messages_stdout`
+    // {impl}`design.requirements.output.warnings_stderr`
     pub fn normal() -> Self {
         Self {
             quiet: false,
@@ -21,6 +23,8 @@ impl Output {
         }
     }
 
+    // {impl}`design.requirements.output.quiet`
+    // {impl}`design.requirements.hooks.no_prompt`
     pub fn quiet() -> Self {
         Self {
             quiet: true,
@@ -30,6 +34,8 @@ impl Output {
 
     /// Create an output that captures all messages into a buffer
     /// instead of printing them.
+    // {impl}`design.requirements.output.capture`
+    // {impl}`design.requirements.hooks.no_prompt`
     pub fn capturing() -> Self {
         Self {
             quiet: false,
@@ -38,6 +44,7 @@ impl Output {
     }
 
     /// Return all captured messages. Panics if not in capturing mode.
+    // {impl}`design.requirements.output.capture`
     pub fn captured(&self) -> Vec<String> {
         self.capture
             .as_ref()
@@ -63,6 +70,9 @@ impl Output {
             && std::io::stdout().is_terminal()
     }
 
+    // {impl}`design.requirements.output.quiet`
+    // {impl}`design.requirements.output.capture`
+    // {impl}`design.requirements.output.messages_stdout`
     fn emit(&self, msg: String) {
         if self.quiet {
             return;
@@ -74,6 +84,9 @@ impl Output {
         }
     }
 
+    // {impl}`design.requirements.output.quiet`
+    // {impl}`design.requirements.output.capture`
+    // {impl}`design.requirements.output.warnings_stderr`
     fn emit_err(&self, msg: String) {
         if self.quiet {
             return;
@@ -86,47 +99,72 @@ impl Output {
     }
 
     /// Something was already in place, no action needed.
+    // {impl}`design.requirements.output.quiet`
+    // {impl}`design.requirements.output.capture`
+    // {impl}`design.requirements.output.messages_stdout`
     pub fn already_ok(&self, msg: impl std::fmt::Display) {
         self.emit(format!("🟢 {msg}"));
     }
 
     /// An action was taken successfully (created, added, wrote).
+    // {impl}`design.requirements.output.quiet`
+    // {impl}`design.requirements.output.capture`
+    // {impl}`design.requirements.output.messages_stdout`
     pub fn done(&self, msg: impl std::fmt::Display) {
         self.emit(format!("✅ {msg}"));
     }
 
     /// A new item was discovered or added.
+    // {impl}`design.requirements.output.quiet`
+    // {impl}`design.requirements.output.capture`
+    // {impl}`design.requirements.output.messages_stdout`
     pub fn added(&self, msg: impl std::fmt::Display) {
         self.emit(format!("➕ {msg}"));
     }
 
     /// An item was removed.
+    // {impl}`design.requirements.output.quiet`
+    // {impl}`design.requirements.output.capture`
+    // {impl}`design.requirements.output.messages_stdout`
     pub fn removed(&self, msg: impl std::fmt::Display) {
         self.emit(format!("➖ {msg}"));
     }
 
     /// Informational status (not an action).
+    // {impl}`design.requirements.output.quiet`
+    // {impl}`design.requirements.output.capture`
+    // {impl}`design.requirements.output.messages_stdout`
     pub fn info(&self, msg: impl std::fmt::Display) {
         self.emit(format!("ℹ️  {msg}"));
     }
 
     /// A warning (something went wrong but not fatal).
+    // {impl}`design.requirements.output.quiet`
+    // {impl}`design.requirements.output.capture`
+    // {impl}`design.requirements.output.warnings_stderr`
     pub fn warn(&self, msg: impl std::fmt::Display) {
         self.emit_err(format!("⚠️  {msg}"));
     }
 
     /// Print a blank line for spacing.
+    // {impl}`design.requirements.output.quiet`
+    // {impl}`design.requirements.output.capture`
+    // {impl}`design.requirements.output.messages_stdout`
     pub fn blank(&self) {
         self.emit(String::new());
     }
 
     /// Print arbitrary text (for prompts, headers, etc.).
+    // {impl}`design.requirements.output.quiet`
+    // {impl}`design.requirements.output.capture`
+    // {impl}`design.requirements.output.messages_stdout`
     pub fn println(&self, msg: impl std::fmt::Display) {
         self.emit(format!("{msg}"));
     }
 }
 
 /// Replace the home directory prefix with `~` for display.
+// {impl}`design.requirements.output.display_path`
 pub fn display_path(path: &Path) -> String {
     if let Some(home) = dirs::home_dir()
         && let Ok(rest) = path.strip_prefix(&home)

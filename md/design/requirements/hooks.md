@@ -273,3 +273,27 @@ Symposium MAY merge the output of a symposium-format plugin hook that is a JSON 
 *Source:* Documented in md/reference/plugin-definition.md:438 "Valid JSON objects are merged together across successful hooks".
 
 *Note:* Open question for maintainers: `md/design/hooks.md` and `md/reference/hook-events.md` say symposium-format output is converted to the host agent's format, and this fallback skips the deny-is-final check and context joining. Kept as current behavior until that is decided.
+
+:::{req} claude_reload_skills
+Symposium's `SessionStart` response to Claude Code MUST set `reloadSkills` to `true`.
+:::
+
+*Source:* Documented in md/design/hook-flow.md:40 "Claude Code's `SessionStart` response always carries `reloadSkills: true`".
+
+:::{req} malformed_payload_fails
+A `cargo agents hook` process given a payload it cannot parse MUST exit with a failure status and write nothing to stdout.
+:::
+
+*Source:* Inferred from the code only (`execute_hook`, `run`); needs maintainer review.
+
+:::{req} unreadable_payload_succeeds
+A `cargo agents hook` process that cannot read its payload from stdin MUST exit successfully and write nothing to stdout.
+:::
+
+*Source:* Inferred from the code only (`run`); needs maintainer review.
+
+:::{req} block_reason_nonempty
+When a blocking plugin hook writes nothing to stderr, Symposium MUST give the agent a non-empty generic block reason.
+:::
+
+*Source:* Inferred from the code only (`blocked_response`); needs maintainer review.

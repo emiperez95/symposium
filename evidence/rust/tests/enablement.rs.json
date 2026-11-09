@@ -1,0 +1,2195 @@
+{
+  "functions": [
+    {
+      "citations": [
+        {
+          "name": "design.requirements.internal.internal_detail",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[find_installed_skills]",
+          "text": [
+            "/// Every installed skill directory under `parent` named `<skill_name>` or",
+            "/// `<skill_name>-<hash>`.",
+            "// {impl}`design.requirements.internal.internal_detail`",
+            "fn find_installed_skills(parent: &Path, skill_name: &str) -> Vec<PathBuf> {",
+            "    let Ok(entries) = std::fs::read_dir(parent) else {",
+            "        return Vec::new();",
+            "    };",
+            "    let mut out = Vec::new();",
+            "    for entry in entries.flatten() {",
+            "        let path = entry.path();",
+            "        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {",
+            "            continue;",
+            "        };",
+            "        let matches = name == skill_name",
+            "            || (name.starts_with(skill_name)",
+            "                && name.as_bytes().get(skill_name.len()) == Some(&b'-'));",
+            "        if matches && path.join(\"SKILL.md\").is_file() {",
+            "            out.push(path);",
+            "        }",
+            "    }",
+            "    out.sort();",
+            "    out",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.internal.internal_detail"
+          ],
+          "requirements": "design.requirements.internal.internal_detail",
+          "text": [
+            ":::{req} internal_detail",
+            "A function cited with this requirement MUST NOT introduce end-user-observable behavior beyond the requirements its callers cite.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Test helper: lists installed skill directories under a parent whose name is the skill name or the skill name plus a `-<hash>` suffix and that contain SKILL.md. It only reads the test's temp tree and asserts nothing, so it adds no end-user-observable behavior; the tests that call it cite the requirements they check. internal.internal_detail is the only applicable requirement.",
+      "rust_item": "fn[find_installed_skills]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.internal.internal_detail",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[find_installed_skill]",
+          "text": [
+            "/// The unique installed skill directory with this name. Panics on 0 or >1.",
+            "// {impl}`design.requirements.internal.internal_detail`",
+            "fn find_installed_skill(parent: &Path, skill_name: &str) -> PathBuf {",
+            "    let mut hits = find_installed_skills(parent, skill_name);",
+            "    assert_eq!(",
+            "        hits.len(),",
+            "        1,",
+            "        \"expected exactly one installed skill named `{skill_name}` under {}, found {hits:?}\",",
+            "        parent.display(),",
+            "    );",
+            "    hits.pop().unwrap()",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.internal.internal_detail"
+          ],
+          "requirements": "design.requirements.internal.internal_detail",
+          "text": [
+            ":::{req} internal_detail",
+            "A function cited with this requirement MUST NOT introduce end-user-observable behavior beyond the requirements its callers cite.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Test helper: returns the single installed directory for a skill name via find_installed_skills and panics on zero or several. It is a test-fixture assertion aid with no product behavior; callers cite the requirements they check. internal.internal_detail is the only applicable requirement.",
+      "rust_item": "fn[find_installed_skill]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.internal.internal_detail",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[read_config]",
+          "text": [
+            "// {impl}`design.requirements.internal.internal_detail`",
+            "fn read_config(ctx: &TestContext) -> String {",
+            "    std::fs::read_to_string(ctx.sym.config_dir().join(\"config.toml\")).unwrap()",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.internal.internal_detail"
+          ],
+          "requirements": "design.requirements.internal.internal_detail",
+          "text": [
+            ":::{req} internal_detail",
+            "A function cited with this requirement MUST NOT introduce end-user-observable behavior beyond the requirements its callers cite.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Test helper: reads config.toml from the test Symposium's config dir. Pure fixture accessor, no product behavior; internal.internal_detail is the only applicable requirement.",
+      "rust_item": "fn[read_config]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.internal.internal_detail",
+          "role": "impl"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[with_report]",
+          "text": [
+            "/// Run `f` with a JSON report layer installed and return the drained events.",
+            "// {impl}`design.requirements.internal.internal_detail`",
+            "async fn with_report<F>(f: F) -> Vec<serde_json::Value>",
+            "where",
+            "    F: AsyncFnOnce(),",
+            "{",
+            "    use symposium::report::{ReportLayer, ReportMode};",
+            "    use tracing_subscriber::layer::SubscriberExt;",
+            "",
+            "    symposium_testlib::install_tracing_baseline();",
+            "    let (layer, handle) = ReportLayer::new(ReportMode::Json, tracing::Level::INFO);",
+            "    let subscriber = tracing_subscriber::registry().with(layer);",
+            "    let guard = tracing::subscriber::set_default(subscriber);",
+            "    f().await;",
+            "    drop(guard);",
+            "    handle.drain()",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.internal.internal_detail"
+          ],
+          "requirements": "design.requirements.internal.internal_detail",
+          "text": [
+            ":::{req} internal_detail",
+            "A function cited with this requirement MUST NOT introduce end-user-observable behavior beyond the requirements its callers cite.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Test helper: installs a JSON ReportLayer for the duration of a closure and returns the drained report events. It only observes product output for assertions in callers; internal.internal_detail is the only applicable requirement.",
+      "rust_item": "fn[with_report]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.consent.consented_active",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.crate_name_matching",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.unconsented_inactive",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.use_idempotent",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.use_scope",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.use_syncs",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[use_records_workspace_entry_and_installs]",
+          "text": [
+            "/// `use <dep>` records a workspace-scoped entry and installs the",
+            "/// dependency's embedded skills right away; running it again changes",
+            "/// nothing.",
+            "// {test}`design.requirements.consent.unconsented_inactive`",
+            "// {test}`design.requirements.consent.consented_active`",
+            "// {test}`design.requirements.consent.crate_name_matching`",
+            "// {test}`design.requirements.enablement.use_scope`",
+            "// {test}`design.requirements.enablement.use_idempotent`",
+            "// {test}`design.requirements.enablement.use_syncs`",
+            "#[tokio::test]",
+            "async fn use_records_workspace_entry_and_installs() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let skills_dir = ctx.workspace_root.clone().unwrap().join(\".claude/skills\");",
+            "",
+            "            // Unconsented, the dependency's skills stay out.",
+            "            ctx.symposium(&[\"sync\"]).await?;",
+            "            assert!(find_installed_skills(&skills_dir, \"a-guidance\").is_empty());",
+            "",
+            "            ctx.symposium(&[\"use\", \"crate-a\"]).await?;",
+            "            find_installed_skill(&skills_dir, \"a-guidance\");",
+            "",
+            "            let config = read_config(&ctx);",
+            "            assert!(config.contains(\"crate-a\"), \"entry recorded: {config}\");",
+            "            assert!(",
+            "                config.contains(\"workspace\"),",
+            "                \"entry is workspace-scoped: {config}\"",
+            "            );",
+            "",
+            "            ctx.symposium(&[\"use\", \"crate-a\"]).await?;",
+            "            assert_eq!(config, read_config(&ctx), \"re-using must not duplicate\");",
+            "            ctx.symposium(&[\"use\", \"crate_a\"]).await?;",
+            "            assert_eq!(",
+            "                config,",
+            "                read_config(&ctx),",
+            "                \"another spelling must not duplicate\"",
+            "            );",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.consented_active"
+          ],
+          "requirements": "design.requirements.consent.consented_active",
+          "text": [
+            ":::{req} consented_active",
+            "Symposium MUST activate the plugin embedded in a workspace dependency that `[plugins] auto-enable` or an applicable `[plugins] use` entry names, when `[plugins] disable` does not name it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.crate_name_matching"
+          ],
+          "requirements": "design.requirements.consent.crate_name_matching",
+          "text": [
+            ":::{req} crate_name_matching",
+            "Symposium MUST treat hyphens and underscores as equal when it compares a `[plugins]` or `cargo agents use` name with a cargo crate name.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.unconsented_inactive"
+          ],
+          "requirements": "design.requirements.consent.unconsented_inactive",
+          "text": [
+            ":::{req} unconsented_inactive",
+            "Symposium MUST NOT activate a plugin embedded in a workspace dependency unless `[plugins] auto-enable` or an applicable `[plugins] use` entry names that dependency.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_idempotent"
+          ],
+          "requirements": "design.requirements.enablement.use_idempotent",
+          "text": [
+            ":::{req} use_idempotent",
+            "`cargo agents use <name>` MUST NOT add an entry when one in the requested scope already names the same package.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_scope"
+          ],
+          "requirements": "design.requirements.enablement.use_scope",
+          "text": [
+            ":::{req} use_scope",
+            "`cargo agents use <name>` MUST record its entry for the current workspace, or unscoped when `--global` is given.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_syncs"
+          ],
+          "requirements": "design.requirements.enablement.use_syncs",
+          "text": [
+            ":::{req} use_syncs",
+            "`cargo agents use` and `cargo agents use --remove` MUST sync the workspace after changing the config.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Asserts: (1) after a plain sync the unconsented crate-a's a-guidance skill is not installed (consent.unconsented_inactive); (2) after `use crate-a` the skill is installed immediately, without a separate sync (consent.consented_active, enablement.use_syncs); (3) the recorded entry names crate-a and is workspace-scoped (enablement.use_scope); (4) re-running `use crate-a` leaves the config unchanged (enablement.use_idempotent); (5) `use crate_a` also leaves it unchanged, so the underscore spelling is the same crate (consent.crate_name_matching, enablement.use_idempotent). I checked the consent and enablement chapters and the hooks chapter; no other requirement is asserted, so the citations are complete.",
+      "rust_item": "fn[use_records_workspace_entry_and_installs]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.consent.crate_name_matching",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.use_idempotent",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.use_scope",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[use_global_records_unscoped_entry]",
+          "text": [
+            "/// `--global` records a plain-string entry with no workspace scope.",
+            "// {test}`design.requirements.consent.crate_name_matching`",
+            "// {test}`design.requirements.enablement.use_scope`",
+            "// {test}`design.requirements.enablement.use_idempotent`",
+            "#[tokio::test]",
+            "async fn use_global_records_unscoped_entry() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            ctx.symposium(&[\"use\", \"--global\", \"crate-a\"]).await?;",
+            "",
+            "            let config = read_config(&ctx);",
+            "            assert!(",
+            "                config.contains(r#\"use = [\"crate-a\"]\"#),",
+            "                \"global entry is a plain string: {config}\"",
+            "            );",
+            "            ctx.symposium(&[\"use\", \"--global\", \"crate_a\"]).await?;",
+            "            assert_eq!(",
+            "                config,",
+            "                read_config(&ctx),",
+            "                \"another spelling must not duplicate\"",
+            "            );",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.crate_name_matching"
+          ],
+          "requirements": "design.requirements.consent.crate_name_matching",
+          "text": [
+            ":::{req} crate_name_matching",
+            "Symposium MUST treat hyphens and underscores as equal when it compares a `[plugins]` or `cargo agents use` name with a cargo crate name.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_idempotent"
+          ],
+          "requirements": "design.requirements.enablement.use_idempotent",
+          "text": [
+            ":::{req} use_idempotent",
+            "`cargo agents use <name>` MUST NOT add an entry when one in the requested scope already names the same package.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_scope"
+          ],
+          "requirements": "design.requirements.enablement.use_scope",
+          "text": [
+            ":::{req} use_scope",
+            "`cargo agents use <name>` MUST record its entry for the current workspace, or unscoped when `--global` is given.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Asserts `use --global crate-a` records an unscoped plain-string `use = [\"crate-a\"]` entry (enablement.use_scope) and that `use --global crate_a` afterwards leaves the config unchanged: the same package in the same scope is not added twice (enablement.use_idempotent) because hyphen and underscore compare equal for a crate name (consent.crate_name_matching). No other requirement is asserted; citations are complete.",
+      "rust_item": "fn[use_global_records_unscoped_entry]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.use_unknown_rejected",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[use_unknown_name_errors]",
+          "text": [
+            "/// A name that is neither a workspace dependency nor a registry hit is",
+            "/// rejected instead of recorded.",
+            "// {test}`design.requirements.enablement.use_unknown_rejected`",
+            "#[tokio::test]",
+            "async fn use_unknown_name_errors() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let err = ctx",
+            "                .symposium(&[\"use\", \"no-such-plugin\"])",
+            "                .await",
+            "                .expect_err(\"unknown name should be rejected\");",
+            "            assert!(",
+            "                err.to_string()",
+            "                    .contains(\"no package named `no-such-plugin`\"),",
+            "                \"{err}\"",
+            "            );",
+            "            assert!(",
+            "                !read_config(&ctx).contains(\"no-such-plugin\"),",
+            "                \"nothing recorded\"",
+            "            );",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_unknown_rejected"
+          ],
+          "requirements": "design.requirements.enablement.use_unknown_rejected",
+          "text": [
+            ":::{req} use_unknown_rejected",
+            "`cargo agents use <name>` MUST fail without changing the config when `<name>` resolves to no package.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Asserts `use no-such-plugin` fails with `no package named` and the config does not mention the name afterwards: exactly enablement.use_unknown_rejected (fail without changing the config when the name resolves to no package). Nothing else is asserted; citation is complete.",
+      "rust_item": "fn[use_unknown_name_errors]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.use_registry_noop",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[use_registry_content_is_a_noop]",
+          "text": [
+            "/// A registry is a trust root, so `use`-ing something it already offers is a",
+            "/// no-op rather than a recorded entry.",
+            "// {test}`design.requirements.enablement.use_registry_noop`",
+            "#[tokio::test]",
+            "async fn use_registry_content_is_a_noop() {",
+            "    with_fixture(TestMode::SimulationOnly, &[\"plugins0\"], async |mut ctx| {",
+            "        ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "        ctx.symposium(&[\"use\", \"serde-guidance\"]).await?;",
+            "        assert!(",
+            "            !read_config(&ctx).contains(\"serde-guidance\"),",
+            "            \"{}\",",
+            "            read_config(&ctx)",
+            "        );",
+            "        Ok(())",
+            "    })",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_registry_noop"
+          ],
+          "requirements": "design.requirements.enablement.use_registry_noop",
+          "text": [
+            ":::{req} use_registry_noop",
+            "`cargo agents use <name>` MUST record nothing when a configured registry already activates the named plugin.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "With a user-plugins registry that already activates serde-guidance, asserts `use serde-guidance` succeeds and records nothing in the config: enablement.use_registry_noop. Nothing else is asserted; citation is complete.",
+      "rust_item": "fn[use_registry_content_is_a_noop]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.consent.registry_name_exact",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.use_unknown_rejected",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[use_matches_registry_plugin_names_exactly]",
+          "text": [
+            "// {test}`design.requirements.consent.registry_name_exact`",
+            "// {test}`design.requirements.enablement.use_unknown_rejected`",
+            "#[tokio::test]",
+            "async fn use_matches_registry_plugin_names_exactly() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"dormant-plugin0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let err = ctx",
+            "                .symposium(&[\"use\", \"gateless_plugin\"])",
+            "                .await",
+            "                .expect_err(\"a registry plugin name is not a crate name\");",
+            "            assert!(",
+            "                err.to_string()",
+            "                    .contains(\"no package named `gateless_plugin`\"),",
+            "                \"{err}\"",
+            "            );",
+            "            assert!(!read_config(&ctx).contains(\"gateless_plugin\"));",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.registry_name_exact"
+          ],
+          "requirements": "design.requirements.consent.registry_name_exact",
+          "text": [
+            ":::{req} registry_name_exact",
+            "Symposium MUST compare a `[plugins]` or `cargo agents use` name with a registry plugin's name exactly.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_unknown_rejected"
+          ],
+          "requirements": "design.requirements.enablement.use_unknown_rejected",
+          "text": [
+            ":::{req} use_unknown_rejected",
+            "`cargo agents use <name>` MUST fail without changing the config when `<name>` resolves to no package.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "With the registry plugin `gateless-plugin`, asserts `use gateless_plugin` is not matched to it (registry names compare exactly: consent.registry_name_exact) and, since no crate has that name either, fails with `no package named` and records nothing (enablement.use_unknown_rejected). Citations are complete.",
+      "rust_item": "fn[use_matches_registry_plugin_names_exactly]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.consent.consented_active",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.crate_name_matching",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.disable_wins",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[plugins_entries_match_crate_names_like_cargo]",
+          "text": [
+            "/// A crate name matches the way cargo matches it, so `crate_a` names the",
+            "/// dependency `crate-a` in `auto-enable`, `use` and `disable` alike.",
+            "// {test}`design.requirements.consent.crate_name_matching`",
+            "// {test}`design.requirements.consent.consented_active`",
+            "// {test}`design.requirements.consent.disable_wins`",
+            "#[tokio::test]",
+            "async fn plugins_entries_match_crate_names_like_cargo() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let skills_dir = ctx.workspace_root.clone().unwrap().join(\".claude/skills\");",
+            "            let installed = || !find_installed_skills(&skills_dir, \"a-guidance\").is_empty();",
+            "",
+            "            ctx.sym.config.plugins.auto_enable = vec![\"crate_a\".into()];",
+            "            ctx.symposium(&[\"sync\"]).await?;",
+            "            assert!(installed(), \"auto-enable\");",
+            "",
+            "            ctx.sym.config.plugins.auto_enable.clear();",
+            "            ctx.sym.config.plugins.used = vec![UseEntry::Global(\"crate_a\".into())];",
+            "            ctx.symposium(&[\"sync\"]).await?;",
+            "            assert!(installed(), \"use\");",
+            "",
+            "            ctx.sym.config.plugins.used.clear();",
+            "            ctx.sym.config.plugins.auto_enable = vec![\"*\".into()];",
+            "            ctx.sym.config.plugins.disable = vec![\"crate_a\".into()];",
+            "            ctx.symposium(&[\"sync\"]).await?;",
+            "            assert!(!installed(), \"disable\");",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.consented_active"
+          ],
+          "requirements": "design.requirements.consent.consented_active",
+          "text": [
+            ":::{req} consented_active",
+            "Symposium MUST activate the plugin embedded in a workspace dependency that `[plugins] auto-enable` or an applicable `[plugins] use` entry names, when `[plugins] disable` does not name it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.crate_name_matching"
+          ],
+          "requirements": "design.requirements.consent.crate_name_matching",
+          "text": [
+            ":::{req} crate_name_matching",
+            "Symposium MUST treat hyphens and underscores as equal when it compares a `[plugins]` or `cargo agents use` name with a cargo crate name.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.disable_wins"
+          ],
+          "requirements": "design.requirements.consent.disable_wins",
+          "text": [
+            ":::{req} disable_wins",
+            "Symposium MUST NOT activate a dependency plugin or `use`d crate that `[plugins] disable` names, even when `[plugins] auto-enable` or a `[plugins] use` entry also names it.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Sets `auto-enable = [crate_a]`, then `use = [crate_a]`, and checks after each sync that dependency crate-a's skill installs (consent.consented_active through both consent forms, with the underscore spelling matching the crate: consent.crate_name_matching); then with `auto-enable = [*]` and `disable = [crate_a]` checks the skill is not installed (consent.disable_wins, again with a folded spelling). Citations cover every assertion.",
+      "rust_item": "fn[plugins_entries_match_crate_names_like_cargo]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.consent.auto_enable_dependencies_only",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.dormant_inactive",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.registry_name_exact",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.unresolved_use_skipped",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.use_wakes_dormant",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.use_disabled_rejected",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[plugins_entries_match_registry_plugin_names_exactly]",
+          "text": [
+            "/// A registry plugin's name matches exactly: `use = [\"gateless_plugin\"]`",
+            "/// neither wakes the dormant `gateless-plugin` nor is taken for a crate, and",
+            "/// `disable = [\"gateless_plugin\"]` does not block it. `auto-enable` is consent",
+            "/// for dependencies, so it wakes no registry plugin whatever the spelling.",
+            "// {test}`design.requirements.consent.registry_name_exact`",
+            "// {test}`design.requirements.consent.auto_enable_dependencies_only`",
+            "// {test}`design.requirements.consent.dormant_inactive`",
+            "// {test}`design.requirements.consent.use_wakes_dormant`",
+            "// {test}`design.requirements.consent.unresolved_use_skipped`",
+            "// {test}`design.requirements.enablement.use_disabled_rejected`",
+            "#[tokio::test]",
+            "async fn plugins_entries_match_registry_plugin_names_exactly() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"dormant-plugin0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let skills_dir = ctx.workspace_root.clone().unwrap().join(\".claude/skills\");",
+            "            let woken = || !find_installed_skills(&skills_dir, \"gateless-guidance\").is_empty();",
+            "",
+            "            ctx.sym.config.plugins.auto_enable = vec![\"gateless-plugin\".into()];",
+            "            ctx.sym.config.plugins.used = vec![UseEntry::Global(\"gateless_plugin\".into())];",
+            "            ctx.symposium(&[\"sync\"]).await?;",
+            "            assert!(!woken(), \"auto-enable and a folded `use` spelling\");",
+            "",
+            "            ctx.sym.config.plugins.auto_enable.clear();",
+            "            ctx.sym.config.plugins.used.clear();",
+            "            ctx.sym.config.plugins.disable = vec![\"gateless_plugin\".into()];",
+            "            ctx.symposium(&[\"use\", \"gateless-plugin\"]).await?;",
+            "            assert!(woken(), \"a folded `disable` spelling\");",
+            "",
+            "            ctx.symposium(&[\"use\", \"--remove\", \"gateless-plugin\"])",
+            "                .await?;",
+            "            ctx.sym.config.plugins.disable = vec![\"gateless-plugin\".into()];",
+            "            let err = ctx",
+            "                .symposium(&[\"use\", \"gateless-plugin\"])",
+            "                .await",
+            "                .expect_err(\"the exact `disable` spelling blocks it\");",
+            "            assert!(err.to_string().contains(\"[plugins] disable\"), \"{err}\");",
+            "            assert!(!woken());",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.auto_enable_dependencies_only"
+          ],
+          "requirements": "design.requirements.consent.auto_enable_dependencies_only",
+          "text": [
+            ":::{req} auto_enable_dependencies_only",
+            "An `[plugins] auto-enable` entry MUST NOT enable anything other than a plugin embedded in a workspace dependency.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.dormant_inactive"
+          ],
+          "requirements": "design.requirements.consent.dormant_inactive",
+          "text": [
+            ":::{req} dormant_inactive",
+            "Symposium MUST NOT activate a registry plugin that no dependency gates unless an applicable `[plugins] use` entry names it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.registry_name_exact"
+          ],
+          "requirements": "design.requirements.consent.registry_name_exact",
+          "text": [
+            ":::{req} registry_name_exact",
+            "Symposium MUST compare a `[plugins]` or `cargo agents use` name with a registry plugin's name exactly.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.unresolved_use_skipped"
+          ],
+          "requirements": "design.requirements.consent.unresolved_use_skipped",
+          "text": [
+            ":::{req} unresolved_use_skipped",
+            "Symposium MUST skip, without failing, a `[plugins] use` entry that no package manager resolves.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.use_wakes_dormant"
+          ],
+          "requirements": "design.requirements.consent.use_wakes_dormant",
+          "text": [
+            ":::{req} use_wakes_dormant",
+            "Symposium MUST activate a dormant registry plugin while an applicable `[plugins] use` entry names it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_disabled_rejected"
+          ],
+          "requirements": "design.requirements.enablement.use_disabled_rejected",
+          "text": [
+            ":::{req} use_disabled_rejected",
+            "`cargo agents use <name>` MUST fail without changing the config when `[plugins] disable` names the package.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "With dormant registry plugin `gateless-plugin`: (1) `auto-enable = [gateless-plugin]` plus `use = [gateless_plugin]` leave it asleep after sync: auto-enable does not wake registry plugins (consent.auto_enable_dependencies_only), the folded use spelling does not name it (consent.registry_name_exact), so it stays dormant (consent.dormant_inactive), and the sync succeeds although `gateless_plugin` resolves to no package (consent.unresolved_use_skipped); (2) with `disable = [gateless_plugin]`, `use gateless-plugin` wakes it (consent.use_wakes_dormant; the folded disable spelling does not match: consent.registry_name_exact); (3) with the exact `disable = [gateless-plugin]`, `use gateless-plugin` fails mentioning `[plugins] disable` and the plugin stays asleep (enablement.use_disabled_rejected). Map correction: the function map listed enablement.use_unknown_rejected, but no unknown-name error is asserted here; the error asserted is the disable refusal. Citations cover every assertion.",
+      "rust_item": "fn[plugins_entries_match_registry_plugin_names_exactly]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.consent.dormant_inactive",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.use_wakes_dormant",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.use_syncs",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[use_wakes_and_remove_sleeps_a_dormant_plugin]",
+          "text": [
+            "/// `use` wakes a dormant registry plugin (one no dependency gates), and",
+            "/// `--remove` puts it back to sleep, reaping its skills.",
+            "// {test}`design.requirements.consent.dormant_inactive`",
+            "// {test}`design.requirements.consent.use_wakes_dormant`",
+            "// {test}`design.requirements.enablement.use_syncs`",
+            "#[tokio::test]",
+            "async fn use_wakes_and_remove_sleeps_a_dormant_plugin() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"dormant-plugin0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let skills_dir = ctx.workspace_root.clone().unwrap().join(\".claude/skills\");",
+            "",
+            "            ctx.symposium(&[\"sync\"]).await?;",
+            "            assert!(find_installed_skills(&skills_dir, \"gateless-guidance\").is_empty());",
+            "",
+            "            ctx.symposium(&[\"use\", \"gateless-plugin\"]).await?;",
+            "            find_installed_skill(&skills_dir, \"gateless-guidance\");",
+            "            assert!(read_config(&ctx).contains(\"gateless-plugin\"));",
+            "",
+            "            ctx.symposium(&[\"use\", \"--remove\", \"gateless-plugin\"])",
+            "                .await?;",
+            "            assert!(find_installed_skills(&skills_dir, \"gateless-guidance\").is_empty());",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.dormant_inactive"
+          ],
+          "requirements": "design.requirements.consent.dormant_inactive",
+          "text": [
+            ":::{req} dormant_inactive",
+            "Symposium MUST NOT activate a registry plugin that no dependency gates unless an applicable `[plugins] use` entry names it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.use_wakes_dormant"
+          ],
+          "requirements": "design.requirements.consent.use_wakes_dormant",
+          "text": [
+            ":::{req} use_wakes_dormant",
+            "Symposium MUST activate a dormant registry plugin while an applicable `[plugins] use` entry names it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_syncs"
+          ],
+          "requirements": "design.requirements.enablement.use_syncs",
+          "text": [
+            ":::{req} use_syncs",
+            "`cargo agents use` and `cargo agents use --remove` MUST sync the workspace after changing the config.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Asserts the dormant registry plugin's skill is absent after plain sync (consent.dormant_inactive), installed right after `use gateless-plugin` with the entry recorded (consent.use_wakes_dormant, enablement.use_syncs), and reaped right after `use --remove` (enablement.use_syncs for the remove side, consent.dormant_inactive once no use entry names it). Citations are complete.",
+      "rust_item": "fn[use_wakes_and_remove_sleeps_a_dormant_plugin]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.remove_requires_entry",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.use_syncs",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[use_remove_reaps_and_then_errors]",
+          "text": [
+            "/// `--remove` drops the entry, reaps the installed skills, and errors when",
+            "/// there is nothing left to remove.",
+            "// {test}`design.requirements.enablement.use_syncs`",
+            "// {test}`design.requirements.enablement.remove_requires_entry`",
+            "#[tokio::test]",
+            "async fn use_remove_reaps_and_then_errors() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let skills_dir = ctx.workspace_root.clone().unwrap().join(\".claude/skills\");",
+            "",
+            "            ctx.symposium(&[\"use\", \"crate-a\"]).await?;",
+            "            find_installed_skill(&skills_dir, \"a-guidance\");",
+            "",
+            "            ctx.symposium(&[\"use\", \"--remove\", \"crate-a\"]).await?;",
+            "            assert!(",
+            "                !read_config(&ctx).contains(\"crate-a\"),",
+            "                \"entry removed: {}\",",
+            "                read_config(&ctx)",
+            "            );",
+            "            assert!(",
+            "                find_installed_skills(&skills_dir, \"a-guidance\").is_empty(),",
+            "                \"skills reaped after removal\"",
+            "            );",
+            "",
+            "            let err = ctx",
+            "                .symposium(&[\"use\", \"--remove\", \"crate-a\"])",
+            "                .await",
+            "                .expect_err(\"nothing left to remove\");",
+            "            assert!(err.to_string().contains(\"no `use` entry\"), \"{err}\");",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.remove_requires_entry"
+          ],
+          "requirements": "design.requirements.enablement.remove_requires_entry",
+          "text": [
+            ":::{req} remove_requires_entry",
+            "`cargo agents use --remove <name>` MUST fail without changing the config when no entry in the requested scope names `<name>`.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_syncs"
+          ],
+          "requirements": "design.requirements.enablement.use_syncs",
+          "text": [
+            ":::{req} use_syncs",
+            "`cargo agents use` and `cargo agents use --remove` MUST sync the workspace after changing the config.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Asserts `use crate-a` installs the skill and `use --remove crate-a` drops the entry and reaps the skill without a separate sync (enablement.use_syncs), then that a second remove fails with `no use entry` (enablement.remove_requires_entry). Citations are complete.",
+      "rust_item": "fn[use_remove_reaps_and_then_errors]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.remove_requires_entry",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.use_scope",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[use_remove_respects_scope]",
+          "text": [
+            "/// `--remove --global` targets only the global entry, leaving a",
+            "/// workspace-scoped one alone.",
+            "// {test}`design.requirements.enablement.use_scope`",
+            "// {test}`design.requirements.enablement.remove_requires_entry`",
+            "#[tokio::test]",
+            "async fn use_remove_respects_scope() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            ctx.symposium(&[\"use\", \"crate-a\"]).await?;",
+            "",
+            "            let err = ctx",
+            "                .symposium(&[\"use\", \"--remove\", \"--global\", \"crate-a\"])",
+            "                .await",
+            "                .expect_err(\"no global entry to remove\");",
+            "            assert!(err.to_string().contains(\"no `use` entry\"), \"{err}\");",
+            "            assert!(",
+            "                read_config(&ctx).contains(\"crate-a\"),",
+            "                \"workspace entry untouched\"",
+            "            );",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.remove_requires_entry"
+          ],
+          "requirements": "design.requirements.enablement.remove_requires_entry",
+          "text": [
+            ":::{req} remove_requires_entry",
+            "`cargo agents use --remove <name>` MUST fail without changing the config when no entry in the requested scope names `<name>`.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_scope"
+          ],
+          "requirements": "design.requirements.enablement.use_scope",
+          "text": [
+            ":::{req} use_scope",
+            "`cargo agents use <name>` MUST record its entry for the current workspace, or unscoped when `--global` is given.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "After `use crate-a` (workspace-scoped, enablement.use_scope, which the test relies on), asserts `use --remove --global crate-a` fails with `no use entry` and the workspace entry stays in the config: no entry in the requested (global) scope, so it fails without changing the config (enablement.remove_requires_entry). Citations are complete.",
+      "rust_item": "fn[use_remove_respects_scope]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.search_matches",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.search_origin",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[search_finds_registry_content_tagged_by_origin]",
+          "text": [
+            "/// Search finds both a registry's standalone skills and its plugin entries,",
+            "/// tagged with the instance they came from.",
+            "// {test}`design.requirements.enablement.search_matches`",
+            "// {test}`design.requirements.enablement.search_origin`",
+            "#[tokio::test]",
+            "async fn search_finds_registry_content_tagged_by_origin() {",
+            "    with_fixture(TestMode::SimulationOnly, &[\"plugins0\"], async |mut ctx| {",
+            "        let matches = symposium::search_command::find_matches(&ctx.sym, \"SERDE-gui\").await;",
+            "        assert!(",
+            "            matches.iter().any(|m| m.name == \"serde-guidance\"),",
+            "            \"case-insensitive substring match: {matches:?}\"",
+            "        );",
+            "",
+            "        let matches = symposium::search_command::find_matches(&ctx.sym, \"my-skill\").await;",
+            "        assert!(",
+            "            matches",
+            "                .iter()",
+            "                .any(|m| m.origin == \"user-plugins\" && m.name == \"my-skill\"),",
+            "            \"registry entry tagged with its instance name: {matches:?}\"",
+            "        );",
+            "",
+            "        let matches = symposium::search_command::find_matches(&ctx.sym, \"MY-SKILL\").await;",
+            "        assert!(",
+            "            matches",
+            "                .iter()",
+            "                .any(|m| m.origin == \"user-plugins\" && m.name == \"my-skill\"),",
+            "            \"registry entries match case-insensitively: {matches:?}\"",
+            "        );",
+            "",
+            "        // A query nothing matches finds nothing (and does not fail).",
+            "        assert!(",
+            "            symposium::search_command::find_matches(&ctx.sym, \"zzz-nothing\")",
+            "                .await",
+            "                .is_empty()",
+            "        );",
+            "",
+            "        ctx.symposium(&[\"search\", \"serde\"]).await?;",
+            "        Ok(())",
+            "    })",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.search_matches"
+          ],
+          "requirements": "design.requirements.enablement.search_matches",
+          "text": [
+            ":::{req} search_matches",
+            "`cargo agents search <query>` MUST list every configured-registry plugin whose name contains `<query>`, ignoring case.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.search_origin"
+          ],
+          "requirements": "design.requirements.enablement.search_origin",
+          "text": [
+            ":::{req} search_origin",
+            "`cargo agents search <query>` MUST tag each hit with the registry it comes from.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Asserts find_matches finds serde-guidance for `SERDE-gui` and my-skill for `my-skill` and `MY-SKILL` (case-insensitive substring match over registry plugin names: enablement.search_matches), that the my-skill hits are tagged origin `user-plugins` (enablement.search_origin), and that a query matching nothing returns empty without failing. Citations are complete.",
+      "rust_item": "fn[search_finds_registry_content_tagged_by_origin]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.search_once",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[search_lists_a_registry_entry_once]",
+          "text": [
+            "// {test}`design.requirements.enablement.search_once`",
+            "#[tokio::test]",
+            "async fn search_lists_a_registry_entry_once() {",
+            "    with_fixture(TestMode::SimulationOnly, &[\"plugins0\"], async |ctx| {",
+            "        let entry = ctx.sym.config_dir().join(\"plugins/tokio-guidance\");",
+            "        std::fs::create_dir_all(&entry)?;",
+            "        std::fs::write(",
+            "            entry.join(\"SKILL.md\"),",
+            "            \"---\\nname: tokio-guidance\\ndescription: Guidance for tokio\\ndepends-on: tokio\\n---\\n\",",
+            "        )?;",
+            "        let matches = symposium::search_command::find_matches(&ctx.sym, \"tokio-guidance\").await;",
+            "        let hits: Vec<_> = matches",
+            "            .iter()",
+            "            .filter(|m| m.origin == \"user-plugins\" && m.name == \"tokio-guidance\")",
+            "            .collect();",
+            "        assert_eq!(hits.len(), 1, \"{matches:#?}\");",
+            "        Ok(())",
+            "    })",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.search_once"
+          ],
+          "requirements": "design.requirements.enablement.search_once",
+          "text": [
+            ":::{req} search_once",
+            "`cargo agents search <query>` MUST list each matching registry entry at most once.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Adds a bare-skill registry entry tokio-guidance and asserts find_matches returns exactly one user-plugins hit for it: enablement.search_once. Citation is complete.",
+      "rust_item": "fn[search_lists_a_registry_entry_once]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.search_matches",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.search_origin",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[search_renders_grouped_by_origin]",
+          "text": [
+            "/// The rendered report groups hits under their origin and carries the",
+            "/// per-hit detail.",
+            "// {test}`design.requirements.enablement.search_matches`",
+            "// {test}`design.requirements.enablement.search_origin`",
+            "#[tokio::test]",
+            "async fn search_renders_grouped_by_origin() {",
+            "    with_fixture(TestMode::SimulationOnly, &[\"plugins0\"], async |ctx| {",
+            "        let events = with_report(async || {",
+            "            symposium::search_command::search(&ctx.sym, \"serde\")",
+            "                .await",
+            "                .unwrap();",
+            "        })",
+            "        .await;",
+            "",
+            "        let kinds: Vec<&str> = events",
+            "            .iter()",
+            "            .filter_map(|e| e[\"kind\"].as_str())",
+            "            .collect::<Vec<_>>();",
+            "        assert!(",
+            "            kinds.contains(&\"info\") && kinds.contains(&\"search_match\"),",
+            "            \"a group heading plus at least one hit: {events:?}\"",
+            "        );",
+            "",
+            "        // The bare skill is searched as the plugin it now is: matched by its",
+            "        // name, tagged with its registry origin. Plugins carry no per-skill",
+            "        // description in search (only a dormancy hint, and this one is active).",
+            "        let hit = events",
+            "            .iter()",
+            "            .find(|e| e[\"kind\"] == \"search_match\")",
+            "            .expect(\"a search_match event\");",
+            "        assert_eq!(hit[\"name\"], \"serde-guidance\");",
+            "        assert_eq!(hit[\"origin\"], \"user-plugins\");",
+            "",
+            "        let events = with_report(async || {",
+            "            symposium::search_command::search(&ctx.sym, \"zzz-nothing\")",
+            "                .await",
+            "                .unwrap();",
+            "        })",
+            "        .await;",
+            "        assert_eq!(events.len(), 1, \"just the nothing-found notice: {events:?}\");",
+            "        assert_eq!(events[0][\"kind\"], \"info\");",
+            "        Ok(())",
+            "    })",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.search_matches"
+          ],
+          "requirements": "design.requirements.enablement.search_matches",
+          "text": [
+            ":::{req} search_matches",
+            "`cargo agents search <query>` MUST list every configured-registry plugin whose name contains `<query>`, ignoring case.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.search_origin"
+          ],
+          "requirements": "design.requirements.enablement.search_origin",
+          "text": [
+            ":::{req} search_origin",
+            "`cargo agents search <query>` MUST tag each hit with the registry it comes from.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Asserts the rendered `search serde` report has a group heading (info) plus search_match events, the hit is serde-guidance (enablement.search_matches) tagged origin user-plugins under its group (enablement.search_origin), and a query with no hits yields only the nothing-found notice. Map correction: added enablement.search_matches, since the test asserts the matching hit. Citations are complete.",
+      "rust_item": "fn[search_renders_grouped_by_origin]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.use_disabled_rejected",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[use_on_a_disabled_plugin_errors]",
+          "text": [
+            "/// `disable` is the last word, so `use` on a declined plugin is refused",
+            "/// rather than recorded. Recording it would report success and then install",
+            "/// nothing, since activation refuses the plugin too.",
+            "// {test}`design.requirements.enablement.use_disabled_rejected`",
+            "#[tokio::test]",
+            "async fn use_on_a_disabled_plugin_errors() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            symposium::discovery::apply_consent(&mut ctx.sym, &[], &[\"crate-a\".to_string()])?;",
+            "",
+            "            let err = ctx",
+            "                .symposium(&[\"use\", \"crate-a\"])",
+            "                .await",
+            "                .expect_err(\"a disabled plugin cannot be enabled by name\");",
+            "            assert!(",
+            "                err.to_string().contains(\"disabled in `[plugins] disable`\"),",
+            "                \"{err}\"",
+            "            );",
+            "            let config = read_config(&ctx);",
+            "            assert!(!config.contains(\"use = \"), \"nothing recorded: {config}\");",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.use_disabled_rejected"
+          ],
+          "requirements": "design.requirements.enablement.use_disabled_rejected",
+          "text": [
+            ":::{req} use_disabled_rejected",
+            "`cargo agents use <name>` MUST fail without changing the config when `[plugins] disable` names the package.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "With crate-a recorded in `[plugins] disable`, asserts `use crate-a` fails with `disabled in [plugins] disable` and no `use = ` entry is written: enablement.use_disabled_rejected. Citation is complete.",
+      "rust_item": "fn[use_on_a_disabled_plugin_errors]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.status_state",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[status_reports_candidate_then_used]",
+          "text": [
+            "/// `status` reports an undecided dependency plugin as a candidate, then as",
+            "/// active with its `use` root once enabled — and names declined entries.",
+            "// {test}`design.requirements.enablement.status_state`",
+            "#[tokio::test]",
+            "async fn status_reports_candidate_then_used() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let workspace_root = ctx.workspace_root.clone().unwrap();",
+            "",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;",
+            "            let candidate = entries",
+            "                .iter()",
+            "                .find(|e| e.name == \"crate-a\")",
+            "                .expect(\"crate-a discovered\");",
+            "            assert_eq!(candidate.state, StatusState::Candidate);",
+            "            assert!(candidate.root.contains(\"awaiting consent\"), \"{candidate:?}\");",
+            "",
+            "            ctx.symposium(&[\"use\", \"crate-a\"]).await?;",
+            "            symposium::discovery::apply_consent(&mut ctx.sym, &[], &[\"noisy-crate\".to_string()])?;",
+            "",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;",
+            "            let used = entries",
+            "                .iter()",
+            "                .find(|e| e.name == \"crate-a\")",
+            "                .expect(\"crate-a present\");",
+            "            assert_eq!(used.state, StatusState::Active);",
+            "            assert_eq!(used.root, \"`[plugins] use`\");",
+            "            assert_eq!(used.version.as_deref(), Some(\"0.1.0\"));",
+            "",
+            "            let declined = entries",
+            "                .iter()",
+            "                .find(|e| e.name == \"noisy-crate\")",
+            "                .expect(\"declined entry present\");",
+            "            assert_eq!(declined.state, StatusState::Declined);",
+            "",
+            "            // CLI wiring, and the rendered report.",
+            "            let events = with_report(async || {",
+            "                symposium::status_command::status(&ctx.sym, &workspace_root)",
+            "                    .await",
+            "                    .unwrap();",
+            "            })",
+            "            .await;",
+            "            assert!(",
+            "                events",
+            "                    .iter()",
+            "                    .any(|e| e[\"kind\"] == \"plugin_status\" && e[\"state\"] == \"active\"),",
+            "                \"{events:?}\"",
+            "            );",
+            "            ctx.symposium(&[\"status\"]).await?;",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.status_state"
+          ],
+          "requirements": "design.requirements.enablement.status_state",
+          "text": [
+            ":::{req} status_state",
+            "`cargo agents status` MUST give each plugin the state that activation gives it: active, dormant, candidate (awaiting consent), or declined.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Asserts workspace_status reports undecided dependency crate-a as Candidate awaiting consent, then Active with root `[plugins] use` after `use crate-a`, and a disabled name as Declined; the rendered report carries an active plugin_status. All of this is status giving each plugin its activation state: enablement.status_state. Citation is complete.",
+      "rust_item": "fn[status_reports_candidate_then_used]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.search_origin",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.status_state",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[status_reports_dormant_registry_plugin]",
+          "text": [
+            "/// A registry plugin nothing gates is reported dormant until `use` names it.",
+            "// {test}`design.requirements.enablement.status_state`",
+            "// {test}`design.requirements.enablement.search_origin`",
+            "#[tokio::test]",
+            "async fn status_reports_dormant_registry_plugin() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"dormant-plugin0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let workspace_root = ctx.workspace_root.clone().unwrap();",
+            "",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;",
+            "            let dormant = entries",
+            "                .iter()",
+            "                .find(|e| e.name == \"gateless-plugin\")",
+            "                .expect(\"gateless-plugin present\");",
+            "            assert_eq!(dormant.state, StatusState::Dormant);",
+            "            assert!(dormant.root.contains(\"awaiting `cargo agents use`\"));",
+            "",
+            "            // And `search` finds it, tagged with the registry it came from",
+            "            // and flagged as needing `use`.",
+            "            let hit = symposium::search_command::find_matches(&ctx.sym, \"gateless\")",
+            "                .await",
+            "                .into_iter()",
+            "                .find(|m| m.name == \"gateless-plugin\")",
+            "                .expect(\"search finds the manifest plugin\");",
+            "            assert_eq!(hit.origin, \"user-plugins\");",
+            "            assert!(",
+            "                hit.description",
+            "                    .as_deref()",
+            "                    .is_some_and(|d| d.contains(\"dormant\")),",
+            "                \"{hit:?}\"",
+            "            );",
+            "",
+            "            ctx.symposium(&[\"use\", \"gateless-plugin\"]).await?;",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;",
+            "            let awake = entries",
+            "                .iter()",
+            "                .find(|e| e.name == \"gateless-plugin\")",
+            "                .expect(\"gateless-plugin present\");",
+            "            assert_eq!(awake.state, StatusState::Active);",
+            "            assert_eq!(awake.root, \"`[plugins] use`\");",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.search_origin"
+          ],
+          "requirements": "design.requirements.enablement.search_origin",
+          "text": [
+            ":::{req} search_origin",
+            "`cargo agents search <query>` MUST tag each hit with the registry it comes from.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.status_state"
+          ],
+          "requirements": "design.requirements.enablement.status_state",
+          "text": [
+            ":::{req} status_state",
+            "`cargo agents status` MUST give each plugin the state that activation gives it: active, dormant, candidate (awaiting consent), or declined.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Asserts status reports registry plugin gateless-plugin as Dormant awaiting `cargo agents use`, and Active with root `[plugins] use` after `use` (enablement.status_state); also that search finds it tagged origin user-plugins (enablement.search_origin) with a dormant hint. Map correction: dropped consent.dormant_inactive and consent.use_wakes_dormant, because the test observes only the status report, not activation itself (those are asserted by use_wakes_and_remove_sleeps_a_dormant_plugin). Citations are complete.",
+      "rust_item": "fn[status_reports_dormant_registry_plugin]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.consent.unconsented_inactive",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.no_prompt",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[consent_prompt_never_fires_non_interactively]",
+          "text": [
+            "/// The consent prompt must never block on stdin outside a terminal session.",
+            "///",
+            "/// The gate is [`Output::is_interactive`], not a bare TTY check: `cargo test`",
+            "/// inherits the developer's terminal, so a stdin-only check would make this",
+            "/// test hang on an interactive machine. Quiet and capturing outputs — the",
+            "/// ones hook dispatch and the library harness use — are never interactive.",
+            "// {test}`design.requirements.consent.unconsented_inactive`",
+            "// {test}`design.requirements.hooks.no_prompt`",
+            "#[tokio::test]",
+            "async fn consent_prompt_never_fires_non_interactively() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            assert!(!Output::quiet().is_interactive());",
+            "            assert!(!Output::capturing().is_interactive());",
+            "",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let workspace_root = ctx.workspace_root.clone().unwrap();",
+            "",
+            "            // There *is* something to ask about — so nothing below is",
+            "            // vacuous.",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            assert_eq!(",
+            "                symposium::discovery::pending_candidates(&ctx.sym, &deps).await,",
+            "                vec![\"crate-a\".to_string()]",
+            "            );",
+            "",
+            "            // The prompt returns without reading stdin, recording nothing.",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            let out = Output::quiet();",
+            "            symposium::discovery::prompt_for_consent(&mut ctx.sym, &deps, &out).await?;",
+            "            assert!(ctx.sym.config.plugins.auto_enable.is_empty());",
+            "            assert!(ctx.sym.config.plugins.disable.is_empty());",
+            "",
+            "            // Nor does the `sync` command, whose harness output captures.",
+            "            ctx.symposium(&[\"sync\"]).await?;",
+            "            let config = read_config(&ctx);",
+            "            assert!(!config.contains(\"auto-enable\"), \"{config}\");",
+            "            assert!(!config.contains(\"disable\"), \"{config}\");",
+            "",
+            "            // Still undecided, and still not installed.",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            assert_eq!(",
+            "                symposium::discovery::pending_candidates(&ctx.sym, &deps).await,",
+            "                vec![\"crate-a\".to_string()]",
+            "            );",
+            "            assert!(",
+            "                find_installed_skills(&workspace_root.join(\".claude/skills\"), \"a-guidance\")",
+            "                    .is_empty()",
+            "            );",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.unconsented_inactive"
+          ],
+          "requirements": "design.requirements.consent.unconsented_inactive",
+          "text": [
+            ":::{req} unconsented_inactive",
+            "Symposium MUST NOT activate a plugin embedded in a workspace dependency unless `[plugins] auto-enable` or an applicable `[plugins] use` entry names that dependency.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.no_prompt"
+          ],
+          "requirements": "design.requirements.hooks.no_prompt",
+          "text": [
+            ":::{req} no_prompt",
+            "A `cargo agents` process started by an agent hook MUST NOT read from stdin to ask the user a question. Symposium MUST prompt only when its output is neither quiet nor capturing and both stdin and stdout are terminals.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Asserts quiet and capturing outputs are not interactive, that with a pending candidate prompt_for_consent under a quiet output returns without recording auto-enable or disable, and that `sync` through the capturing harness records nothing (hooks.no_prompt: prompt only when output is neither quiet nor capturing). It then asserts crate-a is still pending and its skill is not installed (consent.unconsented_inactive). Citations are complete.",
+      "rust_item": "fn[consent_prompt_never_fires_non_interactively]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.consent.approval_recorded",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.consented_active",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.decline_recorded",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[apply_consent_records_both_answers]",
+          "text": [
+            "/// Recorded consent is durable in both directions: approval enables and the",
+            "/// candidate stops being offered; a decline is remembered too.",
+            "// {test}`design.requirements.consent.consented_active`",
+            "// {test}`design.requirements.consent.approval_recorded`",
+            "// {test}`design.requirements.consent.decline_recorded`",
+            "#[tokio::test]",
+            "async fn apply_consent_records_both_answers() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let workspace_root = ctx.workspace_root.clone().unwrap();",
+            "",
+            "            symposium::discovery::apply_consent(&mut ctx.sym, &[\"crate-a\".to_string()], &[])?;",
+            "            assert!(read_config(&ctx).contains(\"auto-enable\"));",
+            "",
+            "            ctx.symposium(&[\"sync\"]).await?;",
+            "            find_installed_skill(&workspace_root.join(\".claude/skills\"), \"a-guidance\");",
+            "",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            assert!(",
+            "                symposium::discovery::pending_candidates(&ctx.sym, &deps)",
+            "                    .await",
+            "                    .is_empty(),",
+            "                \"a decided dependency is not offered again\"",
+            "            );",
+            "",
+            "            symposium::discovery::apply_consent(&mut ctx.sym, &[], &[\"other-dep\".to_string()])?;",
+            "            assert!(read_config(&ctx).contains(\"disable\"));",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.approval_recorded"
+          ],
+          "requirements": "design.requirements.consent.approval_recorded",
+          "text": [
+            ":::{req} approval_recorded",
+            "Symposium MUST record a consent approval as a `[plugins] auto-enable` entry.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.consented_active"
+          ],
+          "requirements": "design.requirements.consent.consented_active",
+          "text": [
+            ":::{req} consented_active",
+            "Symposium MUST activate the plugin embedded in a workspace dependency that `[plugins] auto-enable` or an applicable `[plugins] use` entry names, when `[plugins] disable` does not name it.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.decline_recorded"
+          ],
+          "requirements": "design.requirements.consent.decline_recorded",
+          "text": [
+            ":::{req} decline_recorded",
+            "Symposium MUST record a consent decline as a `[plugins] disable` entry.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Asserts an approval through apply_consent writes an auto-enable entry (consent.approval_recorded), that a following sync installs crate-a's skill (consent.consented_active) and it is no longer pending, and that a decline writes a disable entry (consent.decline_recorded). Citations are complete.",
+      "rust_item": "fn[apply_consent_records_both_answers]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.hooks.consent_hint_defers",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.consent_hint_names",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.hooks.pending_consent",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[session_start_hints_pending_candidates]",
+          "text": [
+            "/// Non-interactively, pending candidates surface as `SessionStart` context",
+            "/// rather than a prompt — and the agent is told not to act on them itself.",
+            "// {test}`design.requirements.hooks.consent_hint_names`",
+            "// {test}`design.requirements.hooks.consent_hint_defers`",
+            "// {test}`design.requirements.hooks.pending_consent`",
+            "#[tokio::test]",
+            "async fn session_start_hints_pending_candidates() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.sym.config.auto_update = symposium::config::AutoUpdate::Off;",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "",
+            "            let result = ctx",
+            "                .prompt_or_hook(",
+            "                    \"hello\",",
+            "                    &[HookStep::session_start()],",
+            "                    symposium::hook_schema::HookAgent::Claude,",
+            "                )",
+            "                .await?;",
+            "",
+            "            let context = result",
+            "                .hooks",
+            "                .iter()",
+            "                .filter_map(|h| {",
+            "                    h.output",
+            "                        .get(\"additionalContext\")",
+            "                        .and_then(|v| v.as_str())",
+            "                        .or_else(|| {",
+            "                            h.output",
+            "                                .get(\"hookSpecificOutput\")",
+            "                                .and_then(|o| o.get(\"additionalContext\"))",
+            "                                .and_then(|v| v.as_str())",
+            "                        })",
+            "                })",
+            "                .next()",
+            "                .expect(\"session-start should produce additionalContext\");",
+            "",
+            "            assert!(context.contains(\"crate-a\"), \"{context}\");",
+            "            assert!(context.contains(\"cargo agents use\"), \"{context}\");",
+            "            assert!(context.contains(\"Do not enable them yourself\"), \"{context}\");",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.consent_hint_defers"
+          ],
+          "requirements": "design.requirements.hooks.consent_hint_defers",
+          "text": [
+            ":::{req} consent_hint_defers",
+            "The consent hint MUST tell the agent to point the user at `cargo agents sync` or `cargo agents use` rather than enable the plugins itself.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.consent_hint_names"
+          ],
+          "requirements": "design.requirements.hooks.consent_hint_names",
+          "text": [
+            ":::{req} consent_hint_names",
+            "On `SessionStart`, when workspace dependencies ship plugins the user has neither enabled nor declined, Symposium MUST add context naming each of those dependencies once.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.hooks.pending_consent"
+          ],
+          "requirements": "design.requirements.hooks.pending_consent",
+          "text": [
+            ":::{example} pending_consent",
+            "A workspace depends on a crate that ships a plugin the user has not enabled or declined. When an agent starts a session, the `SessionStart` hook names that crate in the agent's context instead of asking, and for every agent that takes JSON its stdout parses as JSON. {cite}`design.requirements.hooks.no_prompt` {cite}`design.requirements.hooks.stdout_protocol`",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Runs a Claude SessionStart hook with undecided dependency crate-a and asserts the additionalContext names crate-a (hooks.consent_hint_names), mentions `cargo agents use` and says `Do not enable them yourself` (hooks.consent_hint_defers). This is the core of the hooks.pending_consent example (named in context instead of asked); the example's JSON-parse aspect is covered by tests/hook_stdout.rs, which also cites it. Citations are complete.",
+      "rust_item": "fn[session_start_hints_pending_candidates]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.enablement.status_state",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[status_reports_a_used_but_disabled_plugin_as_declined]",
+          "text": [
+            "/// A plugin named by both `use` and `disable` is reported declined, matching",
+            "/// what activation does with it. The two must agree, or `status` says a",
+            "/// plugin is active while it never runs.",
+            "// {test}`design.requirements.enablement.status_state`",
+            "#[tokio::test]",
+            "async fn status_reports_a_used_but_disabled_plugin_as_declined() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let workspace_root = ctx.workspace_root.clone().unwrap();",
+            "",
+            "            ctx.symposium(&[\"use\", \"crate-a\"]).await?;",
+            "            // Straight into the config: `use` itself now refuses this pairing,",
+            "            // but a hand-edited config can still hold both.",
+            "            symposium::discovery::apply_consent(&mut ctx.sym, &[], &[\"crate-a\".to_string()])?;",
+            "",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;",
+            "            let entry = entries",
+            "                .iter()",
+            "                .find(|e| e.name == \"crate-a\")",
+            "                .expect(\"crate-a present\");",
+            "            assert_eq!(entry.state, StatusState::Declined);",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.status_state"
+          ],
+          "requirements": "design.requirements.enablement.status_state",
+          "text": [
+            ":::{req} status_state",
+            "`cargo agents status` MUST give each plugin the state that activation gives it: active, dormant, candidate (awaiting consent), or declined.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "With crate-a named by both a use entry and disable, asserts status reports it Declined, the same state activation gives it: enablement.status_state. Map correction: dropped consent.disable_wins, since the test checks only the status report, not activation (plugins_entries_match_crate_names_like_cargo asserts disable_wins). Citation is complete.",
+      "rust_item": "fn[status_reports_a_used_but_disabled_plugin_as_declined]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.consent.crate_name_matching",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.status_once",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.status_state",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[status_lists_each_declined_name_once]",
+          "text": [
+            "// {test}`design.requirements.consent.crate_name_matching`",
+            "// {test}`design.requirements.enablement.status_once`",
+            "// {test}`design.requirements.enablement.status_state`",
+            "#[tokio::test]",
+            "async fn status_lists_each_declined_name_once() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"auto-enable0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let workspace_root = ctx.workspace_root.clone().unwrap();",
+            "            ctx.sym.config.plugins.disable = [\"crate_a\", \"*\", \"never-seen\", \"never_seen\"]",
+            "                .map(String::from)",
+            "                .to_vec();",
+            "",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;",
+            "            let named = |name: &str| {",
+            "                entries",
+            "                    .iter()",
+            "                    .filter(|e| e.name.replace('_', \"-\") == name)",
+            "                    .collect::<Vec<_>>()",
+            "            };",
+            "",
+            "            let crate_a = named(\"crate-a\");",
+            "            assert_eq!(crate_a.len(), 1, \"{entries:?}\");",
+            "            assert_eq!(crate_a[0].state, StatusState::Declined);",
+            "            assert_eq!(crate_a[0].version.as_deref(), Some(\"0.1.0\"));",
+            "            assert!(named(\"*\").is_empty(), \"{entries:?}\");",
+            "            // No package manager has `never-seen`, so nothing says the two",
+            "            // spellings are one package.",
+            "            let never_seen = named(\"never-seen\");",
+            "            assert_eq!(never_seen.len(), 2, \"{entries:?}\");",
+            "            assert!(never_seen.iter().all(|e| e.state == StatusState::Declined));",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.crate_name_matching"
+          ],
+          "requirements": "design.requirements.consent.crate_name_matching",
+          "text": [
+            ":::{req} crate_name_matching",
+            "Symposium MUST treat hyphens and underscores as equal when it compares a `[plugins]` or `cargo agents use` name with a cargo crate name.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.status_once"
+          ],
+          "requirements": "design.requirements.enablement.status_once",
+          "text": [
+            ":::{req} status_once",
+            "`cargo agents status` MUST list each plugin it reports on one line.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.status_state"
+          ],
+          "requirements": "design.requirements.enablement.status_state",
+          "text": [
+            ":::{req} status_state",
+            "`cargo agents status` MUST give each plugin the state that activation gives it: active, dormant, candidate (awaiting consent), or declined.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "With disable = [crate_a, *, never-seen, never_seen], asserts status lists dependency crate-a exactly once, Declined, with version 0.1.0 (enablement.status_once, enablement.status_state; the crate_a spelling matches crate-a: consent.crate_name_matching), lists no `*` entry, and lists the two unresolvable spellings as two Declined lines (the documented exception in status_once's note). Citations are complete.",
+      "rust_item": "fn[status_lists_each_declined_name_once]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.consent.unresolved_use_skipped",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.enablement.status_state",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[status_reports_a_pluginless_dependency_only_when_used]",
+          "text": [
+            "// {test}`design.requirements.consent.unresolved_use_skipped`",
+            "// {test}`design.requirements.enablement.status_state`",
+            "#[tokio::test]",
+            "async fn status_reports_a_pluginless_dependency_only_when_used() {",
+            "    with_fixture(",
+            "        TestMode::SimulationOnly,",
+            "        &[\"plain-dep0\"],",
+            "        async |mut ctx| {",
+            "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "            let workspace_root = ctx.workspace_root.clone().unwrap();",
+            "            ctx.sym.config.plugins.auto_enable = vec![\"*\".into()];",
+            "            ctx.sym",
+            "                .config",
+            "                .plugins",
+            "                .used",
+            "                .push(symposium::config::UseEntry::Global(\"not-a-dep\".into()));",
+            "",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;",
+            "            assert!(",
+            "                !entries.iter().any(|e| e.name == \"plain-dep\"),",
+            "                \"{entries:?}\"",
+            "            );",
+            "            let crate_a = entries",
+            "                .iter()",
+            "                .find(|e| e.name == \"crate-a\")",
+            "                .expect(\"crate-a present\");",
+            "            assert_eq!(crate_a.state, StatusState::Active);",
+            "            assert_eq!(crate_a.root, \"`[plugins] auto-enable`\");",
+            "            let not_a_dep = entries",
+            "                .iter()",
+            "                .find(|e| e.name == \"not-a-dep\")",
+            "                .expect(\"not-a-dep present\");",
+            "            assert_eq!(not_a_dep.state, StatusState::Dormant);",
+            "            assert!(not_a_dep.root.contains(\"cached crate\"), \"{not_a_dep:?}\");",
+            "",
+            "            ctx.sym.config.plugins.auto_enable.clear();",
+            "            ctx.symposium(&[\"use\", \"plain-dep\"]).await?;",
+            "            let deps = ctx.sym.workspace(&workspace_root);",
+            "            let entries = symposium::status_command::workspace_status(&ctx.sym, &deps).await?;",
+            "            let plain = entries",
+            "                .iter()",
+            "                .find(|e| e.name == \"plain-dep\")",
+            "                .expect(\"plain-dep present once used\");",
+            "            assert_eq!(plain.state, StatusState::Dormant);",
+            "            assert!(!plain.root.contains(\"not a dependency\"), \"{plain:?}\");",
+            "            Ok(())",
+            "        },",
+            "    )",
+            "    .await",
+            "    .unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.unresolved_use_skipped"
+          ],
+          "requirements": "design.requirements.consent.unresolved_use_skipped",
+          "text": [
+            ":::{req} unresolved_use_skipped",
+            "Symposium MUST skip, without failing, a `[plugins] use` entry that no package manager resolves.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.enablement.status_state"
+          ],
+          "requirements": "design.requirements.enablement.status_state",
+          "text": [
+            ":::{req} status_state",
+            "`cargo agents status` MUST give each plugin the state that activation gives it: active, dormant, candidate (awaiting consent), or declined.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "With auto-enable = [*] and a global use of not-a-dep (resolved by no package manager), asserts status succeeds (consent.unresolved_use_skipped), omits pluginless plain-dep, reports crate-a Active via auto-enable and not-a-dep Dormant; after `use plain-dep` it reports plain-dep Dormant (enablement.status_state). Citations are complete.",
+      "rust_item": "fn[status_reports_a_pluginless_dependency_only_when_used]"
+    },
+    {
+      "citations": [
+        {
+          "name": "design.requirements.consent.registry_use_not_dependency_consent",
+          "role": "test"
+        },
+        {
+          "name": "design.requirements.consent.use_resolves_registry_first",
+          "role": "test"
+        }
+      ],
+      "determination": true,
+      "inputs": [
+        {
+          "rust_file": "tests/enablement.rs",
+          "rust_item": "fn[choosing_registry_plugin_does_not_enable_same_named_dependency]",
+          "text": [
+            "// {test}`design.requirements.consent.use_resolves_registry_first`",
+            "// {test}`design.requirements.consent.registry_use_not_dependency_consent`",
+            "#[tokio::test]",
+            "async fn choosing_registry_plugin_does_not_enable_same_named_dependency() {",
+            "    with_fixture(TestMode::SimulationOnly, &[\"auto-enable0\"], async |mut ctx| {",
+            "        ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+            "        ctx.sym.config.defaults.user_plugins = true;",
+            "        let plugin_dir = ctx.sym.config_dir().join(\"plugins/registry-choice\");",
+            "        std::fs::create_dir_all(&plugin_dir)?;",
+            "        std::fs::write(plugin_dir.join(\"Symposium.toml\"), \"name = \\\"crate-a\\\"\\n\")?;",
+            "        let registry = symposium::plugins::load_registry(&ctx.sym).await;",
+            "        assert!(registry.plugins.iter().any(|plugin|",
+            "            plugin.manifest.name == \"crate-a\" && plugin.manifest.requires_use));",
+            "        ctx.symposium(&[\"use\", \"crate-a\"]).await?;",
+            "        let skills = ctx.workspace_root.as_ref().unwrap().join(\".claude/skills\");",
+            "        let installed = find_installed_skills(&skills, \"a-guidance\");",
+            "        assert!(installed.is_empty(),",
+            "            \"enabling the registry plugin also installed the unconsented dependency: {installed:?}\");",
+            "        Ok(())",
+            "    }).await.unwrap();",
+            "}"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.registry_use_not_dependency_consent"
+          ],
+          "requirements": "design.requirements.consent.registry_use_not_dependency_consent",
+          "text": [
+            ":::{req} registry_use_not_dependency_consent",
+            "A `[plugins] use` entry that resolves to a registry plugin MUST NOT count as consent for the plugin embedded in a same-named dependency.",
+            ":::"
+          ]
+        },
+        {
+          "matches": [
+            "design.requirements.consent.use_resolves_registry_first"
+          ],
+          "requirements": "design.requirements.consent.use_resolves_registry_first",
+          "text": [
+            ":::{req} use_resolves_registry_first",
+            "When a `[plugins] use` name matches both a configured registry plugin and a crate, Symposium MUST resolve it to the registry plugin.",
+            ":::"
+          ]
+        }
+      ],
+      "rationale": "Adds a dormant registry plugin named crate-a beside dependency crate-a, runs `use crate-a`, and asserts the dependency's a-guidance skill is not installed. Had the name resolved to the crate it would install, so this checks the name resolves to the registry plugin (consent.use_resolves_registry_first) and that the use does not consent to the dependency's embedded plugin (consent.registry_use_not_dependency_consent). Citations are complete.",
+      "rust_item": "fn[choosing_registry_plugin_does_not_enable_same_named_dependency]"
+    }
+  ],
+  "rust_file": "tests/enablement.rs"
+}

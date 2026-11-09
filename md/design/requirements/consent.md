@@ -125,3 +125,9 @@ Symposium MUST record nothing for a consent prompt answered with the default ("A
 :::
 
 *Source:* Documented in md/reference/cargo-agents-sync.md:38 "**Ask me later** (the default) — records nothing"; :42-43 "Escape leaves the remaining questions undecided".
+
+:::{req} consent_confirmed
+After recording consent answers, Symposium SHOULD tell the user which dependency plugins it enabled and which it declined.
+:::
+
+*Source:* Inferred from the code only (`apply_consent`); needs maintainer review.

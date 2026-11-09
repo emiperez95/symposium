@@ -11,6 +11,8 @@ use symposium_testlib::{HookStep, TestContext, TestMode, with_fixture};
 /// agent with nothing but its own output: here, the consent hint for `crate-a`.
 // {test}`design.requirements.hooks.stdout_protocol`
 // {test}`design.requirements.hooks.pending_consent`
+// {test}`design.requirements.hooks.consent_hint_names`
+// {test}`design.requirements.output.quiet`
 #[tokio::test(flavor = "multi_thread")]
 async fn sync_progress_stays_off_hook_stdout() {
     with_fixture(TestMode::SimulationOnly, &["auto-enable0"], async |ctx| {
@@ -46,7 +48,11 @@ async fn sync_progress_stays_off_hook_stdout() {
 /// A plugin's install commands run on every dispatch of the hook that needs
 /// them; what they print must not reach the agent's stdout.
 // {test}`design.requirements.hooks.stdout_protocol`
+// {test}`design.requirements.hooks.hook_output_captured`
+// {test}`design.requirements.hooks.canonical_output`
+// {test}`design.requirements.hooks.joined_context`
 #[tokio::test(flavor = "multi_thread")]
+// {test}`design.requirements.hooks.claude_reload_skills`
 async fn install_command_output_stays_off_hook_stdout() {
     with_fixture(TestMode::SimulationOnly, &["install-noise0"], async |ctx| {
         let output = run_session_start(&ctx, HookAgent::Claude, &ctx.tempdir);
@@ -74,6 +80,8 @@ async fn install_command_output_stays_off_hook_stdout() {
     .unwrap();
 }
 
+// {test}`design.requirements.hooks.best_effort`
+// {test}`design.requirements.hooks.stdout_protocol`
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn hook_runs_when_the_logs_dir_is_unwritable() {
@@ -112,6 +120,7 @@ async fn hook_runs_when_the_logs_dir_is_unwritable() {
 }
 
 // {test}`design.requirements.hooks.stdout_protocol`
+// {test}`design.requirements.hooks.auto_sync_session_start`
 #[tokio::test(flavor = "multi_thread")]
 async fn rejected_skill_warning_stays_off_hook_stdout() {
     with_fixture(
@@ -142,6 +151,7 @@ async fn rejected_skill_warning_stays_off_hook_stdout() {
 }
 
 /// Run `cargo agents hook <agent> session-start` as the agent would, from `cwd`.
+// {impl}`design.requirements.internal.internal_detail`
 fn run_session_start(
     ctx: &TestContext,
     agent: HookAgent,

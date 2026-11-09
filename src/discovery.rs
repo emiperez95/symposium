@@ -79,6 +79,7 @@ pub struct DiscoveredPlugin {
 
 impl DiscoveredPlugin {
     /// The name the user would type to enable this plugin.
+    // {impl}`design.requirements.internal.internal_detail`
     pub fn name(&self) -> &str {
         &self.id.name
     }
@@ -104,6 +105,10 @@ pub struct Discovery {
 /// cache-only — for a workspace dependency, into the source `cargo metadata`
 /// already extracted (no probe, no network) — so every dependency-embedded
 /// plugin is discoverable, registry crates included.
+// {impl}`design.requirements.consent.unconsented_inactive`
+// {impl}`design.requirements.consent.offline_resolution`
+// {impl}`design.requirements.enablement.status_state`
+// {impl}`design.requirements.hooks.consent_hint_names`
 pub async fn discover(sym: &Symposium, ws: &Arc<Workspace>, registry: &[Plugin]) -> Discovery {
     let Some(workspace_root) = ws.root().await.map(Path::to_path_buf) else {
         return Discovery::default();
@@ -159,6 +164,16 @@ pub async fn discover(sym: &Symposium, ws: &Arc<Workspace>, registry: &[Plugin])
 /// ([`PmRegistry::identify`]) at `update`: one that names a plugin in
 /// `registry` is left out, since that plugin is loaded already and
 /// [`used_plugins`] wakes it, and one that no package manager has is skipped.
+// {impl}`design.requirements.consent.unconsented_inactive`
+// {impl}`design.requirements.consent.consented_active`
+// {impl}`design.requirements.consent.disable_wins`
+// {impl}`design.requirements.consent.scoped_use`
+// {impl}`design.requirements.consent.use_beyond_dependencies`
+// {impl}`design.requirements.consent.auto_enable_dependencies_only`
+// {impl}`design.requirements.consent.crate_name_matching`
+// {impl}`design.requirements.consent.registry_use_not_dependency_consent`
+// {impl}`design.requirements.consent.unresolved_use_skipped`
+// {impl}`design.requirements.consent.enabled_once`
 pub async fn enabled_dependencies(
     sym: &Symposium,
     pms: &PmRegistry,
@@ -193,6 +208,10 @@ pub async fn enabled_dependencies(
     enabled
 }
 
+// {impl}`design.requirements.consent.scoped_use`
+// {impl}`design.requirements.consent.offline_resolution`
+// {impl}`design.requirements.consent.unresolved_use_skipped`
+// {impl}`design.requirements.consent.use_resolves_registry_first`
 pub(crate) async fn resolve_used<'a>(
     sym: &'a Symposium,
     pms: &PmRegistry,
@@ -213,6 +232,10 @@ pub(crate) async fn resolve_used<'a>(
 /// The canonical ids of the `plugins` an applicable `use` entry names, which
 /// is what wakes a dormant one. A plugin is named by its manifest name, under
 /// the rule of the package manager it came from.
+// {impl}`design.requirements.consent.use_wakes_dormant`
+// {impl}`design.requirements.consent.dormant_inactive`
+// {impl}`design.requirements.consent.registry_name_exact`
+// {impl}`design.requirements.consent.scoped_use`
 pub fn used_plugins(
     sym: &Symposium,
     pms: &PmRegistry,
@@ -232,6 +255,7 @@ pub fn used_plugins(
 /// Run [`discover`] for the workspace `deps` points at, against the plugins
 /// its registries and members define, or an empty [`Discovery`] when there is
 /// no workspace.
+// {impl}`design.requirements.internal.internal_detail`
 pub async fn discover_for(sym: &Symposium, ws: &Arc<Workspace>) -> Discovery {
     let workspace = ws.info().await.cloned();
     let registry = crate::plugins::load_registry_with_workspace(sym, workspace.as_ref()).await;
@@ -241,6 +265,7 @@ pub async fn discover_for(sym: &Symposium, ws: &Arc<Workspace>) -> Discovery {
 /// The names of the discovered offers still awaiting consent, deduplicated
 /// and sorted — what a consent prompt would ask about, and what the
 /// non-interactive hint names.
+// {impl}`design.requirements.hooks.consent_hint_names`
 pub async fn pending_candidates(sym: &Symposium, deps: &Arc<Workspace>) -> Vec<String> {
     let mut names: Vec<String> = discover_for(sym, deps)
         .await
@@ -259,6 +284,9 @@ pub async fn pending_candidates(sym: &Symposium, deps: &Arc<Workspace>) -> Vec<S
 ///
 /// Split out from the prompt so the decision recording is testable without a
 /// terminal, and so other entry points can record the same way.
+// {impl}`design.requirements.consent.approval_recorded`
+// {impl}`design.requirements.consent.decline_recorded`
+// {impl}`design.requirements.consent.consent_confirmed`
 pub fn apply_consent(sym: &mut Symposium, approved: &[String], declined: &[String]) -> Result<()> {
     if approved.is_empty() && declined.is_empty() {
         return Ok(());
@@ -308,6 +336,11 @@ pub fn apply_consent(sym: &mut Symposium, approved: &[String], declined: &[Strin
 /// Only explicit answers are recorded — the default ("ask me later") leaves
 /// the dependency undecided, so reflexively hitting Enter never permanently
 /// declines anything, and Escape leaves the remaining offers undecided too.
+// {impl}`design.requirements.consent.prompt_once_per_candidate`
+// {impl}`design.requirements.consent.prompt_describes_extensions`
+// {impl}`design.requirements.consent.approval_recorded`
+// {impl}`design.requirements.consent.decline_recorded`
+// {impl}`design.requirements.consent.deferral_records_nothing`
 pub async fn prompt_for_consent(
     sym: &mut Symposium,
     deps: &Arc<Workspace>,
@@ -354,6 +387,7 @@ pub async fn prompt_for_consent(
 /// the consent prompt. Emphasizes the facets that matter to a
 /// trust decision — a plugin that only ships skills is lower-stakes than one
 /// that runs a hook or an MCP server.
+// {impl}`design.requirements.consent.prompt_describes_extensions`
 fn describe_plugin(plugin: &crate::plugins::PluginManifest) -> String {
     let parts: Vec<String> = [
         count_phrase(plugin.skills.len(), "skill group", "skill groups"),
@@ -372,6 +406,7 @@ fn describe_plugin(plugin: &crate::plugins::PluginManifest) -> String {
 }
 
 /// `"<n> <singular|plural>"`, or `None` when `n` is zero.
+// {impl}`design.requirements.consent.prompt_describes_extensions`
 fn count_phrase(n: usize, singular: &str, plural: &str) -> Option<String> {
     (n > 0).then(|| format!("{n} {}", if n == 1 { singular } else { plural }))
 }
@@ -379,6 +414,12 @@ fn count_phrase(n: usize, singular: &str, plural: &str) -> Option<String> {
 /// Classify one offer against the `[plugins]` config. `disable` outranks every
 /// other entry, and an explicit `use` outranks the standing `auto-enable`, so a
 /// name the user declined stays declined.
+// {impl}`design.requirements.consent.unconsented_inactive`
+// {impl}`design.requirements.consent.consented_active`
+// {impl}`design.requirements.consent.disable_wins`
+// {impl}`design.requirements.consent.crate_name_matching`
+// {impl}`design.requirements.consent.registry_use_not_dependency_consent`
+// {impl}`design.requirements.enablement.status_state`
 fn decide(
     sym: &Symposium,
     pms: &PmRegistry,
@@ -412,6 +453,7 @@ mod tests {
     /// A workspace with `widget-lib` as a path dependency carrying skills,
     /// plus a plain registry dependency (an extracted source with no plugin
     /// content, as `cargo metadata` always yields a `source_dir`).
+    // {impl}`design.requirements.internal.internal_detail`
     fn workspace(root: &Path) -> Arc<Workspace> {
         let widget = root.join("widget-lib");
         std::fs::create_dir_all(widget.join("skills/guidance")).unwrap();
@@ -434,6 +476,7 @@ mod tests {
 
     /// A `Symposium` over a fresh config dir with only the given config, and
     /// no built-in registries (so tests see only what they set up).
+    // {impl}`design.requirements.internal.internal_detail`
     fn sym_with(root: &Path, config: &str) -> Symposium {
         let config_dir = root.join("config");
         std::fs::create_dir_all(&config_dir).unwrap();
@@ -448,6 +491,8 @@ mod tests {
         Symposium::from_dir(&config_dir)
     }
 
+    // {test}`design.requirements.consent.unconsented_inactive`
+    // {test}`design.requirements.enablement.status_state`
     #[tokio::test]
     async fn undecided_dependency_plugin_is_a_candidate() {
         let tmp = tempfile::tempdir().unwrap();
@@ -462,6 +507,8 @@ mod tests {
         assert_eq!(found.candidates[0].recommends, "widget-lib");
     }
 
+    // {test}`design.requirements.consent.consented_active`
+    // {test}`design.requirements.consent.crate_name_matching`
     #[tokio::test]
     async fn auto_enable_moves_a_candidate_to_enabled() {
         let tmp = tempfile::tempdir().unwrap();
@@ -481,6 +528,8 @@ mod tests {
         assert!(found.active.is_empty());
     }
 
+    // {test}`design.requirements.consent.consented_active`
+    // {test}`design.requirements.consent.disable_wins`
     #[tokio::test]
     async fn use_entry_and_disable_outrank_the_standing_decisions() {
         let tmp = tempfile::tempdir().unwrap();
@@ -510,6 +559,8 @@ mod tests {
         assert_eq!(found.declined.len(), 1);
     }
 
+    // {test}`design.requirements.consent.use_resolves_registry_first`
+    // {test}`design.requirements.consent.registry_use_not_dependency_consent`
     #[tokio::test]
     async fn use_naming_a_registry_plugin_leaves_the_dependency_undecided() {
         let tmp = tempfile::tempdir().unwrap();
@@ -537,6 +588,7 @@ mod tests {
 
     /// A `use` entry recorded for another workspace does not enable anything
     /// here.
+    // {test}`design.requirements.consent.scoped_use`
     #[tokio::test]
     async fn workspace_scoped_use_entries_only_count_in_their_workspace() {
         let tmp = tempfile::tempdir().unwrap();
@@ -556,6 +608,7 @@ mod tests {
 
     /// The crates the tests below name, all cached: every dependency they
     /// list, plus `my-skills-crate`, which no workspace depends on.
+    // {impl}`design.requirements.internal.internal_detail`
     fn cached_crates() -> PmRegistry {
         let (cargo, _) = crate::test_utils::FakeCargo::instance(
             &["serde", "tokio", "clap", "anyhow", "my-skills-crate"],
@@ -564,6 +617,7 @@ mod tests {
         PmRegistry::new(vec![cargo])
     }
 
+    // {impl}`design.requirements.internal.internal_detail`
     async fn enabled_names(sym: &Symposium, deps: &[PackageId], root: &Path) -> Vec<String> {
         enabled_dependencies(sym, &cached_crates(), &[], deps, root, UpdateLevel::None)
             .await
@@ -576,6 +630,8 @@ mod tests {
     /// `UpdateLevel::None`, so a `use` entry for a crate that is neither a
     /// dependency nor cached is skipped without a crates.io search or a cargo
     /// process; `sync` resolves it at `Check`.
+    // {test}`design.requirements.consent.offline_resolution`
+    // {test}`design.requirements.consent.unresolved_use_skipped`
     #[tokio::test]
     async fn resolving_use_entries_without_update_stays_offline() {
         let tmp = tempfile::tempdir().unwrap();
@@ -609,6 +665,9 @@ mod tests {
         assert_eq!(network.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
+    // {test}`design.requirements.consent.unconsented_inactive`
+    // {test}`design.requirements.consent.consented_active`
+    // {test}`design.requirements.consent.disable_wins`
     #[tokio::test]
     async fn enabled_dependencies_reads_config_not_offers() {
         let tmp = tempfile::tempdir().unwrap();
@@ -642,6 +701,10 @@ mod tests {
     /// sync loads its plugin from the registry. `auto-enable` does not: it is
     /// consent for dependencies you already have. A `use` name no package
     /// manager has is skipped.
+    // {test}`design.requirements.consent.use_beyond_dependencies`
+    // {test}`design.requirements.consent.auto_enable_dependencies_only`
+    // {test}`design.requirements.consent.unresolved_use_skipped`
+    // {test}`design.requirements.consent.scoped_use`
     #[tokio::test]
     async fn use_enables_a_non_dependency_crate_but_auto_enable_does_not() {
         let tmp = tempfile::tempdir().unwrap();
@@ -666,6 +729,7 @@ mod tests {
     }
 
     /// A `use`d crate that *is* a dependency appears once, not twice.
+    // {test}`design.requirements.consent.enabled_once`
     #[tokio::test]
     async fn used_dependency_is_not_duplicated() {
         let tmp = tempfile::tempdir().unwrap();
@@ -685,6 +749,9 @@ mod tests {
 
     /// A registry compares plugin names exactly, so only the exact spelling
     /// in `use` wakes a dormant registry plugin.
+    // {test}`design.requirements.consent.use_wakes_dormant`
+    // {test}`design.requirements.consent.dormant_inactive`
+    // {test}`design.requirements.consent.registry_name_exact`
     #[tokio::test]
     async fn use_wakes_a_registry_plugin_only_by_its_exact_name() {
         let used = async |entry: &str| {

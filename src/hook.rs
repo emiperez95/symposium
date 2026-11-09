@@ -43,6 +43,10 @@ struct ResolvedHook {
 }
 
 impl ResolvedHook {
+    // {impl}`design.requirements.hooks.hook_spawn_runnable`
+    // {impl}`design.requirements.hooks.hook_env_path_var`
+    // {impl}`design.requirements.hooks.hook_env_dir_var`
+    // {impl}`design.requirements.hooks.hook_env_path_prepend`
     fn build(parsed_plugin: &Plugin, hook: &crate::plugins::Hook) -> anyhow::Result<Self> {
         let plugin = &parsed_plugin.manifest;
         let lookup = |name: &str| -> anyhow::Result<Installation> {
@@ -74,6 +78,8 @@ impl ResolvedHook {
 
 /// Sanitize an installation name for use as part of an env var name.
 /// Replaces non-alphanumeric chars with underscore.
+// {impl}`design.requirements.hooks.hook_env_path_var`
+// {impl}`design.requirements.hooks.hook_env_dir_var`
 fn env_safe(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
@@ -86,6 +92,9 @@ fn env_safe(name: &str) -> String {
 /// `runnable` is prepended to `$PATH` so later entries take precedence over
 /// earlier ones (the command's own parent ends up first since it's pushed
 /// last and prepended).
+// {impl}`design.requirements.hooks.hook_env_path_var`
+// {impl}`design.requirements.hooks.hook_env_dir_var`
+// {impl}`design.requirements.hooks.hook_env_path_prepend`
 fn build_env(acquired: &[AcquiredInstallation]) -> Vec<(String, String)> {
     let mut env = Vec::new();
     let mut path_prefix: Vec<String> = Vec::new();
@@ -123,6 +132,7 @@ fn build_env(acquired: &[AcquiredInstallation]) -> Vec<(String, String)> {
 /// Prepend `dirs` to the current `PATH`, using the platform path-list
 /// separator (`:` on Unix, `;` on Windows). Returns `None` when `dirs` is
 /// empty. `join_paths` picks the separator, so this stays correct on Windows.
+// {impl}`design.requirements.hooks.hook_env_path_prepend`
 fn prepend_to_path(dirs: &[String]) -> Option<String> {
     if dirs.is_empty() {
         return None;
@@ -148,6 +158,12 @@ enum SpawnSpec {
     },
 }
 
+// {impl}`design.requirements.hooks.hook_spawn_runnable`
+// {impl}`design.requirements.hooks.dispatch_serves_cache`
+// {impl}`design.requirements.hooks.best_effort`
+// {impl}`design.requirements.hooks.hook_env_path_var`
+// {impl}`design.requirements.hooks.hook_env_dir_var`
+// {impl}`design.requirements.hooks.hook_env_path_prepend`
 async fn build_spawn_spec(sym: &Symposium, hook: &ResolvedHook) -> anyhow::Result<SpawnSpec> {
     // Dispatch-time acquisition serves the cache (git checks debounced); the
     // `SessionStart` prewarm is what forces a freshness check once per session.
@@ -197,6 +213,13 @@ async fn build_spawn_spec(sym: &Symposium, hook: &ResolvedHook) -> anyhow::Resul
     })
 }
 
+// {impl}`design.requirements.hooks.hook_spawn_runnable`
+// {impl}`design.requirements.hooks.hook_stdin_payload`
+// {impl}`design.requirements.hooks.hook_output_captured`
+// {impl}`design.requirements.hooks.stdout_protocol`
+// {impl}`design.requirements.hooks.hook_env_path_var`
+// {impl}`design.requirements.hooks.hook_env_dir_var`
+// {impl}`design.requirements.hooks.hook_env_path_prepend`
 fn spawn_from_spec(spec: SpawnSpec) -> std::io::Result<std::process::Child> {
     match spec {
         SpawnSpec::Script { path, args, env } => {
@@ -230,6 +253,19 @@ pub use crate::hook_schema::{HookAgent, HookEvent, HookResponse};
 ///
 /// Takes the raw agent wire-format input, returns the agent wire-format
 /// response. Called by both `run()` (CLI) and the test harness.
+// {impl}`design.requirements.hooks.unsupported_event`
+// {impl}`design.requirements.hooks.non_occurrence_neutral`
+// {impl}`design.requirements.hooks.non_occurrence_no_dispatch`
+// {impl}`design.requirements.hooks.auto_sync_session_start`
+// {impl}`design.requirements.hooks.source_refresh_session_start`
+// {impl}`design.requirements.hooks.joined_context`
+// {impl}`design.requirements.hooks.merge_later_wins`
+// {impl}`design.requirements.hooks.exit_2_stops`
+// {impl}`design.requirements.hooks.block_reason_stderr`
+// {impl}`design.requirements.hooks.block_pre_tool_use_deny`
+// {impl}`design.requirements.hooks.block_other_exit_2`
+// {impl}`design.requirements.hooks.best_effort`
+// {impl}`design.requirements.hooks.malformed_payload_fails`
 pub async fn execute_hook(
     sym: &Symposium,
     agent: HookAgent,
@@ -318,6 +354,10 @@ pub async fn execute_hook(
 /// form it honors (Antigravity ignores exit codes, Copilot drops the reason
 /// on a non-zero exit). Every other event passes exit 2 and the reason
 /// through, for the agent to apply its own blocking semantics.
+// {impl}`design.requirements.hooks.block_reason_stderr`
+// {impl}`design.requirements.hooks.block_pre_tool_use_deny`
+// {impl}`design.requirements.hooks.block_other_exit_2`
+// {impl}`design.requirements.hooks.block_reason_nonempty`
 fn blocked_response(
     handler: &dyn crate::hook_schema::ErasedAgentHookEvent,
     event: HookEvent,
@@ -340,6 +380,12 @@ fn blocked_response(
 }
 
 /// CLI entry point: read payload from stdin, dispatch, print output.
+// {impl}`design.requirements.hooks.unsupported_event`
+// {impl}`design.requirements.hooks.best_effort`
+// {impl}`design.requirements.hooks.hook_trace`
+// {impl}`design.requirements.hooks.block_other_exit_2`
+// {impl}`design.requirements.hooks.malformed_payload_fails`
+// {impl}`design.requirements.hooks.unreadable_payload_succeeds`
 pub async fn run(sym: &Symposium, agent: HookAgent, event: HookEvent) -> ExitCode {
     tracing::debug!("Running hook listener for agent {agent:?} and event {event:?}");
 
@@ -371,6 +417,8 @@ pub async fn run(sym: &Symposium, agent: HookAgent, event: HookEvent) -> ExitCod
 
 /// If `SYMPOSIUM_HOOK_TRACE` is set to a file path, append a JSONL entry.
 /// Used for integration testing to check what hooks occur when we invoke the agent.
+// {impl}`design.requirements.hooks.hook_trace`
+// {impl}`design.requirements.hooks.best_effort`
 fn write_hook_trace(agent: HookAgent, event: HookEvent, input: &str, response: &HookResponse) {
     let Some(path) = std::env::var_os("SYMPOSIUM_HOOK_TRACE") else {
         return;
@@ -424,6 +472,10 @@ fn write_hook_trace(agent: HookAgent, event: HookEvent, input: &str, response: &
 /// workspace's dependencies are unchanged.
 ///
 /// Returns whether it re-synced mid-session because an input changed.
+// {impl}`design.requirements.hooks.auto_sync_session_start`
+// {impl}`design.requirements.hooks.auto_sync_gate`
+// {impl}`design.requirements.hooks.best_effort`
+// {impl}`design.requirements.hooks.new_plugins_notice`
 async fn run_auto_sync(sym: &Symposium, deps: &Arc<Workspace>, session_start: bool) -> bool {
     if !sym.config.auto_sync {
         tracing::debug!("auto-sync disabled, skipping");
@@ -470,6 +522,7 @@ async fn run_auto_sync(sym: &Symposium, deps: &Arc<Workspace>, session_start: bo
 /// plugin in — since expansion evaluates edge and plugin predicates against the
 /// crate graph too. Registry plugins reached without any of these dispatch on a
 /// crate-free context (the fast path for `PreToolUse`).
+// {impl}`design.requirements.hooks.hook_gating`
 fn hook_dispatch_needs_deps(sym: &Symposium, registry_plugins: &[Plugin]) -> bool {
     registry_plugins
         .iter()
@@ -487,6 +540,15 @@ fn hook_dispatch_needs_deps(sym: &Symposium, registry_plugins: &[Plugin]) -> boo
 /// Refresh-only: a source that was never acquired is left alone (it installs
 /// lazily when the hook first fires) — `SessionStart` updates installed tools
 /// but never installs eagerly. Best-effort: failures are logged and skipped.
+// {impl}`design.requirements.hooks.source_refresh_session_start`
+// {impl}`design.requirements.hooks.source_refresh_installed_only`
+// {impl}`design.requirements.hooks.best_effort`
+// {impl}`design.requirements.hooks.hook_gating`
+// {impl}`design.requirements.consent.unconsented_inactive`
+// {impl}`design.requirements.consent.consented_active`
+// {impl}`design.requirements.consent.dormant_inactive`
+// {impl}`design.requirements.consent.use_wakes_dormant`
+// {impl}`design.requirements.consent.offline_resolution`
 async fn prewarm_hook_sources(sym: &Symposium, deps: &Arc<Workspace>) {
     let workspace = deps.info().await.cloned();
     let registry = crate::plugins::load_registry_with_workspace(sym, workspace.as_ref()).await;
@@ -549,6 +611,11 @@ async fn prewarm_hook_sources(sym: &Symposium, deps: &Arc<Workspace>) {
 }
 
 /// Built-in hook logic on canonical symposium types.
+// {impl}`design.requirements.hooks.builtin_quiet`
+// {impl}`design.requirements.hooks.new_plugins_notice`
+// {impl}`design.requirements.hooks.discovery_hint`
+// {impl}`design.requirements.hooks.consent_hint_names`
+// {impl}`design.requirements.hooks.update_nudge`
 pub async fn dispatch_builtin(
     sym: &Symposium,
     input: &symposium::InputEvent,
@@ -576,6 +643,10 @@ pub async fn dispatch_builtin(
 /// awaiting consent, and, when due, nudge the user to update. The three fragments are computed
 /// independently -- only the update nudge is gated behind the update-check throttle -- then joined
 /// into a single context block.
+// {impl}`design.requirements.hooks.discovery_hint`
+// {impl}`design.requirements.hooks.consent_hint_names`
+// {impl}`design.requirements.hooks.update_nudge`
+// {impl}`design.requirements.hooks.joined_context`
 async fn handle_session_start(
     sym: &Symposium,
     _payload: &SessionStartInput,
@@ -599,6 +670,13 @@ async fn handle_session_start(
 
 /// Suggest `cargo agents --help` when the active workspace exposes crate-aware plugin subcommands.
 /// Reuses the help renderer's `applicable_subcommands`, so the hint fires only when there is actually something to discover; `None` otherwise.
+// {impl}`design.requirements.hooks.discovery_hint`
+// {impl}`design.requirements.hooks.discovery_hint_audience`
+// {impl}`design.requirements.consent.unconsented_inactive`
+// {impl}`design.requirements.consent.consented_active`
+// {impl}`design.requirements.consent.dormant_inactive`
+// {impl}`design.requirements.consent.use_wakes_dormant`
+// {impl}`design.requirements.consent.offline_resolution`
 async fn discovery_hint(sym: &Symposium, deps: &Arc<Workspace>) -> Option<String> {
     let workspace = deps.info().await.cloned();
     let registry = crate::plugins::load_registry_with_workspace(sym, workspace.as_ref()).await;
@@ -635,6 +713,9 @@ async fn discovery_hint(sym: &Symposium, deps: &Arc<Workspace>) -> Option<String
 /// behalf, so it must never block on stdin — the candidates are reported as
 /// context, with a pointer at the interactive command that can actually ask.
 /// `None` when nothing is pending.
+// {impl}`design.requirements.hooks.consent_hint_names`
+// {impl}`design.requirements.hooks.consent_hint_defers`
+// {impl}`design.requirements.hooks.no_prompt`
 async fn consent_hint(sym: &Symposium, deps: &Arc<Workspace>) -> Option<String> {
     let names = crate::discovery::pending_candidates(sym, deps).await;
     if names.is_empty() {
@@ -651,6 +732,7 @@ async fn consent_hint(sym: &Symposium, deps: &Arc<Workspace>) -> Option<String> 
 
 /// Nudge the user to update. Gated by `auto-update = \"warn\"`, the 24-hour update-check throttle,
 /// and a newer published version on the registry; `None` otherwise.
+// {impl}`design.requirements.hooks.update_nudge`
 fn update_nudge(sym: &Symposium) -> Option<String> {
     use crate::config::AutoUpdate;
     use crate::state::CURRENT_VERSION;
@@ -670,6 +752,8 @@ fn update_nudge(sym: &Symposium) -> Option<String> {
     ))
 }
 
+// {impl}`design.requirements.hooks.new_plugins_notice`
+// {impl}`design.requirements.hooks.builtin_quiet`
 async fn handle_post_tool_use(
     _sym: &Symposium,
     _post: &symposium::PostToolUseInput,
@@ -678,6 +762,8 @@ async fn handle_post_tool_use(
     possible_new_plugins_notice(HookEvent::PostToolUse, notify_about_possible_new_plugins)
 }
 
+// {impl}`design.requirements.hooks.new_plugins_notice`
+// {impl}`design.requirements.hooks.builtin_quiet`
 async fn handle_user_prompt_submit(
     _sym: &Symposium,
     _prompt_payload: &symposium::UserPromptSubmitInput,
@@ -689,6 +775,8 @@ async fn handle_user_prompt_submit(
     )
 }
 
+// {impl}`design.requirements.hooks.new_plugins_notice`
+// {impl}`design.requirements.hooks.builtin_quiet`
 fn possible_new_plugins_notice(event: HookEvent, notify: bool) -> symposium::OutputEvent {
     if !notify {
         return symposium::OutputEvent::empty_for(event);
@@ -719,6 +807,23 @@ pub enum PluginHookOutput {
 ///
 /// Returns `Ok(json)` on success, `Err(stderr)` on exit code 2.
 #[allow(clippy::too_many_arguments)]
+// {impl}`design.requirements.hooks.hook_gating`
+// {impl}`design.requirements.hooks.native_input`
+// {impl}`design.requirements.hooks.native_output`
+// {impl}`design.requirements.hooks.canonical_input`
+// {impl}`design.requirements.hooks.canonical_output`
+// {impl}`design.requirements.hooks.raw_json_fallback`
+// {impl}`design.requirements.hooks.hook_stdin_payload`
+// {impl}`design.requirements.hooks.merge_later_wins`
+// {impl}`design.requirements.hooks.joined_context`
+// {impl}`design.requirements.hooks.deny_final`
+// {impl}`design.requirements.hooks.exit_2_stops`
+// {impl}`design.requirements.hooks.best_effort`
+// {impl}`design.requirements.consent.unconsented_inactive`
+// {impl}`design.requirements.consent.consented_active`
+// {impl}`design.requirements.consent.dormant_inactive`
+// {impl}`design.requirements.consent.use_wakes_dormant`
+// {impl}`design.requirements.consent.offline_resolution`
 pub async fn dispatch_plugin_hooks(
     sym: &Symposium,
     host_agent: HookAgent,
@@ -911,6 +1016,7 @@ struct JoinedContext {
 }
 
 impl JoinedContext {
+    // {impl}`design.requirements.hooks.joined_context`
     fn new(event: HookEvent, prior: Option<String>) -> Self {
         Self { event, text: prior }
     }
@@ -918,6 +1024,8 @@ impl JoinedContext {
     /// Add `hook_output`'s context and write the joined text back into
     /// `output`, whose context the hook's own output has just replaced (or,
     /// for Antigravity's `injectSteps` list, emptied).
+    // {impl}`design.requirements.hooks.joined_context`
+    // {impl}`design.requirements.hooks.merge_later_wins`
     fn add(
         &mut self,
         hook_output: Option<&symposium::OutputEvent>,
@@ -945,6 +1053,7 @@ impl JoinedContext {
 
 /// Whether a hook's output denies the tool call. A denial is final, like exit
 /// 2: otherwise a later hook's decision would overwrite it in [`merge`].
+// {impl}`design.requirements.hooks.deny_final`
 fn denies(output: &symposium::OutputEvent) -> bool {
     matches!(
         output,
@@ -955,6 +1064,8 @@ fn denies(output: &symposium::OutputEvent) -> bool {
 /// Recursively merge two JSON objects, with `b` taking precedence over `a`.
 /// Fields with null values in `b` will delete the corresponding field in `a`.
 /// Fields not present in `b` will be left unchanged in `a`.
+// {impl}`design.requirements.hooks.merge_later_wins`
+// {impl}`design.requirements.hooks.merge_null_removes`
 pub fn merge(a: &mut serde_json::Value, b: serde_json::Value) {
     if let serde_json::Value::Object(a) = a
         && let serde_json::Value::Object(b) = b
@@ -981,6 +1092,11 @@ pub fn merge(a: &mut serde_json::Value, b: serde_json::Value) {
 ///
 /// The resulting `ResolvedHook`s are ready to dispatch without further plugin
 /// lookups.
+// {impl}`design.requirements.hooks.hook_gating`
+// {impl}`design.requirements.hooks.hook_selection_one`
+// {impl}`design.requirements.hooks.hook_selection_native_first`
+// {impl}`design.requirements.hooks.foreign_format_silent`
+// {impl}`design.requirements.hooks.best_effort`
 fn dispatched_hooks_for_payload(
     plugins: &[Plugin],
     input: &symposium::InputEvent,
@@ -1098,6 +1214,8 @@ mod tests {
     use super::*;
 
     #[test]
+    // {test}`design.requirements.hooks.hook_env_path_var`
+    // {test}`design.requirements.hooks.hook_env_dir_var`
     fn env_safe_sanitizes_punctuation() {
         assert_eq!(env_safe("rtk"), "rtk");
         assert_eq!(env_safe("rtk-hooks"), "rtk_hooks");
@@ -1106,6 +1224,9 @@ mod tests {
     }
 
     #[test]
+    // {test}`design.requirements.hooks.hook_env_path_var`
+    // {test}`design.requirements.hooks.hook_env_dir_var`
+    // {test}`design.requirements.hooks.hook_env_path_prepend`
     fn build_env_sets_dir_and_name_vars() {
         // [req (rtk), command (no-source)] order — command was pushed last,
         // so PATH should put its bin dir first.
@@ -1147,6 +1268,7 @@ mod tests {
     }
 
     #[test]
+    // {test}`design.requirements.hooks.hook_env_path_prepend`
     fn prepend_to_path_uses_platform_separator() {
         assert!(prepend_to_path(&[]).is_none(), "empty input yields None");
 
@@ -1161,6 +1283,9 @@ mod tests {
     }
 
     #[test]
+    // {test}`design.requirements.hooks.hook_env_path_var`
+    // {test}`design.requirements.hooks.hook_env_dir_var`
+    // {test}`design.requirements.hooks.hook_env_path_prepend`
     fn build_env_no_runnable_no_vars() {
         // Pure-setup installation: no runnable means no SYMPOSIUM_<name>
         // and no PATH contribution. SYMPOSIUM_DIR_<name> still gets set
@@ -1180,6 +1305,9 @@ mod tests {
     }
 
     #[test]
+    // {test}`design.requirements.hooks.hook_env_path_var`
+    // {test}`design.requirements.hooks.hook_env_dir_var`
+    // {test}`design.requirements.hooks.hook_env_path_prepend`
     fn build_env_global_cargo_skips_env_and_path() {
         // Global cargo: PathLookup runnable. Nothing exposed.
         let acquired = vec![AcquiredInstallation {
@@ -1196,6 +1324,7 @@ mod tests {
     }
 
     #[tokio::test]
+    // {test}`design.requirements.hooks.builtin_quiet`
     async fn builtin_pre_tool_use_returns_empty() {
         let tmp = tempfile::tempdir().unwrap();
         let sym = Symposium::from_dir(tmp.path());
@@ -1211,6 +1340,8 @@ mod tests {
     }
 
     #[tokio::test]
+    // {test}`design.requirements.hooks.builtin_quiet`
+    // {test}`design.requirements.hooks.new_plugins_notice`
     async fn builtin_post_tool_use_returns_empty_when_dependencies_are_unchanged() {
         let tmp = tempfile::tempdir().unwrap();
         let sym = Symposium::from_dir(tmp.path());
@@ -1227,6 +1358,8 @@ mod tests {
     }
 
     #[tokio::test]
+    // {test}`design.requirements.hooks.builtin_quiet`
+    // {test}`design.requirements.hooks.new_plugins_notice`
     async fn builtin_user_prompt_submit_returns_empty_when_dependencies_are_unchanged() {
         let tmp = tempfile::tempdir().unwrap();
         let sym = Symposium::from_dir(tmp.path());
@@ -1241,6 +1374,7 @@ mod tests {
     }
 
     #[tokio::test]
+    // {test}`design.requirements.hooks.builtin_quiet`
     async fn builtin_stop_returns_an_empty_stop_output() {
         let tmp = tempfile::tempdir().unwrap();
         let sym = Symposium::from_dir(tmp.path());
@@ -1258,6 +1392,7 @@ mod tests {
     }
 
     #[test]
+    // {test}`design.requirements.hooks.joined_context`
     fn symposium_output_serializes_with_additional_context() {
         let output = symposium::OutputEvent::with_context(
             HookEvent::UserPromptSubmit,
@@ -1268,6 +1403,7 @@ mod tests {
     }
 
     #[test]
+    // {test}`design.requirements.hooks.builtin_quiet`
     fn symposium_output_empty_has_no_context() {
         let output = symposium::OutputEvent::empty_for(HookEvent::PreToolUse);
         assert!(output.additional_context().is_none());
@@ -1275,6 +1411,7 @@ mod tests {
 
     /// Helper: build a minimal plugin with a single PreToolUse hook backed
     /// by a no-op script installation (no `source`, just an on-disk script).
+    // {test}`design.requirements.hooks.hook_gating`
     fn plugin_with_hook(plugin_shell: Vec<&str>, hook_shell: Vec<&str>) -> crate::plugins::Plugin {
         use crate::plugins::{Hook, HookFormat, Installation, PluginManifest};
 
@@ -1334,6 +1471,7 @@ mod tests {
         }
     }
 
+    // {test}`design.requirements.hooks.hook_gating`
     fn pre_tool_use_input() -> symposium::InputEvent {
         symposium::InputEvent::PreToolUse(symposium::PreToolUseInput::new(
             "Bash".into(),
@@ -1344,6 +1482,7 @@ mod tests {
     }
 
     #[test]
+    // {test}`design.requirements.hooks.hook_gating`
     fn dispatch_skips_when_plugin_predicate_fails() {
         let plugin = plugin_with_hook(vec!["false"], vec![]);
         let hooks = dispatched_hooks_for_payload(
@@ -1356,6 +1495,7 @@ mod tests {
     }
 
     #[test]
+    // {test}`design.requirements.hooks.hook_gating`
     fn dispatch_skips_when_hook_predicate_fails() {
         let plugin = plugin_with_hook(vec![], vec!["false"]);
         let hooks = dispatched_hooks_for_payload(
@@ -1368,6 +1508,7 @@ mod tests {
     }
 
     #[test]
+    // {test}`design.requirements.hooks.hook_gating`
     fn dispatch_includes_when_predicates_pass() {
         let plugin = plugin_with_hook(vec!["true"], vec!["true"]);
         let hooks = dispatched_hooks_for_payload(
@@ -1383,6 +1524,7 @@ mod tests {
     /// workspace that lacks the crate (regression: hooks used to fire for every
     /// plugin regardless of its `depends-on`).
     #[test]
+    // {test}`design.requirements.hooks.hook_gating`
     fn dispatch_respects_plugin_crate_gate() {
         // Replace the wildcard plugin gate with a concrete `depends-on(serde)`.
         let mut plugin = plugin_with_hook(vec![], vec![]);
