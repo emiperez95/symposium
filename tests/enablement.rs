@@ -430,6 +430,20 @@ async fn search_lists_a_registry_entry_once() {
             .filter(|m| m.origin == "user-plugins" && m.name == "tokio-guidance")
             .collect();
         assert_eq!(hits.len(), 1, "{matches:#?}");
+
+        // A plugin named differently from its entry directory is still one hit.
+        let entry = ctx.sym.config_dir().join("plugins/foo-tools");
+        std::fs::create_dir_all(&entry)?;
+        std::fs::write(
+            entry.join("Symposium.toml"),
+            "name = \"foo\"\ndepends-on = [\"*\"]\n",
+        )?;
+        let matches = symposium::search_command::find_matches(&ctx.sym, "foo").await;
+        let hits: Vec<_> = matches
+            .iter()
+            .filter(|m| m.origin == "user-plugins" && (m.name == "foo" || m.name == "foo-tools"))
+            .collect();
+        assert_eq!(hits.len(), 1, "{matches:#?}");
         Ok(())
     })
     .await
