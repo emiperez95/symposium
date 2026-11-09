@@ -1,0 +1,23 @@
+{
+  "determination": true,
+  "inputs": [
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "fn[display_path]",
+      "text": [
+        "/// Replace the home directory prefix with `~` for display.",
+        "// {impl}`design.requirements.output.display_path`",
+        "pub fn display_path(path: &Path) -> String {",
+        "    if let Some(home) = dirs::home_dir()",
+        "        && let Ok(rest) = path.strip_prefix(&home)",
+        "    {",
+        "        return format!(\"~/{}\", rest.display());",
+        "    }",
+        "    path.display().to_string()",
+        "}"
+      ]
+    }
+  ],
+  "rationale": "`output::display_path` strips `dirs::home_dir()` from the path and returns `~/{rest}` when the path is under home, else the path unchanged. Callers that show paths in human messages and report events use it (`src/sync.rs` skill install/removal/warning messages and the config path, and `src/agents/mcp_server_registration.rs` for MCP config files). As a SHOULD, other raw `path.display()` uses elsewhere are not violations.\n\nUntested: no test calls `display_path` directly. Judged from code.",
+  "requirement": "Symposium SHOULD display a path under the user's home directory with the home prefix replaced by `~`."
+}

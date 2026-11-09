@@ -37,7 +37,9 @@ habeas add-input --for-requirement design.requirements.hooks.no_prompt --file-ra
 habeas add-input --for-example design.requirements.hooks.pending_consent --requirements 'design.requirements.hooks.*'
 ```
 
-The first `add-input` creates the evidence file with `determination: false`. Every `{impl}`/`{test}`/`{cite}` line must fall inside one of its inputs. Once the inputs cover the behavior, read them, run the tests they cite, and write a `rationale` saying why the requirement holds before setting `determination` to `true`.
+The first `add-input` creates the evidence file with `determination: false`.
+
+Give `--requirements` an exact definition name, not a chapter glob. A requirements input records every definition its glob matches, so a chapter glob such as `design.requirements.hooks.*` goes stale for every function citing anything in that chapter as soon as one requirement is added to it. Every `{impl}`/`{test}`/`{cite}` line must fall inside one of its inputs. Once the inputs cover the behavior, read them, run the tests they cite, and write a `rationale` saying why the requirement holds before setting `determination` to `true`.
 
 ## When code changes
 
@@ -50,7 +52,14 @@ To refresh, re-run `add-input` (dropping the stale input from the JSON first if 
 
 ## The per-function rule
 
-Upstream Habeas also requires every Rust function in the repository to cite a requirement, with a per-file attestation under `evidence/rust/`. That is several thousand functions here, so `tests/habeas.rs` enforces those two rules only for the files listed in its `FUNCTION_RULE_FILES` (none yet); every other check applies everywhere. Two consequences:
+Upstream Habeas also requires every Rust function in the repository to cite a requirement, with a per-file attestation under `evidence/rust/`. That is several thousand functions here, so `tests/habeas.rs` enforces those two rules only for the files listed in its `FUNCTION_RULE_FILES`; every other check applies everywhere. The first files converted are the hook and consent paths (`src/hook.rs`, `src/discovery.rs`, `src/output.rs` and their tests).
+
+To add a file:
+
+1. Cite every function in it with `{impl}`/`{test}` comments. Use `design.requirements.internal.internal_detail` only for a helper with no end-user-observable behavior of its own.
+2. Record an attestation per function: `habeas add-input --for-rust-item <file> '<selector>' --rust-item <file>:<line>`, then one `--requirements <name>` per cited definition. Habeas derives the citations from the comments; write a rationale explaining why the citations are complete, then set `determination`.
+3. Cover the new reference lines in each cited definition's own evidence, again with `--rust-item` inputs.
+4. Add the file to `FUNCTION_RULE_FILES`. Two consequences:
 
 - `habeas status` and `habeas info` still print the uncited-function findings for every file. Ignore them outside the allowlist.
 - Habeas's agent skills (offered by `cargo agents sync` once the `habeas` dev-dependency's plugin is enabled) assume the full rule. In this repo, only cite every function in a file you are adding to `FUNCTION_RULE_FILES`.

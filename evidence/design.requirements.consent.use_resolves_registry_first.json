@@ -1,0 +1,92 @@
+{
+  "determination": true,
+  "inputs": [
+    {
+      "rust_file": "src/discovery.rs",
+      "rust_item": "fn[resolve_used]",
+      "text": [
+        "// {impl}`design.requirements.consent.scoped_use`",
+        "// {impl}`design.requirements.consent.offline_resolution`",
+        "// {impl}`design.requirements.consent.unresolved_use_skipped`",
+        "// {impl}`design.requirements.consent.use_resolves_registry_first`",
+        "pub(crate) async fn resolve_used<'a>(",
+        "    sym: &'a Symposium,",
+        "    pms: &PmRegistry,",
+        "    registry: &[Plugin],",
+        "    workspace_root: &Path,",
+        "    update: UpdateLevel,",
+        ") -> Vec<(&'a str, PackageId)> {",
+        "    let mut used = Vec::new();",
+        "    for name in sym.config.plugins.used_names_in(workspace_root) {",
+        "        match pms.identify(registry, name, update).await {",
+        "            Ok(id) => used.push((name, id)),",
+        "            Err(e) => tracing::warn!(error = %e, \"skipping `[plugins] use` entry\"),",
+        "        }",
+        "    }",
+        "    used",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "src/discovery.rs",
+      "rust_item": "mod[tests]/fn[use_naming_a_registry_plugin_leaves_the_dependency_undecided]",
+      "text": [
+        "    // {test}`design.requirements.consent.use_resolves_registry_first`",
+        "    // {test}`design.requirements.consent.registry_use_not_dependency_consent`",
+        "    #[tokio::test]",
+        "    async fn use_naming_a_registry_plugin_leaves_the_dependency_undecided() {",
+        "        let tmp = tempfile::tempdir().unwrap();",
+        "        let ws = workspace(tmp.path());",
+        "        let sym = sym_with(",
+        "            tmp.path(),",
+        "            indoc! {r#\"",
+        "                [plugins]",
+        "                use = [\"widget-lib\"]",
+        "",
+        "                [[registry]]",
+        "                name = \"reg\"",
+        "                path = \"reg\"",
+        "            \"#},",
+        "        );",
+        "        let entry = tmp.path().join(\"config/reg/widget-lib\");",
+        "        std::fs::create_dir_all(&entry).unwrap();",
+        "        std::fs::write(entry.join(\"Symposium.toml\"), \"name = \\\"widget-lib\\\"\\n\").unwrap();",
+        "        let registry = crate::plugins::load_registry(&sym).await;",
+        "",
+        "        let found = discover(&sym, &ws, &registry.plugins).await;",
+        "        assert!(found.active.is_empty());",
+        "        assert_eq!(found.candidates.len(), 1);",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "tests/enablement.rs",
+      "rust_item": "fn[choosing_registry_plugin_does_not_enable_same_named_dependency]",
+      "text": [
+        "// {test}`design.requirements.consent.use_resolves_registry_first`",
+        "// {test}`design.requirements.consent.registry_use_not_dependency_consent`",
+        "#[tokio::test]",
+        "async fn choosing_registry_plugin_does_not_enable_same_named_dependency() {",
+        "    with_fixture(TestMode::SimulationOnly, &[\"auto-enable0\"], async |mut ctx| {",
+        "        ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+        "        ctx.sym.config.defaults.user_plugins = true;",
+        "        let plugin_dir = ctx.sym.config_dir().join(\"plugins/registry-choice\");",
+        "        std::fs::create_dir_all(&plugin_dir)?;",
+        "        std::fs::write(plugin_dir.join(\"Symposium.toml\"), \"name = \\\"crate-a\\\"\\n\")?;",
+        "        let registry = symposium::plugins::load_registry(&ctx.sym).await;",
+        "        assert!(registry.plugins.iter().any(|plugin|",
+        "            plugin.manifest.name == \"crate-a\" && plugin.manifest.requires_use));",
+        "        ctx.symposium(&[\"use\", \"crate-a\"]).await?;",
+        "        let skills = ctx.workspace_root.as_ref().unwrap().join(\".claude/skills\");",
+        "        let installed = find_installed_skills(&skills, \"a-guidance\");",
+        "        assert!(installed.is_empty(),",
+        "            \"enabling the registry plugin also installed the unconsented dependency: {installed:?}\");",
+        "        Ok(())",
+        "    }).await.unwrap();",
+        "}"
+      ]
+    }
+  ],
+  "rationale": "`resolve_used` resolves each applicable `use` name with `PmRegistry::identify(registry, name, update)`, which first searches the passed registry plugins (`registry.plugins`, the loaded trust-root plugins) for a plugin with that manifest name under its registry's rule and returns its identity; only if none matches does it ask each package-manager instance's `find` (cargo). So a name shared by a registry plugin and a crate resolves to the registry plugin.\n\nTests (all pass): `discovery::tests::use_naming_a_registry_plugin_leaves_the_dependency_undecided` (registry plugin `widget-lib` + dependency `widget-lib` + `use = [\"widget-lib\"]` -> the dependency is not `Used`, it stays a candidate); `tests/enablement.rs` `choosing_registry_plugin_does_not_enable_same_named_dependency` (`use crate-a` with a dormant registry plugin `crate-a` does not install the dependency's `a-guidance` skill). `pm::tests::identify_asks_each_package_manager_and_the_registry_wins` also passes (not an input).",
+  "requirement": "When a `[plugins] use` name matches both a configured registry plugin and a crate, Symposium MUST resolve it to the registry plugin."
+}

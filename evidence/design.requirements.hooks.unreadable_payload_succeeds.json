@@ -1,0 +1,48 @@
+{
+  "determination": true,
+  "inputs": [
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "fn[run]",
+      "text": [
+        "/// CLI entry point: read payload from stdin, dispatch, print output.",
+        "// {impl}`design.requirements.hooks.unsupported_event`",
+        "// {impl}`design.requirements.hooks.best_effort`",
+        "// {impl}`design.requirements.hooks.hook_trace`",
+        "// {impl}`design.requirements.hooks.block_other_exit_2`",
+        "// {impl}`design.requirements.hooks.malformed_payload_fails`",
+        "// {impl}`design.requirements.hooks.unreadable_payload_succeeds`",
+        "pub async fn run(sym: &Symposium, agent: HookAgent, event: HookEvent) -> ExitCode {",
+        "    tracing::debug!(\"Running hook listener for agent {agent:?} and event {event:?}\");",
+        "",
+        "    let mut input = String::new();",
+        "    if let Err(e) = std::io::stdin().read_to_string(&mut input) {",
+        "        tracing::warn!(?event, error = %e, \"failed to read hook stdin\");",
+        "        return ExitCode::SUCCESS;",
+        "    }",
+        "    tracing::trace!(?input, \"hook stdin\");",
+        "",
+        "    match execute_hook(sym, agent, event, &input).await {",
+        "        Ok(response) => {",
+        "            write_hook_trace(agent, event, &input, &response);",
+        "            // {impl}`design.requirements.hooks.stdout_protocol`",
+        "            if !response.stdout.is_empty() {",
+        "                std::io::stdout().write_all(&response.stdout).unwrap();",
+        "            }",
+        "            if !response.stderr.is_empty() {",
+        "                std::io::stderr().write_all(&response.stderr).unwrap();",
+        "            }",
+        "            ExitCode::from(response.exit_code)",
+        "        }",
+        "        Err(e) => {",
+        "            tracing::warn!(?event, error = %e, \"hook failed\");",
+        "            ExitCode::FAILURE",
+        "        }",
+        "    }",
+        "}"
+      ]
+    }
+  ],
+  "rationale": "**Implementation.** `run` reads stdin with `read_to_string`; on error (including stdin that is not valid UTF-8) it logs a warning and returns `ExitCode::SUCCESS` before calling `execute_hook`, so nothing is written to stdout.\n\n**Tests.** Untested. Judged from code.",
+  "requirement": "A `cargo agents hook` process that cannot read its payload from stdin MUST exit successfully and write nothing to stdout."
+}

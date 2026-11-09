@@ -1,0 +1,53 @@
+{
+  "determination": true,
+  "inputs": [
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[normal]",
+      "text": [
+        "    // {impl}`design.requirements.output.messages_stdout`",
+        "    // {impl}`design.requirements.output.warnings_stderr`",
+        "    pub fn normal() -> Self {",
+        "        Self {",
+        "            quiet: false,",
+        "            capture: None,",
+        "        }",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[emit_err]",
+      "text": [
+        "    // {impl}`design.requirements.output.quiet`",
+        "    // {impl}`design.requirements.output.capture`",
+        "    // {impl}`design.requirements.output.warnings_stderr`",
+        "    fn emit_err(&self, msg: String) {",
+        "        if self.quiet {",
+        "            return;",
+        "        }",
+        "        if let Some(buf) = &self.capture {",
+        "            buf.lock().unwrap().push(msg);",
+        "        } else {",
+        "            eprintln!(\"{msg}\");",
+        "        }",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/output.rs",
+      "rust_item": "impl[Output]/fn[warn]",
+      "text": [
+        "    /// A warning (something went wrong but not fatal).",
+        "    // {impl}`design.requirements.output.quiet`",
+        "    // {impl}`design.requirements.output.capture`",
+        "    // {impl}`design.requirements.output.warnings_stderr`",
+        "    pub fn warn(&self, msg: impl std::fmt::Display) {",
+        "        self.emit_err(format!(\"⚠️  {msg}\"));",
+        "    }"
+      ]
+    }
+  ],
+  "rationale": "`Output::normal()` sets `quiet: false, capture: None`. `warn` formats `⚠️  {msg}` and calls `emit_err`, which, not quiet and not capturing, calls `eprintln!` (stderr). `warn` is the only helper routed to `emit_err`.\n\nUntested: no test runs a normal `Output` and inspects stderr. Judged from code, which is a direct three-branch function.",
+  "requirement": "A normal `Output` MUST print warnings to stderr."
+}

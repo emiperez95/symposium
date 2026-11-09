@@ -1,0 +1,223 @@
+{
+  "determination": true,
+  "inputs": [
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "fn[dispatch_builtin]",
+      "text": [
+        "/// Built-in hook logic on canonical symposium types.",
+        "// {impl}`design.requirements.hooks.builtin_quiet`",
+        "// {impl}`design.requirements.hooks.new_plugins_notice`",
+        "// {impl}`design.requirements.hooks.discovery_hint`",
+        "// {impl}`design.requirements.hooks.consent_hint_names`",
+        "// {impl}`design.requirements.hooks.update_nudge`",
+        "pub async fn dispatch_builtin(",
+        "    sym: &Symposium,",
+        "    input: &symposium::InputEvent,",
+        "    deps: &Arc<Workspace>,",
+        "    notify_about_possible_new_plugins: bool,",
+        ") -> symposium::OutputEvent {",
+        "    match input {",
+        "        symposium::InputEvent::PreToolUse(_) => {",
+        "            symposium::OutputEvent::empty_for(HookEvent::PreToolUse)",
+        "        }",
+        "        symposium::InputEvent::PostToolUse(post) => {",
+        "            handle_post_tool_use(sym, post, notify_about_possible_new_plugins).await",
+        "        }",
+        "        symposium::InputEvent::UserPromptSubmit(prompt) => {",
+        "            handle_user_prompt_submit(sym, prompt, notify_about_possible_new_plugins).await",
+        "        }",
+        "        symposium::InputEvent::SessionStart(session) => {",
+        "            handle_session_start(sym, session, deps).await",
+        "        }",
+        "        _ => symposium::OutputEvent::empty_for(input.event()),",
+        "    }",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "fn[handle_post_tool_use]",
+      "text": [
+        "// {impl}`design.requirements.hooks.new_plugins_notice`",
+        "// {impl}`design.requirements.hooks.builtin_quiet`",
+        "async fn handle_post_tool_use(",
+        "    _sym: &Symposium,",
+        "    _post: &symposium::PostToolUseInput,",
+        "    notify_about_possible_new_plugins: bool,",
+        ") -> symposium::OutputEvent {",
+        "    possible_new_plugins_notice(HookEvent::PostToolUse, notify_about_possible_new_plugins)",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "fn[handle_user_prompt_submit]",
+      "text": [
+        "// {impl}`design.requirements.hooks.new_plugins_notice`",
+        "// {impl}`design.requirements.hooks.builtin_quiet`",
+        "async fn handle_user_prompt_submit(",
+        "    _sym: &Symposium,",
+        "    _prompt_payload: &symposium::UserPromptSubmitInput,",
+        "    notify_about_possible_new_plugins: bool,",
+        ") -> symposium::OutputEvent {",
+        "    possible_new_plugins_notice(",
+        "        HookEvent::UserPromptSubmit,",
+        "        notify_about_possible_new_plugins,",
+        "    )",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "fn[possible_new_plugins_notice]",
+      "text": [
+        "// {impl}`design.requirements.hooks.new_plugins_notice`",
+        "// {impl}`design.requirements.hooks.builtin_quiet`",
+        "fn possible_new_plugins_notice(event: HookEvent, notify: bool) -> symposium::OutputEvent {",
+        "    if !notify {",
+        "        return symposium::OutputEvent::empty_for(event);",
+        "    }",
+        "    symposium::OutputEvent::with_context(",
+        "        event,",
+        "        \"The workspace's dependencies just changed, so there may be new agent plugins \\",
+        "         available from them. They stay off until the user consents: tell the user to run \\",
+        "         `cargo agents sync` in their terminal to review them. Do not enable them yourself.\"",
+        "            .to_string(),",
+        "    )",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "mod[tests]/fn[builtin_pre_tool_use_returns_empty]",
+      "text": [
+        "    #[tokio::test]",
+        "    // {test}`design.requirements.hooks.builtin_quiet`",
+        "    async fn builtin_pre_tool_use_returns_empty() {",
+        "        let tmp = tempfile::tempdir().unwrap();",
+        "        let sym = Symposium::from_dir(tmp.path());",
+        "        let deps = sym.workspace(tmp.path());",
+        "        let input = symposium::InputEvent::PreToolUse(symposium::PreToolUseInput::new(",
+        "            \"Bash\".to_string(),",
+        "            serde_json::Value::default(),",
+        "            None,",
+        "            None,",
+        "        ));",
+        "        let output = dispatch_builtin(&sym, &input, &deps, false).await;",
+        "        assert!(output.additional_context().is_none());",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "mod[tests]/fn[builtin_post_tool_use_returns_empty_when_dependencies_are_unchanged]",
+      "text": [
+        "    #[tokio::test]",
+        "    // {test}`design.requirements.hooks.builtin_quiet`",
+        "    // {test}`design.requirements.hooks.new_plugins_notice`",
+        "    async fn builtin_post_tool_use_returns_empty_when_dependencies_are_unchanged() {",
+        "        let tmp = tempfile::tempdir().unwrap();",
+        "        let sym = Symposium::from_dir(tmp.path());",
+        "        let deps = sym.workspace(tmp.path());",
+        "        let input = symposium::InputEvent::PostToolUse(symposium::PostToolUseInput::new(",
+        "            \"Bash\".to_string(),",
+        "            serde_json::json!({\"command\": \"ls\"}),",
+        "            serde_json::json!({\"stdout\": \"file.rs\"}),",
+        "            Some(\"test-session\".to_string()),",
+        "            Some(\"/tmp\".to_string()),",
+        "        ));",
+        "        let output = dispatch_builtin(&sym, &input, &deps, false).await;",
+        "        assert!(output.additional_context().is_none());",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "mod[tests]/fn[builtin_user_prompt_submit_returns_empty_when_dependencies_are_unchanged]",
+      "text": [
+        "    #[tokio::test]",
+        "    // {test}`design.requirements.hooks.builtin_quiet`",
+        "    // {test}`design.requirements.hooks.new_plugins_notice`",
+        "    async fn builtin_user_prompt_submit_returns_empty_when_dependencies_are_unchanged() {",
+        "        let tmp = tempfile::tempdir().unwrap();",
+        "        let sym = Symposium::from_dir(tmp.path());",
+        "        let deps = sym.workspace(tmp.path());",
+        "        let input = symposium::InputEvent::UserPromptSubmit(symposium::UserPromptSubmitInput::new(",
+        "            \"Use tokio for async\".to_string(),",
+        "            Some(\"test-session\".to_string()),",
+        "            Some(\"/tmp\".to_string()),",
+        "        ));",
+        "        let output = dispatch_builtin(&sym, &input, &deps, false).await;",
+        "        assert!(output.additional_context().is_none());",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "mod[tests]/fn[builtin_stop_returns_an_empty_stop_output]",
+      "text": [
+        "    #[tokio::test]",
+        "    // {test}`design.requirements.hooks.builtin_quiet`",
+        "    async fn builtin_stop_returns_an_empty_stop_output() {",
+        "        let tmp = tempfile::tempdir().unwrap();",
+        "        let sym = Symposium::from_dir(tmp.path());",
+        "        let deps = sym.workspace(tmp.path());",
+        "        let input = symposium::InputEvent::Stop(symposium::StopInput::new(",
+        "            Some(\"test-session\".to_string()),",
+        "            Some(\"/tmp\".to_string()),",
+        "        ));",
+        "        let output = dispatch_builtin(&sym, &input, &deps, false).await;",
+        "        assert!(",
+        "            matches!(output, symposium::OutputEvent::Stop(_)),",
+        "            \"{output:?}\"",
+        "        );",
+        "        assert!(output.additional_context().is_none());",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/hook.rs",
+      "rust_item": "mod[tests]/fn[symposium_output_empty_has_no_context]",
+      "text": [
+        "    #[test]",
+        "    // {test}`design.requirements.hooks.builtin_quiet`",
+        "    fn symposium_output_empty_has_no_context() {",
+        "        let output = symposium::OutputEvent::empty_for(HookEvent::PreToolUse);",
+        "        assert!(output.additional_context().is_none());",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "tests/plugin_notice.rs",
+      "rust_item": "fn[a_dependency_added_by_a_tool_call_is_noticed_once]",
+      "text": [
+        "#[tokio::test(flavor = \"multi_thread\")]",
+        "async fn a_dependency_added_by_a_tool_call_is_noticed_once() {",
+        "    with_fixture(",
+        "        TestMode::SimulationOnly,",
+        "        &[\"plugin-notice0\"],",
+        "        async |mut ctx| {",
+        "            ctx.symposium(&[\"init\", \"--add-agent\", \"claude\"]).await?;",
+        "            start_session(&ctx, HookAgent::Claude).await;",
+        "",
+        "            add_crate_b(ctx.workspace_root.as_ref().unwrap());",
+        "            let stdout = respond(&ctx, HookAgent::Claude, tool_call_finished()).await;",
+        "            assert_notice(HookAgent::Claude, &stdout);",
+        "",
+        "            for step in [tool_call_finished(), HookStep::user_prompt(\"next\")] {",
+        "                let stdout = respond(&ctx, HookAgent::Claude, step).await;",
+        "                assert!(!stdout.contains(NOTICE), \"noticed twice: {stdout}\");",
+        "            }",
+        "            Ok(())",
+        "        },",
+        "    )",
+        "    .await",
+        "    .unwrap();",
+        "}"
+      ]
+    }
+  ],
+  "rationale": "**Holds.** `dispatch_builtin`: `PreToolUse` -> `OutputEvent::empty_for(PreToolUse)`. `PostToolUse` / `UserPromptSubmit` -> `possible_new_plugins_notice`, which is empty unless `notify` (the new-plugins notice). Every other non-`SessionStart` event (`Stop`) -> `empty_for(input.event())`. The earlier bug where `Stop` got a `PreToolUse`-shaped output is fixed.\n\n**Tests (all pass):** `hook::tests::builtin_pre_tool_use_returns_empty`, `builtin_post_tool_use_returns_empty_when_dependencies_are_unchanged`, `builtin_user_prompt_submit_returns_empty_when_dependencies_are_unchanged`, `builtin_stop_returns_an_empty_stop_output` (asserts an `OutputEvent::Stop` with no context), `symposium_output_empty_has_no_context`. `tests/plugin_notice.rs::a_dependency_added_by_a_tool_call_is_noticed_once` shows later `PostToolUse` / `UserPromptSubmit` events carry no notice once deps are unchanged.\n",
+  "requirement": "Except for the new-plugins notice, Symposium's built-in handling MUST add no context on events other than `SessionStart`."
+}

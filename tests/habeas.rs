@@ -13,7 +13,13 @@ use std::path::Path;
 
 /// Files held to the "every function cites a requirement" rule, written with
 /// `/` separators.
-const FUNCTION_RULE_FILES: &[&str] = &[];
+const FUNCTION_RULE_FILES: &[&str] = &[
+    "src/discovery.rs",
+    "src/hook.rs",
+    "src/output.rs",
+    "tests/enablement.rs",
+    "tests/hook_stdout.rs",
+];
 
 /// Error fragments produced only by the per-function rules.
 const FUNCTION_RULE_ERRORS: &[&str] = &[

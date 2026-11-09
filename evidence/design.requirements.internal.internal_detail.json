@@ -1,0 +1,234 @@
+{
+  "determination": true,
+  "inputs": [
+    {
+      "rust_file": "src/discovery.rs",
+      "rust_item": "impl[DiscoveredPlugin]/fn[name]",
+      "text": [
+        "    /// The name the user would type to enable this plugin.",
+        "    // {impl}`design.requirements.internal.internal_detail`",
+        "    pub fn name(&self) -> &str {",
+        "        &self.id.name",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/discovery.rs",
+      "rust_item": "fn[discover_for]",
+      "text": [
+        "/// Run [`discover`] for the workspace `deps` points at, against the plugins",
+        "/// its registries and members define, or an empty [`Discovery`] when there is",
+        "/// no workspace.",
+        "// {impl}`design.requirements.internal.internal_detail`",
+        "pub async fn discover_for(sym: &Symposium, ws: &Arc<Workspace>) -> Discovery {",
+        "    let workspace = ws.info().await.cloned();",
+        "    let registry = crate::plugins::load_registry_with_workspace(sym, workspace.as_ref()).await;",
+        "    discover(sym, ws, &registry.plugins).await",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "src/discovery.rs",
+      "rust_item": "mod[tests]/fn[workspace]",
+      "text": [
+        "    /// A workspace with `widget-lib` as a path dependency carrying skills,",
+        "    /// plus a plain registry dependency (an extracted source with no plugin",
+        "    /// content, as `cargo metadata` always yields a `source_dir`).",
+        "    // {impl}`design.requirements.internal.internal_detail`",
+        "    fn workspace(root: &Path) -> Arc<Workspace> {",
+        "        let widget = root.join(\"widget-lib\");",
+        "        std::fs::create_dir_all(widget.join(\"skills/guidance\")).unwrap();",
+        "        std::fs::write(widget.join(\"skills/guidance/SKILL.md\"), \"\").unwrap();",
+        "        let serde = root.join(\"serde-src\");",
+        "        std::fs::create_dir_all(&serde).unwrap();",
+        "        Workspace::fixture(",
+        "            root.to_path_buf(),",
+        "            vec![",
+        "                WorkspaceCrate::new(",
+        "                    \"widget-lib\".to_string(),",
+        "                    semver::Version::new(1, 0, 0),",
+        "                    Some(widget),",
+        "                ),",
+        "                WorkspaceCrate::new(\"serde\".to_string(), semver::Version::new(1, 0, 210), None)",
+        "                    .with_source_dir(Some(serde)),",
+        "            ],",
+        "        )",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/discovery.rs",
+      "rust_item": "mod[tests]/fn[sym_with]",
+      "text": [
+        "    /// A `Symposium` over a fresh config dir with only the given config, and",
+        "    /// no built-in registries (so tests see only what they set up).",
+        "    // {impl}`design.requirements.internal.internal_detail`",
+        "    fn sym_with(root: &Path, config: &str) -> Symposium {",
+        "        let config_dir = root.join(\"config\");",
+        "        std::fs::create_dir_all(&config_dir).unwrap();",
+        "        std::fs::write(",
+        "            config_dir.join(\"config.toml\"),",
+        "            format!(",
+        "                \"{}\\n[defaults]\\nsymposium-recommendations = false\\nuser-plugins = false\\n\",",
+        "                config",
+        "            ),",
+        "        )",
+        "        .unwrap();",
+        "        Symposium::from_dir(&config_dir)",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/discovery.rs",
+      "rust_item": "mod[tests]/fn[cached_crates]",
+      "text": [
+        "    /// The crates the tests below name, all cached: every dependency they",
+        "    /// list, plus `my-skills-crate`, which no workspace depends on.",
+        "    // {impl}`design.requirements.internal.internal_detail`",
+        "    fn cached_crates() -> PmRegistry {",
+        "        let (cargo, _) = crate::test_utils::FakeCargo::instance(",
+        "            &[\"serde\", \"tokio\", \"clap\", \"anyhow\", \"my-skills-crate\"],",
+        "            &[],",
+        "        );",
+        "        PmRegistry::new(vec![cargo])",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "src/discovery.rs",
+      "rust_item": "mod[tests]/fn[enabled_names]",
+      "text": [
+        "    // {impl}`design.requirements.internal.internal_detail`",
+        "    async fn enabled_names(sym: &Symposium, deps: &[PackageId], root: &Path) -> Vec<String> {",
+        "        enabled_dependencies(sym, &cached_crates(), &[], deps, root, UpdateLevel::None)",
+        "            .await",
+        "            .into_iter()",
+        "            .map(|id| id.name)",
+        "            .collect()",
+        "    }"
+      ]
+    },
+    {
+      "rust_file": "tests/enablement.rs",
+      "rust_item": "fn[find_installed_skills]",
+      "text": [
+        "/// Every installed skill directory under `parent` named `<skill_name>` or",
+        "/// `<skill_name>-<hash>`.",
+        "// {impl}`design.requirements.internal.internal_detail`",
+        "fn find_installed_skills(parent: &Path, skill_name: &str) -> Vec<PathBuf> {",
+        "    let Ok(entries) = std::fs::read_dir(parent) else {",
+        "        return Vec::new();",
+        "    };",
+        "    let mut out = Vec::new();",
+        "    for entry in entries.flatten() {",
+        "        let path = entry.path();",
+        "        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {",
+        "            continue;",
+        "        };",
+        "        let matches = name == skill_name",
+        "            || (name.starts_with(skill_name)",
+        "                && name.as_bytes().get(skill_name.len()) == Some(&b'-'));",
+        "        if matches && path.join(\"SKILL.md\").is_file() {",
+        "            out.push(path);",
+        "        }",
+        "    }",
+        "    out.sort();",
+        "    out",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "tests/enablement.rs",
+      "rust_item": "fn[find_installed_skill]",
+      "text": [
+        "/// The unique installed skill directory with this name. Panics on 0 or >1.",
+        "// {impl}`design.requirements.internal.internal_detail`",
+        "fn find_installed_skill(parent: &Path, skill_name: &str) -> PathBuf {",
+        "    let mut hits = find_installed_skills(parent, skill_name);",
+        "    assert_eq!(",
+        "        hits.len(),",
+        "        1,",
+        "        \"expected exactly one installed skill named `{skill_name}` under {}, found {hits:?}\",",
+        "        parent.display(),",
+        "    );",
+        "    hits.pop().unwrap()",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "tests/enablement.rs",
+      "rust_item": "fn[read_config]",
+      "text": [
+        "// {impl}`design.requirements.internal.internal_detail`",
+        "fn read_config(ctx: &TestContext) -> String {",
+        "    std::fs::read_to_string(ctx.sym.config_dir().join(\"config.toml\")).unwrap()",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "tests/enablement.rs",
+      "rust_item": "fn[with_report]",
+      "text": [
+        "/// Run `f` with a JSON report layer installed and return the drained events.",
+        "// {impl}`design.requirements.internal.internal_detail`",
+        "async fn with_report<F>(f: F) -> Vec<serde_json::Value>",
+        "where",
+        "    F: AsyncFnOnce(),",
+        "{",
+        "    use symposium::report::{ReportLayer, ReportMode};",
+        "    use tracing_subscriber::layer::SubscriberExt;",
+        "",
+        "    symposium_testlib::install_tracing_baseline();",
+        "    let (layer, handle) = ReportLayer::new(ReportMode::Json, tracing::Level::INFO);",
+        "    let subscriber = tracing_subscriber::registry().with(layer);",
+        "    let guard = tracing::subscriber::set_default(subscriber);",
+        "    f().await;",
+        "    drop(guard);",
+        "    handle.drain()",
+        "}"
+      ]
+    },
+    {
+      "rust_file": "tests/hook_stdout.rs",
+      "rust_item": "fn[run_session_start]",
+      "text": [
+        "/// Run `cargo agents hook <agent> session-start` as the agent would, from `cwd`.",
+        "// {impl}`design.requirements.internal.internal_detail`",
+        "fn run_session_start(",
+        "    ctx: &TestContext,",
+        "    agent: HookAgent,",
+        "    cwd: &std::path::Path,",
+        ") -> std::process::Output {",
+        "    use std::io::Write;",
+        "",
+        "    let step = HookStep::session_start();",
+        "    let payload = agent_event(agent, step.event())",
+        "        .unwrap()",
+        "        .translate_input(&step.to_input_event(&cwd.display().to_string()))",
+        "        .to_string()",
+        "        .unwrap();",
+        "",
+        "    let binary = std::env::var(\"CARGO_BIN_EXE_cargo-agents\").expect(\"must run via cargo test\");",
+        "    let mut child = std::process::Command::new(binary)",
+        "        .args([\"hook\", agent.as_str(), \"session-start\"])",
+        "        .env(\"SYMPOSIUM_HOME\", ctx.sym.config_dir())",
+        "        .current_dir(cwd)",
+        "        .stdin(std::process::Stdio::piped())",
+        "        .stdout(std::process::Stdio::piped())",
+        "        .stderr(std::process::Stdio::piped())",
+        "        .spawn()",
+        "        .expect(\"spawn cargo-agents\");",
+        "    child",
+        "        .stdin",
+        "        .take()",
+        "        .unwrap()",
+        "        .write_all(payload.as_bytes())",
+        "        .unwrap();",
+        "    child.wait_with_output().unwrap()",
+        "}"
+      ]
+    }
+  ],
+  "rationale": "Each helper checked for end-user-observable behavior of its own:\n\n- `DiscoveredPlugin::name` (src/discovery.rs): returns `&self.id.name`; a pure accessor used by `status_command::entry_for` and tests. Nothing beyond what `enablement.status_state` covers.\n- `discover_for` (src/discovery.rs): loads the registry with workspace plugins (`load_registry_with_workspace`) and calls `discover`; callers `pending_candidates` (hooks `consent_hint_names`) and `prompt_for_consent` (consent requirements). Any reporting during registry load is that loader's own behavior; the wrapper adds no branch, output or state.\n- `discovery::tests::workspace`, `sym_with`, `cached_crates`, `enabled_names`: test fixtures building a temp workspace, a `Symposium` over a temp config dir, a `FakeCargo` registry, and a call to `enabled_dependencies` mapped to names. Test-only (`#[cfg(test)]`), not in the shipped binary.\n- `tests/enablement.rs` `find_installed_skills`, `find_installed_skill`, `read_config`, `with_report`: test-only helpers that list installed skill dirs, assert uniqueness, read `config.toml`, and capture JSON report events.\n- `tests/hook_stdout.rs` `run_session_start`: test-only helper that spawns the built `cargo-agents hook <agent> session-start` with a translated payload and returns its output; the behavior it observes belongs to the hook requirements its callers cite.\n\nNone adds observable behavior beyond its callers' cited requirements. The test files pass (`cargo test -q --lib discovery::tests`, `--test enablement`, `--test hook_stdout`).",
+  "requirement": "A function cited with this requirement MUST NOT introduce end-user-observable behavior beyond the requirements its callers cite."
+}
