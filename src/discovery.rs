@@ -60,13 +60,6 @@ pub enum Enablement {
     Candidate,
 }
 
-impl Enablement {
-    /// Does this decision let the plugin run?
-    pub fn is_enabled(self) -> bool {
-        matches!(self, Self::Used | Self::AutoEnabled)
-    }
-}
-
 /// One plugin offer whose recommended dependency the workspace has.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredPlugin {
@@ -102,13 +95,6 @@ pub struct Discovery {
     pub candidates: Vec<DiscoveredPlugin>,
     /// Declined previously, recorded in `[plugins] disable`.
     pub declined: Vec<DiscoveredPlugin>,
-}
-
-impl Discovery {
-    /// Every offer that may run, whatever enabled it.
-    pub fn enabled(&self) -> impl Iterator<Item = &DiscoveredPlugin> {
-        self.active.iter().chain(&self.auto_enabled)
-    }
 }
 
 /// Discover the plugins offered for this workspace's dependencies.
@@ -492,7 +478,7 @@ mod tests {
         assert!(found.candidates.is_empty());
         let names: Vec<&str> = found.auto_enabled.iter().map(|c| c.name()).collect();
         assert_eq!(names, vec!["widget-lib"]);
-        assert!(found.enabled().count() == 1);
+        assert!(found.active.is_empty());
     }
 
     #[tokio::test]
