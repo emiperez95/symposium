@@ -98,54 +98,24 @@ type TreeEntry = (PathBuf, EntryKind);
 /// Sorting by relative path puts each directory before its children, so a
 /// caller may create or read the entries in order.
 fn walk_tree(root: &Path) -> Result<(Vec<TreeEntry>, Vec<String>)> {
-    let mut entries = Vec::new();
-    let mut skipped = Vec::new();
-    let mut ancestors = dir_walk::Ancestors::rooted_at(root);
-    walk_tree_inner(root, root, &mut ancestors, &mut entries, &mut skipped)?;
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok((entries, skipped))
-}
-
-fn walk_tree_inner(
-    root: &Path,
-    dir: &Path,
-    ancestors: &mut dir_walk::Ancestors,
-    entries: &mut Vec<TreeEntry>,
-    skipped: &mut Vec<String>,
-) -> Result<()> {
-    let read = match fs::read_dir(dir) {
-        Ok(read) => read,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e).with_context(|| format!("read {}", dir.display())),
-    };
-    for entry in read {
-        let entry = entry?;
-        let path = entry.path();
-        let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
-        let file_type = entry.file_type()?;
-        match dir_walk::resolved_kind(&path, file_type) {
-            Ok(Some(EntryKind::Dir)) => {
-                if !ancestors.enter(&path) {
-                    skipped.push(format!(
-                        "skipping {}: symlink re-enters a directory it is inside",
-                        display_path(&path)
-                    ));
-                    continue;
-                }
-                entries.push((rel, EntryKind::Dir));
-                walk_tree_inner(root, &path, ancestors, entries, skipped)?;
-                ancestors.leave();
-            }
-            Ok(Some(EntryKind::File)) => entries.push((rel, EntryKind::File)),
-            // A socket or a fifo. Never skill content, so never worth a word.
-            Ok(None) => {}
-            Err(e) => skipped.push(format!(
-                "skipping {}: broken symlink ({e})",
-                display_path(&path)
+    let tree = dir_walk::walk(root)?;
+    let skipped = tree
+        .refused
+        .into_iter()
+        .filter_map(|refused| match refused {
+            dir_walk::Refused::Loop(rel) => Some(format!(
+                "skipping {}: symlink re-enters a directory it is inside",
+                display_path(&root.join(rel))
             )),
-        }
-    }
-    Ok(())
+            dir_walk::Refused::BrokenLink(rel, e) => Some(format!(
+                "skipping {}: broken symlink ({e})",
+                display_path(&root.join(rel))
+            )),
+            // A socket or a fifo. Never skill content, so never worth a word.
+            dir_walk::Refused::Special(_) => None,
+        })
+        .collect();
+    Ok((tree.entries, skipped))
 }
 
 /// Recursively copy the contents of `src` into `dst`. Creates `dst` if
