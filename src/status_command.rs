@@ -5,7 +5,7 @@
 //! per plugin, each naming its enablement root — so it answers "why is
 //! serde-skills here?" with "enabled via serde".
 //!
-//! Four states, matching the axis:
+//! Five states, matching the axis:
 //!
 //! - **active** — enabled and its predicates hold for this workspace. The
 //!   root names the trust root: workspace membership, a configured registry,
@@ -19,6 +19,16 @@
 //!   asks about.
 //! - **declined** — recorded in `[plugins] disable`, the record of pruned
 //!   nodes and declined discoveries.
+//! - **revoked** — the [audits list](crate::audits) revokes this release or
+//!   payload, for the stated reason. It is not loaded, whatever `use` or
+//!   `auto-enable` say; only `disable` outranks it, in which case the plugin
+//!   shows as declined.
+//!
+//! A dependency plugin's line also says what the audits list says about it —
+//! audited, or not audited (and, when the list audits the package but this
+//! payload cannot be digested, why) — in the same words as the consent
+//! prompt and the `SessionStart` hint. An audit changes nothing about what
+//! loads.
 
 use std::path::Path;
 
@@ -27,6 +37,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use symposium_install::UpdateLevel;
 
+use crate::audits::{Answer, AuditIndex, Verdict};
 use crate::config::Symposium;
 use crate::discovery::{DiscoveredPlugin, Enablement};
 use crate::report::ReportEvent;
@@ -42,6 +53,8 @@ pub enum StatusState {
     Candidate,
     /// Declined, via `[plugins] disable`.
     Declined,
+    /// Revoked by the audits list.
+    Revoked,
 }
 
 impl StatusState {
@@ -52,6 +65,7 @@ impl StatusState {
             Self::Dormant => "dormant",
             Self::Candidate => "candidate",
             Self::Declined => "declined",
+            Self::Revoked => "revoked",
         }
     }
 }
@@ -67,6 +81,12 @@ pub struct StatusEntry {
     /// the plugin will not load.
     pub root: String,
     pub state: StatusState,
+    /// What the audits list says about a dependency plugin; `None` when it
+    /// is revoked (a revoked line's root says so, a declined one stays
+    /// declined) or not looked up: a trust root's plugin, a `use`d crate that
+    /// is not cached yet or a dependency that offers no plugin, and a
+    /// declined name discovery never saw.
+    pub audit: Option<Verdict>,
 }
 
 /// Compute the enablement report for the workspace `deps` points at.
@@ -108,6 +128,7 @@ pub async fn workspace_status(
             } else {
                 StatusState::Dormant
             },
+            audit: None,
         });
     }
 
@@ -175,6 +196,25 @@ pub async fn workspace_status(
         if dependency && !named {
             continue;
         }
+        // A `use`d crate the workspace does not depend on is loaded from
+        // cargo's cache, so its release is known without fetching: the audits
+        // apply to it like to any other dependency plugin.
+        let mut audit = None;
+        if !dependency && let Ok(fetched) = pms.fetch(&id, UpdateLevel::None).await {
+            match AuditIndex::configured(sym).answer(pms, &fetched.id).await {
+                Answer::Revoked(revocation) => {
+                    entries.push(StatusEntry {
+                        name: id.name,
+                        version: Some(fetched.id.version),
+                        root: revocation.to_string(),
+                        state: StatusState::Revoked,
+                        audit: None,
+                    });
+                    continue;
+                }
+                Answer::Verdict(verdict) => audit = Some(verdict),
+            }
+        }
         entries.push(StatusEntry {
             name: id.name,
             version: None,
@@ -189,6 +229,7 @@ pub async fn workspace_status(
             } else {
                 StatusState::Active
             },
+            audit,
         });
     }
     let mut missing = std::collections::HashSet::new();
@@ -207,6 +248,7 @@ pub async fn workspace_status(
             root: "`[plugins] use` (not a registry plugin, a dependency or a cached crate)"
                 .to_string(),
             state: StatusState::Dormant,
+            audit: None,
         });
     }
 
@@ -239,13 +281,15 @@ pub async fn workspace_status(
             version: None,
             root: "declined (`[plugins] disable`)".to_string(),
             state: StatusState::Declined,
+            audit: None,
         });
     }
 
     Ok(entries)
 }
 
-/// Render one discovered dependency plugin as a status line.
+/// Render one discovered dependency plugin as a status line, with the verdict
+/// discovery looked up (none for a revoked offer, declined or not).
 fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
     let (state, root) = match &found.enablement {
         Enablement::Used => (StatusState::Active, "`[plugins] use`".to_string()),
@@ -254,8 +298,7 @@ fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
             StatusState::Declined,
             "declined (`[plugins] disable`)".to_string(),
         ),
-        // Not loaded, like a declined one; the root says who revoked it and why.
-        Enablement::Revoked(revocation) => (StatusState::Declined, revocation.to_string()),
+        Enablement::Revoked(revocation) => (StatusState::Revoked, revocation.to_string()),
         Enablement::Candidate => (
             StatusState::Candidate,
             format!(
@@ -270,6 +313,7 @@ fn entry_for(found: &DiscoveredPlugin) -> StatusEntry {
         version: Some(found.id.version.clone()),
         root,
         state,
+        audit: found.audit.clone(),
     }
 }
 
@@ -292,6 +336,7 @@ pub async fn status(sym: &Symposium, cwd: &Path) -> Result<()> {
                 version: entry.version,
                 root: entry.root,
                 state: entry.state.as_str().to_string(),
+                audit: entry.audit.as_ref().map(Verdict::to_string),
             },
         );
     }

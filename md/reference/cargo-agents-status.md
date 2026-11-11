@@ -17,7 +17,7 @@ at all; [*activation predicates*](./predicates.md) ask when it applies.
 `status` reports both, one line per plugin, each naming its **enablement
 root** — so it answers "why is this here?" with "enabled via `serde`".
 
-Each line is in one of four states:
+Each line is in one of five states:
 
 | State | Meaning |
 |-------|---------|
@@ -25,21 +25,42 @@ Each line is in one of four states:
 | `dormant` | Loaded but contributing nothing: a registry plugin awaiting [`cargo agents use`](./cargo-agents-use.md), one whose predicates don't currently hold, a dependency named by `use` that offers no plugin, or a `use` entry naming no registry plugin, dependency or cached crate (a [`cargo agents sync`](./cargo-agents-sync.md) downloads a crate that is not cached yet). |
 | `candidate` | Discovered in a dependency and awaiting consent. These are exactly what an interactive [`cargo agents sync`](./cargo-agents-sync.md) asks about. |
 | `declined` | Recorded in `[plugins] disable` — the record of pruned plugins and declined discoveries. |
+| `revoked` | The [audits list](./audits.md) revokes this release or payload of a crate, for the reason shown. It is not loaded and not offered for consent, whatever `use` or `auto-enable` say. `disable` outranks it: a crate that is both shows as `declined`. |
+
+The line of a discovered dependency plugin, or of a cached crate `use`d
+without being a dependency, ends with what the
+[audits list](./audits.md) says about it, in the words the
+[consent prompt](./cargo-agents-sync.md#consent-prompt) uses:
+``audited by registry `symposium-audits` ``, `not audited`, or, when the list
+audits the crate but this payload cannot be checked against an audit,
+`not audited: ...` with the reason. A revoked line has no audit part, since
+its root already says who revoked it and why, and neither has a declined
+crate that is also revoked. Nor do lines that are not looked up: plugins from
+a registry or the workspace (trust roots), a `use`d crate that is not cached
+yet, a `use`d dependency that offers no plugin, and a declined name discovery
+never saw. An audit changes nothing else: an audited candidate is still a
+candidate.
 
 Discovery is cache-only, so a dependency whose source has not been fetched yet
 is simply not listed as a candidate. Enabling it by name still works.
 
+A revoked crate that is only reached through another plugin's `[[plugins]]`
+chain, not named by a dependency or a `use` entry, is not listed.
+
 With `--json`, each line is emitted as a `plugin_status` event carrying
-`name`, `state`, `root`, and — for a discovered dependency plugin — the
-resolved `version`.
+`name`, `state` (`active`, `dormant`, `candidate`, `declined` or `revoked`),
+`root`, for a discovered dependency plugin the resolved `version`, and `audit`
+on every line whose human form shows an audit part (exactly that text).
 
 ## Example
 
 ```bash
 $ cargo agents status
 ✅ my-tool — workspace member
-✅ serde-skills 1.0.0 — `[plugins] use`
+✅ serde-skills 1.0.0 — `[plugins] use` — not audited
 💤 team-conventions — registry `user-plugins` (dormant: awaiting `cargo agents use`)
-❓ widget-lib 0.3.1 — found via dependency `widget-lib`, awaiting consent (`cargo agents use widget-lib`)
+❓ widget-lib 0.3.1 — found via dependency `widget-lib`, awaiting consent (`cargo agents use widget-lib`) — not audited
 ➖ noisy-crate — declined (`[plugins] disable`)
+✅ tidy-crate 2.4.0 — `[plugins] auto-enable` — audited by registry `symposium-audits`
+⛔ risky-crate 2.0.1 — revoked by registry `symposium-audits`: it tells the agent to fetch and run remote code
 ```
