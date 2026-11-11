@@ -71,6 +71,13 @@ fn mark_generated_skill_directory(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The install directory name a skill falls back to when its plain name is
+/// unavailable: `<skill-name>-<origin-hash>`. The revocation cleanup rebuilds
+/// the same names, so both go through here.
+fn suffixed_skill_dir(skill_name: &str, origin_hash: &str) -> String {
+    format!("{skill_name}-{origin_hash}")
+}
+
 fn slot_taken(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok()
 }
@@ -383,7 +390,7 @@ pub async fn sync(sym: &Symposium, ws: &Arc<Workspace>, update: UpdateLevel) -> 
     // reached through `[[plugins]]` chained references and dependency
     // enablement. Every facet resolves over this one set, so a crate plugin's
     // skills and MCP servers install exactly like a registry plugin's.
-    let active = plugins::active_plugins(
+    let plugins::ActivePlugins { active, revoked } = plugins::resolve_active_plugins(
         sym,
         &registry,
         pms,
@@ -395,6 +402,19 @@ pub async fn sync(sym: &Symposium, ws: &Arc<Workspace>, update: UpdateLevel) -> 
 
     // Find all applicable skills.
     let applicable = skills::collect_skills(sym, &active, &mut ctx, update).await;
+
+    // The install directory names (plain and suffixed) of the skills a revoked
+    // package would install. A revocation overrides the cleanup safety net
+    // below: these come off even when cleanup is otherwise skipped.
+    let revoked_dirs: BTreeSet<String> =
+        skills::collect_skills(sym, &revoked, &mut ctx, UpdateLevel::None)
+            .await
+            .into_iter()
+            .flat_map(|entry| {
+                let name = entry.skill.name().to_string();
+                [suffixed_skill_dir(&name, &entry.origin_hash), name]
+            })
+            .collect();
 
     // Dedup by `(skill_name, origin_hash)`: two crate origins with the same
     // (name, version, skill-path-within-crate) collapse (the same skill bytes
@@ -577,7 +597,7 @@ pub async fn sync(sym: &Symposium, ws: &Arc<Workspace>, update: UpdateLevel) -> 
             let dir_name = if unique_name && plain_available {
                 skill_name.clone()
             } else {
-                format!("{skill_name}-{}", origin_hash)
+                suffixed_skill_dir(skill_name, origin_hash)
             };
             let dest_dir = agent.project_skill_dir(&project_root, &dir_name);
 
@@ -631,7 +651,7 @@ pub async fn sync(sym: &Symposium, ws: &Arc<Workspace>, update: UpdateLevel) -> 
         let Ok(parent) = skills_parent_dir(agent, &project_root).canonicalize() else {
             continue;
         };
-        if skip_cleanup || !scanned.insert(parent.clone()) {
+        if (skip_cleanup && revoked_dirs.is_empty()) || !scanned.insert(parent.clone()) {
             continue;
         }
         let Ok(entries) = fs::read_dir(&parent) else {
@@ -640,6 +660,19 @@ pub async fn sync(sym: &Symposium, ws: &Arc<Workspace>, update: UpdateLevel) -> 
         for entry in entries.flatten() {
             let path = entry.path();
             if installed.contains(&path) || !is_managed_skill_dir(&path) {
+                continue;
+            }
+            // While cleanup is skipped, only directories named like a revoked
+            // package's skills are removed. A plain-named directory belonging
+            // to another, currently unreadable origin can be removed too; its
+            // source is untouched, so the next sync that can read it
+            // reinstalls it.
+            if skip_cleanup
+                && !entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| revoked_dirs.contains(name))
+            {
                 continue;
             }
             match fs::remove_dir_all(&path) {
